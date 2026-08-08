@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, realpath, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
@@ -23,6 +23,7 @@ import type {
   SemanticSearchResult,
   SemanticSearchSession,
   SemanticSessionSearchOptions,
+  VerifiedEmbeddingModelLease,
 } from "./semantic.js";
 import { recommendedEmbeddingModel } from "./semantic.js";
 import { scanVault } from "./vault.js";
@@ -150,7 +151,12 @@ describe("knowledge-base session", () => {
     };
     try {
       const kb = await openKnowledgeBase(
-        { root, repository: temporary, embeddingModelFile },
+        {
+          root,
+          repository: temporary,
+          embeddingModelFile,
+          requireStoreLocalVectorBoundary: true,
+        },
         {
           scanVault: async (requestedRoot, options) => {
             scans += 1;
@@ -159,6 +165,7 @@ describe("knowledge-base session", () => {
           openSemanticSearchSession: (options) => {
             opens += 1;
             expect(options.embeddingModelFile).toBe(embeddingModelFile);
+            expect(options.requireStoreLocalVectorBoundary).toBe(true);
             startColdLane("qmd");
             return Promise.resolve(fakeSemanticSession(
               root,
@@ -177,6 +184,9 @@ describe("knowledge-base session", () => {
                   query: options.query,
                   update,
                   embedding: null,
+                  queryEmbedding: options.mode === "keyword"
+                    ? { calls: 0, inputTokens: 0, durationMs: 0 }
+                    : { calls: 1, inputTokens: 9, durationMs: 2.5 },
                   results: hits,
                 });
               },
@@ -226,7 +236,7 @@ describe("knowledge-base session", () => {
         rank: 1,
         evidence: [
           { kind: "exact", identity: true },
-          { kind: "qmd", source: "hybrid" },
+          { kind: "qmd", source: "hybrid", path: "notes/exact.md", line: 4 },
         ],
       });
       expect(result.graph?.linksAmongResults).toContainEqual({
@@ -241,6 +251,11 @@ describe("knowledge-base session", () => {
           .toBe("Explain capture decisions");
       }
       expect(result.partial).toBe(false);
+      expect(result.diagnostics.queryEmbedding).toEqual({
+        calls: 1,
+        inputTokens: 9,
+        durationMs: 2.5,
+      });
       expect(result.diagnostics.lanes).toContainEqual({
         lane: "git",
         status: "ready",
@@ -259,6 +274,11 @@ describe("knowledge-base session", () => {
         },
       });
       expect(boundedRequiredHistory.partial).toBe(false);
+      expect(boundedRequiredHistory.diagnostics.queryEmbedding).toEqual({
+        calls: 0,
+        inputTokens: 0,
+        durationMs: 0,
+      });
       expect(boundedRequiredHistory.history).toMatchObject({
         status: "ready",
         notes: [{
@@ -279,6 +299,11 @@ describe("knowledge-base session", () => {
       });
       expect(semanticOnly.results.every(({ evidence }) =>
         evidence.every(({ kind }) => kind === "qmd"))).toBe(true);
+      expect(semanticOnly.diagnostics.queryEmbedding).toEqual({
+        calls: 1,
+        inputTokens: 9,
+        durationMs: 2.5,
+      });
       expect({ scans, opens, searches, gitIndexes }).toEqual({
         scans: 1,
         opens: 1,
@@ -288,6 +313,97 @@ describe("knowledge-base session", () => {
       await Promise.all([kb.close(), kb.close()]);
       expect(closes).toBe(1);
       expect(() => kb.list()).toThrow("session is closed");
+    } finally {
+      await rm(temporary, { recursive: true, force: true });
+    }
+  });
+
+  test("propagates a shared model lease and strict vector requirement", async () => {
+    const { temporary, root } = await fixture();
+    const lease = Object.freeze({
+      model: recommendedEmbeddingModel,
+      close: () => Promise.resolve(),
+    }) as VerifiedEmbeddingModelLease;
+    let receivedLease: VerifiedEmbeddingModelLease | undefined;
+    try {
+      const kb = await openKnowledgeBase(
+        {
+          root,
+          embeddingModelLease: lease,
+          requireStoreLocalVectorBoundary: true,
+        },
+        {
+          openSemanticSearchSession: (options) => {
+            receivedLease = options.embeddingModelLease;
+            expect(options.requireStoreLocalVectorBoundary).toBe(true);
+            return Promise.resolve(fakeSemanticSession(
+              root,
+              (searchOptions) => Promise.resolve({
+                root,
+                database: join(root, "qmd.sqlite"),
+                model: recommendedEmbeddingModel,
+                mode: searchOptions.mode ?? "semantic",
+                query: searchOptions.query,
+                update,
+                embedding: null,
+                queryEmbedding: { calls: 1, inputTokens: 4, durationMs: 1 },
+                results: [],
+              }),
+              () => Promise.resolve(),
+            ));
+          },
+        },
+      );
+      const result = await kb.search({
+        query: "shared lease",
+        mode: "semantic",
+        graph: false,
+        history: false,
+      });
+      expect(receivedLease).toBe(lease);
+      expect(result.diagnostics.queryEmbedding).toEqual({
+        calls: 1,
+        inputTokens: 4,
+        durationMs: 1,
+      });
+      await kb.close();
+    } finally {
+      await rm(temporary, { recursive: true, force: true });
+    }
+  });
+
+  test("owns an already-open semantic session before the first query", async () => {
+    const { temporary, root } = await fixture();
+    const database = join(temporary, "warm.sqlite");
+    const canonicalRoot = await realpath(root);
+    let closes = 0;
+    let opens = 0;
+    const semanticSession: SemanticSearchSession = {
+      root: canonicalRoot,
+      database,
+      model: recommendedEmbeddingModel,
+      update,
+      search: () => Promise.reject(new Error("not used")),
+      close: () => {
+        closes += 1;
+        return Promise.resolve();
+      },
+    };
+    try {
+      const kb = await openKnowledgeBase(
+        { root, database },
+        {
+          semanticSession,
+          scanVault: async (requestedRoot, options) => {
+            opens += 1;
+            return await scanVault(requestedRoot, options);
+          },
+        },
+      );
+      expect(opens).toBe(1);
+      await kb.close();
+      await kb.close();
+      expect(closes).toBe(1);
     } finally {
       await rm(temporary, { recursive: true, force: true });
     }

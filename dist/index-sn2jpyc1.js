@@ -2,10 +2,10 @@
 import {
   MAX_SEARCH_RESULTS,
   openKnowledgeBase
-} from "./index-1qtgx1er.js";
+} from "./index-98agr5ks.js";
 import {
   scanVault
-} from "./index-b4vcr4gt.js";
+} from "./index-gq6ywf7s.js";
 import {
   MAX_EVALUATION_EVIDENCE_BYTES,
   redactEvaluationMachinePaths
@@ -191,27 +191,72 @@ function unavailable(id, requiredInput, noteCount) {
     resources: Object.freeze({ noteCount })
   });
 }
+function textHitProvenance(hit) {
+  const exactEvidence = hit.evidence.find((evidence) => evidence.kind === "exact");
+  const qmdEvidence = hit.evidence.filter((evidence) => evidence.kind === "qmd");
+  const explicitLocators = hit.evidence.flatMap((evidence) => evidence.kind !== "exact" ? [] : evidence.matches.flatMap((match) => {
+    if (match.field === "title") {
+      return [Object.freeze({ kind: "title", title: hit.title })];
+    }
+    if (match.field === "alias") {
+      return [Object.freeze({
+        kind: "frontmatter-field-any",
+        fields: Object.freeze(["aliases", "alias"])
+      })];
+    }
+    if (match.field === "tag") {
+      return [Object.freeze({ kind: "frontmatter-field", field: "tags" })];
+    }
+    if (match.field === "metadata") {
+      return [Object.freeze({ kind: "frontmatter-value", value: match.value })];
+    }
+    if (match.field === "path") {
+      return [Object.freeze({ kind: "source-path", sourcePath: hit.path })];
+    }
+    return [];
+  }));
+  const exactContentLocators = hit.line !== undefined && exactEvidence?.matches.some(({ field }) => field === "content") === true && (exactEvidence.identity || qmdEvidence.length === 0) ? [Object.freeze({ kind: "line", line: hit.line })] : [];
+  const sameDocumentLocators = [...explicitLocators, ...exactContentLocators];
+  const sameDocument = sameDocumentLocators.map((locator) => Object.freeze({
+    targetDocumentId: hit.id,
+    evidenceDocumentId: hit.id,
+    sourcePath: hit.path,
+    locator
+  }));
+  const qmd = qmdEvidence.flatMap((evidence) => evidence.line === undefined || evidence.path === undefined ? [] : [Object.freeze({
+    targetDocumentId: hit.id,
+    evidenceDocumentId: hit.id,
+    sourcePath: evidence.path,
+    locator: Object.freeze({ kind: "line", line: evidence.line })
+  })]);
+  const unique = [...new Map([...sameDocument, ...qmd].map((provenance) => [JSON.stringify(provenance), provenance])).values()];
+  return Object.freeze(unique);
+}
 function statusFromDiagnostics(diagnostics, hits) {
   if (hits.length === 0 && diagnostics.length > 0 && diagnostics.every(({ status }) => status === "unavailable"))
     return "unavailable";
   return diagnostics.some(({ status }) => status !== "ready") ? "degraded" : "ready";
 }
 function textResult(result) {
-  const hits = Object.freeze(result.results.map((hit) => Object.freeze({
-    documentId: hit.id,
-    rank: hit.rank,
-    score: hit.score,
-    evidence: evidenceSnapshot({
-      mode: result.mode,
-      path: hit.path,
-      title: hit.title,
-      identity: hit.identity,
-      ...hit.line === undefined ? {} : { line: hit.line },
-      snippet: hit.snippet,
-      evidence: hit.evidence,
-      contributions: hit.contributions
-    })
-  })));
+  const hits = Object.freeze(result.results.map((hit) => {
+    const provenance = textHitProvenance(hit);
+    return Object.freeze({
+      documentId: hit.id,
+      rank: hit.rank,
+      score: hit.score,
+      evidence: evidenceSnapshot({
+        mode: result.mode,
+        path: hit.path,
+        title: hit.title,
+        identity: hit.identity,
+        ...hit.line === undefined ? {} : { line: hit.line },
+        snippet: hit.snippet,
+        evidence: hit.evidence,
+        contributions: hit.contributions,
+        ...provenance.length === 0 ? {} : { provenance }
+      })
+    });
+  }));
   const diagnostics = Object.freeze(result.diagnostics.lanes.map((lane) => Object.freeze({
     lane: lane.lane,
     status: lane.status,
@@ -228,7 +273,12 @@ function textResult(result) {
       resultCount: result.results.length,
       partial: Number(result.partial),
       exactResultCount: laneResults.get("exact") ?? 0,
-      qmdResultCount: laneResults.get("qmd") ?? 0
+      qmdResultCount: laneResults.get("qmd") ?? 0,
+      ...result.diagnostics.queryEmbedding == null ? {} : {
+        queryEmbeddingCalls: result.diagnostics.queryEmbedding.calls,
+        queryEmbeddingInputTokens: result.diagnostics.queryEmbedding.inputTokens,
+        queryEmbeddingDurationMs: result.diagnostics.queryEmbedding.durationMs
+      }
     })
   });
 }
@@ -260,10 +310,25 @@ function metadataRetriever(session, now) {
         limit
       });
       throwIfAborted(signal);
+      const provenanceFields = [
+        ...query.inputs.metadata.filters.map(({ path }) => path.split(".")[0]),
+        ...query.inputs.metadata.tags.length === 0 ? [] : ["tags"]
+      ].filter((field) => field !== undefined && field !== "");
+      const provenanceFieldList = [...new Set(provenanceFields)];
       const hits = Object.freeze(rows.map((row, index) => Object.freeze({
         documentId: row.id,
         rank: index + 1,
-        evidence: evidenceSnapshot(row)
+        evidence: evidenceSnapshot({
+          ...row,
+          ...provenanceFieldList.length === 0 ? {} : {
+            provenance: provenanceFieldList.map((field) => ({
+              targetDocumentId: row.id,
+              evidenceDocumentId: row.id,
+              sourcePath: row.path,
+              locator: { kind: "frontmatter-field", field }
+            }))
+          }
+        })
       })));
       return Promise.resolve(Object.freeze({
         status: "ready",
@@ -305,8 +370,43 @@ function graphRetriever(session, now) {
           status: neighborhood.truncated ? "degraded" : "ready",
           ...neighborhood.truncated ? { message: `Graph traversal from ${JSON.stringify(seed)} reached its result limit.` } : {}
         }));
+        const nodeIdByPath = new Map(neighborhood.nodes.map((node) => [node.path, node.id]));
         for (const [nodeIndex, node] of neighborhood.nodes.entries()) {
-          const raw = { seed, node, edges: neighborhood.edges, relations: neighborhood.relations };
+          const links = neighborhood.edges.filter((edge) => edge.source === node.path || edge.target === node.path);
+          const authoredRelations = neighborhood.relations.filter((relation) => relation.source === node.id || relation.target === node.id);
+          const connections = Object.freeze([
+            ...links.map((edge) => Object.freeze({ kind: "link", edge })),
+            ...authoredRelations.map((relation) => Object.freeze({
+              kind: "relation",
+              relation
+            }))
+          ]);
+          const provenance = Object.freeze([...new Map([
+            ...links.flatMap((link) => {
+              const evidenceDocumentId = nodeIdByPath.get(link.source);
+              return evidenceDocumentId === undefined ? [] : [Object.freeze({
+                targetDocumentId: node.id,
+                evidenceDocumentId,
+                sourcePath: link.source,
+                locator: Object.freeze({ kind: "line", line: link.line })
+              })];
+            }),
+            ...authoredRelations.map((relation) => Object.freeze({
+              targetDocumentId: node.id,
+              evidenceDocumentId: relation.source,
+              sourcePath: relation.provenance.source,
+              locator: Object.freeze({
+                kind: "line",
+                line: relation.provenance.line
+              })
+            }))
+          ].map((candidate) => [JSON.stringify(candidate), candidate])).values()]);
+          const raw = Object.freeze({
+            seed,
+            node,
+            connections,
+            ...provenance.length === 0 ? {} : { provenance }
+          });
           const existing = matches.get(node.id);
           if (existing === undefined) {
             matches.set(node.id, {
@@ -325,7 +425,13 @@ function graphRetriever(session, now) {
       const hits = stableHits(candidates.map((candidate) => ({
         documentId: candidate.documentId,
         score: 1 / (candidate.distance + 1),
-        evidence: { neighborhoods: candidate.evidence }
+        evidence: {
+          neighborhoods: candidate.evidence,
+          ...(() => {
+            const provenance = [...new Map(candidate.evidence.flatMap((entry) => entry.provenance ?? []).map((entry) => [JSON.stringify(entry), entry])).values()];
+            return provenance.length === 0 ? {} : { provenance: Object.freeze(provenance) };
+          })()
+        }
       })), limit);
       throwIfAborted(signal);
       return Promise.resolve(Object.freeze({
@@ -404,12 +510,28 @@ function pathContextRetriever(session, snapshot, repository, inspectContext, bui
             guidePath: hub.guidePath,
             canonical: hub.canonical,
             reciprocal: hub.reciprocal,
-            valid: hub.valid
+            valid: hub.valid,
+            provenance: [{
+              targetDocumentId: hub.note.id,
+              evidenceDocumentId: hub.note.id,
+              sourcePath: hub.note.path,
+              locator: { kind: "frontmatter-field", field: "scope" }
+            }]
           }
         })),
         ...repositoryMemoryGroupKeys.flatMap((group) => memory.groups[group].records.map((record) => ({
           documentId: record.id,
-          evidence: { kind: "repository-memory", group, record }
+          evidence: {
+            kind: "repository-memory",
+            group,
+            record,
+            provenance: [{
+              targetDocumentId: record.id,
+              evidenceDocumentId: record.id,
+              sourcePath: record.path,
+              locator: { kind: "frontmatter-field", field: "repository_scopes" }
+            }]
+          }
         })))
       ];
       const hits = stableHits(candidates, limit);
@@ -564,7 +686,11 @@ async function openKnowledgeBaseEvaluation(options) {
     root: verified.root,
     repository: verified.repository,
     ...options.database === undefined ? {} : { database: options.database },
-    ...options.embeddingModelFile === undefined ? {} : { embeddingModelFile: options.embeddingModelFile }
+    ...options.embeddingModelFile === undefined ? {} : { embeddingModelFile: options.embeddingModelFile },
+    ...options.embeddingModelLease === undefined ? {} : { embeddingModelLease: options.embeddingModelLease },
+    ...options.requireStoreLocalVectorBoundary === undefined ? {} : {
+      requireStoreLocalVectorBoundary: options.requireStoreLocalVectorBoundary
+    }
   }, knowledgeBaseDependencies(options, snapshot));
   const now = options.now ?? performance.now.bind(performance);
   const inspectContext = options.inspectAgentContextRepository ?? inspectAgentContextRepository;

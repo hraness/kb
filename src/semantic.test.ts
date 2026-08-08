@@ -1,9 +1,11 @@
 import { describe, expect, test } from "bun:test";
 import { createHash } from "node:crypto";
+import { writeFileSync } from "node:fs";
 import {
   mkdir,
   mkdtemp,
   readFile,
+  readdir,
   realpath,
   rm,
   stat,
@@ -15,12 +17,17 @@ import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 
 import {
+  attestSemanticWarmCache,
+  checkpointSemanticWarmCache,
+  createVerifiedEmbeddingModelLease,
   indexSemanticVault,
   openSemanticSearchSession,
+  openSemanticWarmSearchSession,
   recommendedEmbeddingModel,
   recommendedEmbeddingModelSha256,
   searchSemanticVault,
   semanticDatabasePath,
+  type SemanticDatabaseSnapshotSeal,
   type SemanticDependencies,
   type SemanticStoreOptions,
   type SemanticUpdateResult,
@@ -46,6 +53,7 @@ type FakeStore = {
   readonly internal?: {
     readonly getHashesNeedingEmbedding: (model?: string) => unknown;
     readonly llm: {
+      readonly countTokens: (text: string) => Promise<unknown>;
       readonly embed: (text: string, options?: { readonly model?: string }) => Promise<unknown>;
     };
     readonly searchVec: (
@@ -90,8 +98,89 @@ const unchanged: SemanticUpdateResult = {
   needsEmbedding: 0,
 };
 
-function contentHash(content: string): string {
+function contentHash(content: string | Uint8Array): string {
   return createHash("sha256").update(content).digest("hex");
+}
+
+async function checkpointedDatabaseSeal(
+  database: string,
+): Promise<SemanticDatabaseSnapshotSeal> {
+  const bytes = await readFile(database);
+  return Object.freeze({
+    database: Object.freeze({ bytes: bytes.byteLength, sha256: contentHash(bytes) }),
+    wal: null,
+    shm: null,
+    journal: null,
+  });
+}
+
+const absentDatabaseSeal: SemanticDatabaseSnapshotSeal = Object.freeze({
+  database: Object.freeze({ bytes: 0, sha256: contentHash("") }),
+  wal: null,
+  shm: null,
+  journal: null,
+});
+
+async function qmdDatabaseState(database: string): Promise<readonly Readonly<{
+  readonly name: string;
+  readonly device: string;
+  readonly inode: string;
+  readonly bytes: string;
+  readonly mtimeNs: string;
+  readonly ctimeNs: string;
+  readonly sha256: string;
+}>[]> {
+  const parent = dirname(database);
+  const prefix = database.slice(parent.length + 1);
+  const names = (await readdir(parent))
+    .filter((name) => name === prefix || name.startsWith(`${prefix}-`))
+    .sort();
+  return await Promise.all(names.map(async (name) => {
+    const path = join(parent, name);
+    const metadata = await stat(path, { bigint: true });
+    return Object.freeze({
+      name,
+      device: String(metadata.dev),
+      inode: String(metadata.ino),
+      bytes: String(metadata.size),
+      mtimeNs: String(metadata.mtimeNs),
+      ctimeNs: String(metadata.ctimeNs),
+      sha256: contentHash(await readFile(path)),
+    });
+  }));
+}
+
+async function prepareRealWarmDatabase(
+  root: string,
+  database: string,
+  modelFile: string,
+): Promise<void> {
+  const module = new URL("./semantic.ts", import.meta.url).href;
+  const source = `
+    const { indexSemanticVault, recommendedEmbeddingModelSha256 } = await import(${JSON.stringify(module)});
+    await indexSemanticVault(
+      {
+        root: ${JSON.stringify(root)},
+        database: ${JSON.stringify(database)},
+        embeddingModelFile: ${JSON.stringify(modelFile)},
+      },
+      {
+        digestEmbeddingModelFile: () => Promise.resolve(recommendedEmbeddingModelSha256),
+      },
+    );
+  `;
+  const child = Bun.spawn([process.execPath, "-e", source], {
+    cwd: import.meta.dir,
+    stdout: "pipe",
+    stderr: "pipe",
+  });
+  const [exitCode, standardError] = await Promise.all([
+    child.exited,
+    new Response(child.stderr).text(),
+  ]);
+  if (exitCode !== 0) {
+    throw new Error(`Real QMD warm-cache preparation failed: ${standardError}`);
+  }
 }
 
 function result(
@@ -203,6 +292,87 @@ describe("QMD indexing", () => {
       expect(recommendedEmbeddingModel).toEndWith(
         "#0f741b5a6585bd53aeb15cd1372c56f2a0f65e12",
       );
+    } finally {
+      await rm(temporary, { recursive: true, force: true });
+    }
+  });
+
+  test("indexes from a private verified model snapshot while retaining the stable public identity", async () => {
+    const temporary = await mkdtemp(join(tmpdir(), "hraness-kb-semantic-local-index-"));
+    const root = join(temporary, "vault");
+    const modelFile = join(temporary, "pinned-model.gguf");
+    const optionsSeen: SemanticStoreOptions[] = [];
+    const embedModels: string[] = [];
+    let copiedModelFile = "";
+    let copiedModelContent = "";
+    await mkdir(root);
+    await writeFile(join(root, "index.md"), "# Knowledge base\n", "utf8");
+    await writeFile(modelFile, "fixture model bytes", "utf8");
+    const store = {
+      update: () => Promise.resolve({ ...unchanged, indexed: 1, unchanged: 0, needsEmbedding: 1 }),
+      embed: (options?: Parameters<FakeStore["embed"]>[0]) => {
+        embedModels.push(String(options?.model));
+        return Promise.resolve({ docsProcessed: 1, chunksEmbedded: 1, errors: 0, durationMs: 1 });
+      },
+      searchLex: () => Promise.resolve([]),
+      searchVector: () => Promise.resolve([]),
+      getDocumentBody: () => Promise.resolve(null),
+      close: () => Promise.resolve(),
+    } satisfies FakeStore;
+    try {
+      const indexed = await indexSemanticVault(
+        { root, embeddingModelFile: modelFile },
+        {
+          ...fakeDependencies(store, optionsSeen, join(temporary, "cache")),
+          createStore: async (options) => {
+            optionsSeen.push(options);
+            copiedModelContent = await readFile(String(options.config.models?.embed), "utf8");
+            return store;
+          },
+          digestEmbeddingModelFile: async (path) => {
+            copiedModelFile = path;
+            expect(path).not.toBe(modelFile);
+            expect(await readFile(path, "utf8")).toBe("fixture model bytes");
+            await writeFile(modelFile, "replacement after verification", "utf8");
+            return recommendedEmbeddingModelSha256;
+          },
+        },
+      );
+      expect(optionsSeen[0]?.config.models?.embed).toBe(copiedModelFile);
+      expect(copiedModelContent).toBe("fixture model bytes");
+      expect(await readFile(modelFile, "utf8")).toBe("replacement after verification");
+      expect(stat(copiedModelFile)).rejects.toThrow();
+      expect(embedModels).toEqual([recommendedEmbeddingModel]);
+      expect(indexed.model).toBe(recommendedEmbeddingModel);
+      expect(JSON.stringify(indexed)).not.toContain(modelFile);
+    } finally {
+      await rm(temporary, { recursive: true, force: true });
+    }
+  });
+
+  test("rejects unpinned local index model bytes before opening QMD", async () => {
+    const temporary = await mkdtemp(join(tmpdir(), "hraness-kb-semantic-local-index-"));
+    const root = join(temporary, "vault");
+    const modelFile = join(temporary, "wrong-model.gguf");
+    let creates = 0;
+    await mkdir(root);
+    await writeFile(join(root, "index.md"), "# Knowledge base\n", "utf8");
+    await writeFile(modelFile, "wrong model bytes", "utf8");
+    try {
+      expect(indexSemanticVault(
+        { root, embeddingModelFile: modelFile },
+        {
+          digestEmbeddingModelFile: (path) => {
+            expect(path).not.toBe(modelFile);
+            return Promise.resolve("0".repeat(64));
+          },
+          createStore: () => {
+            creates += 1;
+            return Promise.reject(new Error("must not open QMD"));
+          },
+        },
+      )).rejects.toThrow("does not match the pinned recommended model SHA-256");
+      expect(creates).toBe(0);
     } finally {
       await rm(temporary, { recursive: true, force: true });
     }
@@ -421,8 +591,671 @@ describe("QMD indexing", () => {
   });
 });
 
+describe("QMD warm-cache checkpoint", () => {
+  test("closes exactly once when checkpointing fails", async () => {
+    const temporary = await mkdtemp(join(tmpdir(), "hraness-kb-semantic-checkpoint-failure-"));
+    const root = join(temporary, "vault");
+    const database = join(temporary, "warm.sqlite");
+    let closes = 0;
+    await mkdir(root);
+    await writeFile(database, "not opened by the injected checkpoint", "utf8");
+    try {
+      expect(checkpointSemanticWarmCache({ root, database }, {
+        openCheckpointDatabase: () => Promise.resolve({
+          checkpoint: () => Promise.reject(new Error("checkpoint failed")),
+          close: () => {
+            closes += 1;
+            return Promise.resolve();
+          },
+        }),
+      })).rejects.toThrow("checkpoint failed");
+      expect(closes).toBe(1);
+    } finally {
+      await rm(temporary, { recursive: true, force: true });
+    }
+  });
+
+  test("rejects a rollback journal left beside the checkpointed database", async () => {
+    const temporary = await mkdtemp(join(tmpdir(), "hraness-kb-semantic-checkpoint-journal-"));
+    const root = join(temporary, "vault");
+    const database = join(temporary, "warm.sqlite");
+    await mkdir(root);
+    await writeFile(database, "checkpointed database", "utf8");
+    await writeFile(`${database}-journal`, "unfinished rollback journal", "utf8");
+    try {
+      expect(checkpointSemanticWarmCache({ root, database }, {
+        openCheckpointDatabase: () => Promise.resolve({
+          checkpoint: () => Promise.resolve({
+            wal: { busy: 0, log: 0, checkpointed: 0 },
+            mode: { journal_mode: "delete" },
+          }),
+          close: () => Promise.resolve(),
+        }),
+      })).rejects.toThrow("Semantic database rollback journal appeared");
+      expect(await readFile(`${database}-journal`, "utf8")).toBe(
+        "unfinished rollback journal",
+      );
+    } finally {
+      await rm(temporary, { recursive: true, force: true });
+    }
+  });
+});
+
+describe("QMD warm-cache attestation", () => {
+  test("proves readiness without invoking any repairing or retrieval operation", async () => {
+    const temporary = await mkdtemp(join(tmpdir(), "hraness-kb-semantic-attest-"));
+    const root = join(temporary, "vault");
+    const database = join(temporary, "warm.sqlite");
+    const modelFile = join(temporary, "model.gguf");
+    let privateModelFile = "";
+    let closes = 0;
+    let isolatedDatabase = "";
+    let pendingChecks = 0;
+    const forbidden: string[] = [];
+    await mkdir(root);
+    await writeFile(join(root, "index.md"), "# Knowledge base\n", "utf8");
+    await writeFile(database, "existing warm database", "utf8");
+    await writeFile(modelFile, "verified model", "utf8");
+    const canonicalDatabase = await realpath(database);
+    const store = {
+      internal: {
+        getHashesNeedingEmbedding: (model: string) => {
+          pendingChecks += 1;
+          expect(model).toBe(recommendedEmbeddingModel);
+          return 0;
+        },
+        searchVec: () => {
+          forbidden.push("internal.searchVec");
+          return Promise.resolve([]);
+        },
+        llm: {
+          countTokens: () => {
+            forbidden.push("internal.llm.countTokens");
+            return Promise.resolve(0);
+          },
+          embed: () => {
+            forbidden.push("internal.llm.embed");
+            return Promise.resolve(null);
+          },
+        },
+      },
+      update: () => {
+        forbidden.push("update");
+        return Promise.resolve(unchanged);
+      },
+      embed: () => {
+        forbidden.push("embed");
+        return Promise.resolve({});
+      },
+      search: () => {
+        forbidden.push("search");
+        return Promise.resolve([]);
+      },
+      searchLex: () => {
+        forbidden.push("searchLex");
+        return Promise.resolve([]);
+      },
+      searchVector: () => {
+        forbidden.push("searchVector");
+        return Promise.resolve([]);
+      },
+      close: () => {
+        closes += 1;
+        return Promise.resolve();
+      },
+    };
+    const dependencies: SemanticDependencies = {
+      digestEmbeddingModelFile: (path) => {
+        privateModelFile = path;
+        return Promise.resolve(recommendedEmbeddingModelSha256);
+      },
+      createAttestationStore: (options) => {
+        isolatedDatabase = options.dbPath;
+        expect(options.dbPath).not.toBe(canonicalDatabase);
+        expect("config" in options).toBe(false);
+        return Promise.resolve(store);
+      },
+    };
+    try {
+      const lease = await createVerifiedEmbeddingModelLease(modelFile, dependencies);
+      await writeFile(`${database}-journal`, "unsealed rollback journal", "utf8");
+      expect(attestSemanticWarmCache(
+        {
+          root,
+          database,
+          embeddingModelLease: lease,
+          databaseSnapshotSeal: await checkpointedDatabaseSeal(database),
+        },
+        dependencies,
+      )).rejects.toThrow("Semantic database rollback journal appeared");
+      expect(isolatedDatabase).toBe("");
+      await rm(`${database}-journal`);
+      const readiness = await attestSemanticWarmCache(
+        {
+          root,
+          database,
+          embeddingModelLease: lease,
+          databaseSnapshotSeal: await checkpointedDatabaseSeal(database),
+        },
+        dependencies,
+      );
+      expect(readiness).toEqual({
+        model: recommendedEmbeddingModel,
+        database: canonicalDatabase,
+        pendingEmbeddings: 0,
+      });
+      expect(Object.isFrozen(readiness)).toBe(true);
+      expect({ closes, pendingChecks, forbidden }).toEqual({
+        closes: 1,
+        pendingChecks: 1,
+        forbidden: [],
+      });
+      expect(stat(isolatedDatabase)).rejects.toThrow();
+      expect(await readFile(privateModelFile, "utf8")).toBe("verified model");
+      await lease.close();
+      await lease.close();
+      expect(stat(privateModelFile)).rejects.toThrow();
+    } finally {
+      await rm(temporary, { recursive: true, force: true });
+    }
+  });
+
+  test("fails closed on pending embeddings and releases both store and model references", async () => {
+    const temporary = await mkdtemp(join(tmpdir(), "hraness-kb-semantic-attest-pending-"));
+    const root = join(temporary, "vault");
+    const database = join(temporary, "warm.sqlite");
+    const modelFile = join(temporary, "model.gguf");
+    let privateModelFile = "";
+    let closes = 0;
+    let isolatedDatabase = "";
+    await mkdir(root);
+    await writeFile(join(root, "index.md"), "# Knowledge base\n", "utf8");
+    await writeFile(database, "existing warm database", "utf8");
+    await writeFile(modelFile, "verified model", "utf8");
+    const dependencies: SemanticDependencies = {
+      digestEmbeddingModelFile: (path) => {
+        privateModelFile = path;
+        return Promise.resolve(recommendedEmbeddingModelSha256);
+      },
+      createAttestationStore: (options) => {
+        isolatedDatabase = options.dbPath;
+        return Promise.resolve({
+          internal: {
+            getHashesNeedingEmbedding: () => 2,
+            searchVec: () => Promise.resolve([]),
+            llm: {
+              countTokens: () => Promise.resolve(0),
+              embed: () => Promise.resolve(null),
+            },
+          },
+          close: () => {
+            closes += 1;
+            return Promise.resolve();
+          },
+        });
+      },
+    };
+    try {
+      const lease = await createVerifiedEmbeddingModelLease(modelFile, dependencies);
+      expect(attestSemanticWarmCache(
+        {
+          root,
+          database,
+          embeddingModelLease: lease,
+          databaseSnapshotSeal: await checkpointedDatabaseSeal(database),
+        },
+        dependencies,
+      )).rejects.toThrow("2 embedding input(s) remain pending");
+      expect(closes).toBe(1);
+      expect(stat(isolatedDatabase)).rejects.toThrow();
+      await lease.close();
+      expect(stat(privateModelFile)).rejects.toThrow();
+    } finally {
+      await rm(temporary, { recursive: true, force: true });
+    }
+  });
+
+  test("keeps the isolated database until QMD close settles", async () => {
+    const temporary = await mkdtemp(join(tmpdir(), "hraness-kb-semantic-attest-close-"));
+    const root = join(temporary, "vault");
+    const database = join(temporary, "warm.sqlite");
+    const modelFile = join(temporary, "model.gguf");
+    let isolatedDatabase = "";
+    let closeStarted = false;
+    let releaseClose: (() => void) | undefined;
+    const closeGate = new Promise<void>((resolveClose) => {
+      releaseClose = resolveClose;
+    });
+    await mkdir(root);
+    await writeFile(join(root, "index.md"), "# Knowledge base\n", "utf8");
+    await writeFile(database, "existing warm database", "utf8");
+    await writeFile(modelFile, "verified model", "utf8");
+    const dependencies: SemanticDependencies = {
+      digestEmbeddingModelFile: () => Promise.resolve(recommendedEmbeddingModelSha256),
+      createAttestationStore: (options) => {
+        isolatedDatabase = options.dbPath;
+        return Promise.resolve({
+          internal: {
+            getHashesNeedingEmbedding: () => 0,
+            searchVec: () => Promise.resolve([]),
+            llm: {
+              countTokens: () => Promise.resolve(0),
+              embed: () => Promise.resolve(null),
+            },
+          },
+          close: () => {
+            closeStarted = true;
+            return closeGate;
+          },
+        });
+      },
+    };
+    try {
+      const lease = await createVerifiedEmbeddingModelLease(modelFile, dependencies);
+      const attestation = attestSemanticWarmCache(
+        {
+          root,
+          database,
+          embeddingModelLease: lease,
+          databaseSnapshotSeal: await checkpointedDatabaseSeal(database),
+        },
+        dependencies,
+      );
+      for (let attempt = 0; attempt < 50 && !closeStarted; attempt += 1) {
+        await Bun.sleep(1);
+      }
+      expect(closeStarted).toBe(true);
+      expect((await stat(isolatedDatabase)).isFile()).toBe(true);
+      releaseClose?.();
+      await attestation;
+      expect(stat(isolatedDatabase)).rejects.toThrow();
+      await lease.close();
+    } finally {
+      releaseClose?.();
+      await rm(temporary, { recursive: true, force: true });
+    }
+  });
+
+  test("rejects missing and malformed strict boundaries while closing foreign stores", async () => {
+    const temporary = await mkdtemp(join(tmpdir(), "hraness-kb-semantic-attest-boundary-"));
+    const root = join(temporary, "vault");
+    const database = join(temporary, "warm.sqlite");
+    const modelFile = join(temporary, "model.gguf");
+    let closes = 0;
+    await mkdir(root);
+    await writeFile(join(root, "index.md"), "# Knowledge base\n", "utf8");
+    await writeFile(database, "existing warm database", "utf8");
+    await writeFile(modelFile, "verified model", "utf8");
+    const baseDependencies: SemanticDependencies = {
+      digestEmbeddingModelFile: () => Promise.resolve(recommendedEmbeddingModelSha256),
+    };
+    try {
+      const lease = await createVerifiedEmbeddingModelLease(modelFile, baseDependencies);
+      expect(attestSemanticWarmCache(
+        {
+          root,
+          database,
+          embeddingModelLease: lease,
+          databaseSnapshotSeal: await checkpointedDatabaseSeal(database),
+        },
+        {
+          ...baseDependencies,
+          createAttestationStore: () => Promise.resolve({
+            close: () => {
+              closes += 1;
+              return Promise.resolve();
+            },
+          }),
+        },
+      )).rejects.toThrow("store.internal must be an object");
+      expect(attestSemanticWarmCache(
+        {
+          root,
+          database,
+          embeddingModelLease: lease,
+          databaseSnapshotSeal: await checkpointedDatabaseSeal(database),
+        },
+        {
+          ...baseDependencies,
+          createAttestationStore: () => Promise.resolve({
+            internal: {
+              getHashesNeedingEmbedding: () => "zero",
+              searchVec: () => Promise.resolve([]),
+              llm: {
+                countTokens: () => Promise.resolve(0),
+                embed: () => Promise.resolve(null),
+              },
+            },
+            close: () => {
+              closes += 1;
+              return Promise.resolve();
+            },
+          }),
+        },
+      )).rejects.toThrow("must be a finite number");
+      expect(closes).toBe(2);
+      await lease.close();
+    } finally {
+      await rm(temporary, { recursive: true, force: true });
+    }
+  });
+
+  test("rejects forged and closed model leases before opening a store", async () => {
+    const temporary = await mkdtemp(join(tmpdir(), "hraness-kb-semantic-attest-brand-"));
+    const root = join(temporary, "vault");
+    const modelFile = join(temporary, "model.gguf");
+    let creates = 0;
+    await mkdir(root);
+    await writeFile(join(root, "index.md"), "# Knowledge base\n", "utf8");
+    await writeFile(modelFile, "verified model", "utf8");
+    const dependencies: SemanticDependencies = {
+      digestEmbeddingModelFile: () => Promise.resolve(recommendedEmbeddingModelSha256),
+      createAttestationStore: () => {
+        creates += 1;
+        return Promise.reject(new Error("must not open"));
+      },
+    };
+    try {
+      expect(attestSemanticWarmCache(
+        {
+          root,
+          embeddingModelLease: {
+            model: recommendedEmbeddingModel,
+            close: () => Promise.resolve(),
+          },
+          databaseSnapshotSeal: absentDatabaseSeal,
+        },
+        dependencies,
+      )).rejects.toThrow("must be created by createVerifiedEmbeddingModelLease");
+      const lease = await createVerifiedEmbeddingModelLease(modelFile, dependencies);
+      await lease.close();
+      expect(attestSemanticWarmCache(
+        { root, embeddingModelLease: lease, databaseSnapshotSeal: absentDatabaseSeal },
+        dependencies,
+      )).rejects.toThrow("verified embedding-model lease is closed");
+      expect(creates).toBe(0);
+    } finally {
+      await rm(temporary, { recursive: true, force: true });
+    }
+  });
+});
+
+describe("QMD warm query-only sessions", () => {
+  test("isolates pinned QMD initialization from attestation and warm query cache state", async () => {
+    const temporary = await mkdtemp(join(tmpdir(), "hraness-kb-semantic-real-warm-reader-"));
+    const root = join(temporary, "vault");
+    const database = join(temporary, "cache", "warm.sqlite");
+    const modelFile = join(temporary, "model.gguf");
+    await mkdir(root);
+    await writeFile(join(root, "index.md"), "# Knowledge base\n", "utf8");
+    await writeFile(modelFile, "lazy fixture model", "utf8");
+    const dependencies: SemanticDependencies = {
+      digestEmbeddingModelFile: () => Promise.resolve(recommendedEmbeddingModelSha256),
+    };
+    try {
+      await prepareRealWarmDatabase(root, database, modelFile);
+      const checkpointed = await checkpointSemanticWarmCache({ root, database });
+      expect(checkpointed).toEqual({
+        database: await realpath(database),
+        wal: null,
+        shm: null,
+        journal: null,
+      });
+      const before = await qmdDatabaseState(database);
+      expect(before.map(({ name }) => name)).toEqual(["warm.sqlite"]);
+      const databaseSnapshotSeal = await checkpointedDatabaseSeal(database);
+      const lease = await createVerifiedEmbeddingModelLease(modelFile, dependencies);
+
+      const readiness = await attestSemanticWarmCache({
+        root,
+        database,
+        embeddingModelLease: lease,
+        databaseSnapshotSeal,
+      }, dependencies);
+      expect(readiness.pendingEmbeddings).toBe(0);
+      expect(await qmdDatabaseState(database)).toEqual(before);
+
+      const reader = await openSemanticWarmSearchSession({
+        root,
+        database,
+        embeddingModelLease: lease,
+        databaseSnapshotSeal,
+      }, dependencies);
+      expect(await qmdDatabaseState(database)).toEqual(before);
+      const result = await reader.search({ query: "nothing indexed", mode: "keyword" });
+      expect(result.results).toEqual([]);
+      expect(await qmdDatabaseState(database)).toEqual(before);
+      await reader.close();
+      expect(await qmdDatabaseState(database)).toEqual(before);
+      await lease.close();
+    } finally {
+      await rm(temporary, { recursive: true, force: true });
+    }
+  });
+
+  test("eagerly opens one existing projection without writer, update, or cache mutation", async () => {
+    const temporary = await mkdtemp(join(tmpdir(), "hraness-kb-semantic-warm-reader-"));
+    const root = join(temporary, "vault");
+    const database = join(temporary, "cache", "warm.sqlite");
+    const modelFile = join(temporary, "model.gguf");
+    const body = "# Warm reader\n\nA sealed projection is query-only.\n";
+    let normalUpdates = 0;
+    let warmCreates = 0;
+    let warmCloses = 0;
+    let privateModelPath = "";
+    let isolatedDatabase = "";
+    const forbidden: string[] = [];
+    await mkdir(root);
+    await writeFile(join(root, "index.md"), "# Knowledge base\n", "utf8");
+    await writeFile(join(root, "note.md"), body, "utf8");
+    await writeFile(modelFile, "verified model", "utf8");
+    const internal = {
+      getHashesNeedingEmbedding: (model: string) => {
+        expect(model).toBe(recommendedEmbeddingModel);
+        return 0;
+      },
+      llm: {
+        countTokens: () => Promise.resolve(3),
+        embed: () => Promise.resolve({ embedding: [0.25] }),
+      },
+      searchVec: async (
+        query: string,
+        model: string,
+        limit?: number,
+        collection?: string,
+        session?: { readonly embed: (text: string) => Promise<unknown> },
+      ) => {
+        expect({ query, model, limit, collection }).toEqual({
+          query: "sealed projection",
+          model: recommendedEmbeddingModel,
+          limit: 40,
+          collection: "kb",
+        });
+        await session?.embed("sealed projection");
+        return [];
+      },
+    };
+    const dependencies: SemanticDependencies = {
+      cacheHome: join(temporary, "cache-home"),
+      digestEmbeddingModelFile: (path) => {
+        privateModelPath = path;
+        return Promise.resolve(recommendedEmbeddingModelSha256);
+      },
+      createStore: () => Promise.resolve({
+        internal,
+        update: () => {
+          normalUpdates += 1;
+          return Promise.resolve(unchanged);
+        },
+        embed: () => Promise.resolve({
+          docsProcessed: 0,
+          chunksEmbedded: 0,
+          errors: 0,
+          durationMs: 0,
+        }),
+        searchLex: () => Promise.resolve([]),
+        searchVector: () => Promise.reject(new Error("public vector search must not run")),
+        close: () => Promise.resolve(),
+      }),
+      createWarmSearchStore: async (options) => {
+        warmCreates += 1;
+        isolatedDatabase = options.dbPath;
+        expect(options.dbPath).not.toBe(database);
+        privateModelPath = options.embeddingModelSource;
+        expect(await readFile(privateModelPath, "utf8")).toBe("verified model");
+        return {
+          internal,
+          searchLex: () => Promise.resolve([]),
+          close: () => {
+            warmCloses += 1;
+            return Promise.resolve();
+          },
+          get update() {
+            forbidden.push("update");
+            throw new Error("warm reader must not inspect update");
+          },
+          get embed() {
+            forbidden.push("embed");
+            throw new Error("warm reader must not inspect embed");
+          },
+        };
+      },
+      scanVault: (requestedRoot) => scanVault(requestedRoot, { mentionScope: false }),
+      now: (() => {
+        const values = [10, 12];
+        return () => values.shift() ?? 12;
+      })(),
+    };
+    try {
+      const lease = await createVerifiedEmbeddingModelLease(modelFile, dependencies);
+      const preparing = await openSemanticSearchSession({
+        root,
+        database,
+        embeddingModelLease: lease,
+        requireStoreLocalVectorBoundary: true,
+      }, dependencies);
+      await preparing.close();
+      const databaseBefore = contentHash(await readFile(database, "utf8"));
+      const databaseSnapshotSeal = await checkpointedDatabaseSeal(database);
+
+      await writeFile(`${database}-wal`, "unsealed WAL bytes", "utf8");
+      expect(openSemanticWarmSearchSession({
+        root,
+        database,
+        embeddingModelLease: lease,
+        databaseSnapshotSeal,
+      }, dependencies)).rejects.toThrow("Semantic database WAL appeared");
+      await rm(`${database}-wal`);
+      await writeFile(`${database}-shm`, "unsealed SHM bytes", "utf8");
+      expect(openSemanticWarmSearchSession({
+        root,
+        database,
+        embeddingModelLease: lease,
+        databaseSnapshotSeal,
+      }, dependencies)).rejects.toThrow("Semantic database SHM appeared");
+      await rm(`${database}-shm`);
+      await writeFile(`${database}-journal`, "unsealed rollback journal", "utf8");
+      expect(openSemanticWarmSearchSession({
+        root,
+        database,
+        embeddingModelLease: lease,
+        databaseSnapshotSeal,
+      }, dependencies)).rejects.toThrow("Semantic database rollback journal appeared");
+      await rm(`${database}-journal`);
+
+      let digestReads = 0;
+      const racingSeal: SemanticDatabaseSnapshotSeal = Object.freeze({
+        ...databaseSnapshotSeal,
+        database: Object.freeze({
+          bytes: databaseSnapshotSeal.database.bytes,
+          get sha256() {
+            digestReads += 1;
+            if (digestReads === 2) {
+              writeFileSync(`${database}-journal`, "rollback journal created during copy");
+            }
+            return databaseSnapshotSeal.database.sha256;
+          },
+        }),
+      });
+      expect(openSemanticWarmSearchSession({
+        root,
+        database,
+        embeddingModelLease: lease,
+        databaseSnapshotSeal: racingSeal,
+      }, dependencies)).rejects.toThrow("Semantic database rollback journal appeared");
+      expect(digestReads).toBe(2);
+      await rm(`${database}-journal`);
+      expect(warmCreates).toBe(0);
+
+      const reader = await openSemanticWarmSearchSession({
+        root,
+        database,
+        embeddingModelLease: lease,
+        databaseSnapshotSeal,
+      }, dependencies);
+      await lease.close();
+      expect(await readFile(privateModelPath, "utf8")).toBe("verified model");
+      const result = await reader.search({ query: "sealed projection", mode: "semantic" });
+      expect(result.queryEmbedding).toEqual({ calls: 1, inputTokens: 3, durationMs: 2 });
+      expect(reader.update).toEqual({
+        collections: 1,
+        indexed: 0,
+        updated: 0,
+        unchanged: 2,
+        removed: 0,
+        needsEmbedding: 0,
+      });
+      expect({ normalUpdates, warmCreates, forbidden }).toEqual({
+        normalUpdates: 1,
+        warmCreates: 1,
+        forbidden: [],
+      });
+      expect(contentHash(await readFile(database, "utf8"))).toBe(databaseBefore);
+      await reader.close();
+      await reader.close();
+      expect(warmCloses).toBe(1);
+      expect(stat(isolatedDatabase)).rejects.toThrow();
+      expect(stat(privateModelPath)).rejects.toThrow();
+    } finally {
+      await rm(temporary, { recursive: true, force: true });
+    }
+  });
+
+  test("fails closed before QMD when the immutable projection is absent", async () => {
+    const temporary = await mkdtemp(join(tmpdir(), "hraness-kb-semantic-warm-missing-"));
+    const root = join(temporary, "vault");
+    const database = join(temporary, "warm.sqlite");
+    const modelFile = join(temporary, "model.gguf");
+    let creates = 0;
+    await mkdir(root);
+    await writeFile(join(root, "index.md"), "# Knowledge base\n", "utf8");
+    await writeFile(database, "warm database", "utf8");
+    await writeFile(modelFile, "verified model", "utf8");
+    const dependencies: SemanticDependencies = {
+      digestEmbeddingModelFile: () => Promise.resolve(recommendedEmbeddingModelSha256),
+      createWarmSearchStore: () => {
+        creates += 1;
+        return Promise.reject(new Error("must not open QMD"));
+      },
+    };
+    try {
+      const lease = await createVerifiedEmbeddingModelLease(modelFile, dependencies);
+      expect(openSemanticWarmSearchSession({
+        root,
+        database,
+        embeddingModelLease: lease,
+        databaseSnapshotSeal: await checkpointedDatabaseSeal(database),
+      }, dependencies)).rejects.toThrow("warm semantic projection is absent");
+      expect(creates).toBe(0);
+      await lease.close();
+    } finally {
+      await rm(temporary, { recursive: true, force: true });
+    }
+  });
+});
+
 describe("QMD search", () => {
-  test("loads verified local model bytes without exposing their path as model identity", async () => {
+  test("uses one measured store-local query embedding over a private immutable model copy", async () => {
     const temporary = await mkdtemp(join(tmpdir(), "hraness-kb-semantic-model-"));
     const root = join(temporary, "vault");
     const modelFile = join(temporary, "private-model.gguf");
@@ -431,8 +1264,13 @@ describe("QMD search", () => {
     const pendingModels: string[] = [];
     const queryModels: string[] = [];
     const queryEmbedModels: string[] = [];
+    const countedTexts: string[] = [];
+    let configuredModelFile = "";
+    let configuredModelBytes = "";
+    const clock = [10, 34];
     await mkdir(root);
     await writeFile(join(root, "index.md"), "# Knowledge base\n", "utf8");
+    await writeFile(modelFile, "verified fixture model", "utf8");
     const store = {
       internal: {
         getHashesNeedingEmbedding: (model?: string) => {
@@ -440,6 +1278,10 @@ describe("QMD search", () => {
           return 1;
         },
         llm: {
+          countTokens: (text: string) => {
+            countedTexts.push(text);
+            return Promise.resolve(7);
+          },
           embed: (_text: string, options?: { readonly model?: string }) => {
             queryEmbedModels.push(String(options?.model));
             return Promise.resolve({ embedding: [0.25], model: options?.model });
@@ -479,19 +1321,35 @@ describe("QMD search", () => {
     } satisfies FakeStore;
     try {
       const session = await openSemanticSearchSession(
-        { root, embeddingModelFile: modelFile },
+        {
+          root,
+          embeddingModelFile: modelFile,
+          requireStoreLocalVectorBoundary: true,
+        },
         {
           ...fakeDependencies(store, optionsSeen, join(temporary, "cache")),
-          digestEmbeddingModelFile: (path) => {
-            expect(path).toBe(modelFile);
+          createStore: async (options) => {
+            optionsSeen.push(options);
+            configuredModelFile = String(options.config.models?.embed);
+            configuredModelBytes = await readFile(configuredModelFile, "utf8");
+            return store;
+          },
+          digestEmbeddingModelFile: async (path) => {
+            expect(path).not.toBe(modelFile);
+            await writeFile(modelFile, "mutated after verification", "utf8");
             return Promise.resolve(recommendedEmbeddingModelSha256);
           },
+          now: () => clock.shift() ?? 34,
         },
       );
-      const result = await session.search({ query: "local bytes", mode: "semantic" });
+      const result = await session.search({ query: "local bytes", mode: "hybrid" });
+      const keyword = await session.search({ query: "local bytes", mode: "keyword" });
       await session.close();
 
-      expect(optionsSeen[0]?.config.models?.embed).toBe(modelFile);
+      expect(configuredModelFile).not.toBe(modelFile);
+      expect(configuredModelBytes).toBe("verified fixture model");
+      expect(await readFile(modelFile, "utf8")).toBe("mutated after verification");
+      expect(stat(configuredModelFile)).rejects.toThrow();
       expect(embedModels).toEqual([recommendedEmbeddingModel]);
       expect(pendingModels).toEqual([
         recommendedEmbeddingModel,
@@ -501,6 +1359,17 @@ describe("QMD search", () => {
         `local bytes:${recommendedEmbeddingModel}:40:kb`,
       ]);
       expect(queryEmbedModels).toEqual([recommendedEmbeddingModel]);
+      expect(countedTexts).toEqual(["formatted query"]);
+      expect(result.queryEmbedding).toEqual({
+        calls: 1,
+        inputTokens: 7,
+        durationMs: 24,
+      });
+      expect(keyword.queryEmbedding).toEqual({
+        calls: 0,
+        inputTokens: 0,
+        durationMs: 0,
+      });
       expect(session.model).toBe(recommendedEmbeddingModel);
       expect(result.model).toBe(recommendedEmbeddingModel);
       expect(JSON.stringify({ session: session.model, result: result.model }))
@@ -522,6 +1391,7 @@ describe("QMD search", () => {
       expect(openSemanticSearchSession(
         { root, embeddingModelFile: modelFile },
         {
+          cacheHome: join(temporary, "cache"),
           createStore: () => {
             creates += 1;
             return Promise.reject(new Error("must not open QMD"));
@@ -529,6 +1399,182 @@ describe("QMD search", () => {
         },
       )).rejects.toThrow("does not match the pinned recommended model SHA-256");
       expect(creates).toBe(0);
+    } finally {
+      await rm(temporary, { recursive: true, force: true });
+    }
+  });
+
+  test("shares one branded model copy until every retained session closes", async () => {
+    const temporary = await mkdtemp(join(tmpdir(), "hraness-kb-semantic-lease-"));
+    const root = join(temporary, "vault");
+    const modelFile = join(temporary, "model.gguf");
+    const configuredModels: string[] = [];
+    let closes = 0;
+    await mkdir(root);
+    await writeFile(join(root, "index.md"), "# Knowledge base\n", "utf8");
+    await writeFile(modelFile, "shared fixture model", "utf8");
+    const store = (): FakeStore => ({
+      update: () => Promise.resolve(unchanged),
+      embed: () => Promise.resolve({
+        docsProcessed: 0,
+        chunksEmbedded: 0,
+        errors: 0,
+        durationMs: 0,
+      }),
+      searchLex: () => Promise.resolve([]),
+      searchVector: () => Promise.resolve([]),
+      getDocumentBody: () => Promise.resolve(null),
+      close: () => {
+        closes += 1;
+        return Promise.resolve();
+      },
+    });
+    const dependencies: SemanticDependencies = {
+      cacheHome: join(temporary, "cache"),
+      digestEmbeddingModelFile: () => Promise.resolve(recommendedEmbeddingModelSha256),
+      createStore: async (options) => {
+        const source = String(options.config.models?.embed);
+        configuredModels.push(source);
+        expect(await readFile(source, "utf8")).toBe("shared fixture model");
+        return store();
+      },
+    };
+    try {
+      const lease = await createVerifiedEmbeddingModelLease(modelFile, dependencies);
+      const first = await openSemanticSearchSession(
+        { root, database: join(temporary, "first.sqlite"), embeddingModelLease: lease },
+        dependencies,
+      );
+      const second = await openSemanticSearchSession(
+        { root, database: join(temporary, "second.sqlite"), embeddingModelLease: lease },
+        dependencies,
+      );
+      expect(new Set(configuredModels).size).toBe(1);
+      const privateModel = configuredModels[0] as string;
+      await lease.close();
+      await lease.close();
+      expect(await readFile(privateModel, "utf8")).toBe("shared fixture model");
+      await first.close();
+      expect(await readFile(privateModel, "utf8")).toBe("shared fixture model");
+      await second.close();
+      await second.close();
+      expect(stat(privateModel)).rejects.toThrow();
+      expect(closes).toBe(2);
+      expect(JSON.stringify({ lease, first: first.model, second: second.model }))
+        .not.toContain(privateModel);
+    } finally {
+      await rm(temporary, { recursive: true, force: true });
+    }
+  });
+
+  test("strict vector mode rejects and closes a store without the internal LLM boundary", async () => {
+    const temporary = await mkdtemp(join(tmpdir(), "hraness-kb-semantic-strict-"));
+    const root = join(temporary, "vault");
+    let closed = false;
+    await mkdir(root);
+    await writeFile(join(root, "index.md"), "# Knowledge base\n", "utf8");
+    const store = {
+      update: () => Promise.resolve(unchanged),
+      embed: () => Promise.resolve({
+        docsProcessed: 0,
+        chunksEmbedded: 0,
+        errors: 0,
+        durationMs: 0,
+      }),
+      searchLex: () => Promise.resolve([]),
+      searchVector: () => Promise.resolve([]),
+      getDocumentBody: () => Promise.resolve(null),
+      close: () => {
+        closed = true;
+        return Promise.resolve();
+      },
+    } satisfies FakeStore;
+    try {
+      expect(openSemanticSearchSession(
+        { root, requireStoreLocalVectorBoundary: true },
+        fakeDependencies(store, [], join(temporary, "cache")),
+      )).rejects.toThrow("store-local vector search is required");
+      expect(closed).toBe(true);
+    } finally {
+      await rm(temporary, { recursive: true, force: true });
+    }
+  });
+
+  test("rejects structurally forged model leases before opening QMD", async () => {
+    const temporary = await mkdtemp(join(tmpdir(), "hraness-kb-semantic-brand-"));
+    const root = join(temporary, "vault");
+    let creates = 0;
+    await mkdir(root);
+    await writeFile(join(root, "index.md"), "# Knowledge base\n", "utf8");
+    try {
+      expect(openSemanticSearchSession(
+        {
+          root,
+          embeddingModelLease: {
+            model: recommendedEmbeddingModel,
+            close: () => Promise.resolve(),
+          },
+        },
+        {
+          cacheHome: join(temporary, "cache"),
+          createStore: () => {
+            creates += 1;
+            return Promise.reject(new Error("must not open QMD"));
+          },
+        },
+      )).rejects.toThrow("must be created by createVerifiedEmbeddingModelLease");
+      expect(creates).toBe(0);
+    } finally {
+      await rm(temporary, { recursive: true, force: true });
+    }
+  });
+
+  test("rejects a vector backend that performs more than one query embedding", async () => {
+    const temporary = await mkdtemp(join(tmpdir(), "hraness-kb-semantic-vector-count-"));
+    const root = join(temporary, "vault");
+    await mkdir(root);
+    await writeFile(join(root, "index.md"), "# Knowledge base\n", "utf8");
+    const store = {
+      internal: {
+        getHashesNeedingEmbedding: () => 0,
+        llm: {
+          countTokens: () => Promise.resolve(1),
+          embed: () => Promise.resolve({ embedding: [0.5] }),
+        },
+        searchVec: async (
+          _query: string,
+          _model: string,
+          _limit?: number,
+          _collection?: string,
+          session?: {
+            readonly embed: (text: string, options?: { readonly model?: string }) => Promise<unknown>;
+          },
+        ) => {
+          await session?.embed("first query vector");
+          await session?.embed("second query vector");
+          return [];
+        },
+      },
+      update: () => Promise.resolve(unchanged),
+      embed: () => Promise.resolve({
+        docsProcessed: 0,
+        chunksEmbedded: 0,
+        errors: 0,
+        durationMs: 0,
+      }),
+      searchLex: () => Promise.resolve([]),
+      searchVector: () => Promise.resolve([]),
+      getDocumentBody: () => Promise.resolve(null),
+      close: () => Promise.resolve(),
+    } satisfies FakeStore;
+    try {
+      const session = await openSemanticSearchSession(
+        { root, requireStoreLocalVectorBoundary: true },
+        fakeDependencies(store, [], join(temporary, "cache")),
+      );
+      expect(session.search({ query: "single vector", mode: "hybrid" }))
+        .rejects.toThrow("must perform exactly one query embedding");
+      await session.close();
     } finally {
       await rm(temporary, { recursive: true, force: true });
     }

@@ -17,8 +17,17 @@ import {
 // src/semantic.ts
 import { createHash as createHash2 } from "crypto";
 import { constants as constants3 } from "fs";
-import { mkdir as mkdir2, open as open3, realpath as realpath3, stat } from "fs/promises";
-import { homedir } from "os";
+import {
+  chmod,
+  lstat as lstat3,
+  mkdir as mkdir2,
+  mkdtemp,
+  open as open3,
+  realpath as realpath3,
+  rm as rm3,
+  stat
+} from "fs/promises";
+import { homedir, tmpdir } from "os";
 import { dirname as dirname3, isAbsolute as isAbsolute2, join as join3, relative as relative3, resolve as resolve3, sep as sep3 } from "path";
 
 // src/semantic-runtime.ts
@@ -1213,6 +1222,9 @@ async function prepareSemanticProjection(description, notes) {
 var recommendedEmbeddingModel = "hf:ggml-org/embeddinggemma-300M-GGUF/embeddinggemma-300M-Q8_0.gguf#0f741b5a6585bd53aeb15cd1372c56f2a0f65e12";
 var recommendedEmbeddingModelSha256 = "b5ce9d77a3fc4b3b39ccb5643c36777911cc4eb46a66962eadfa3f5f60490d63";
 var MAX_EMBEDDING_MODEL_BYTES = 2 * 1024 * 1024 * 1024;
+var MAX_SEMANTIC_DATABASE_IDENTITY_BYTES = 16 * 1024;
+var MAX_SEMANTIC_READ_SNAPSHOT_BYTES = 16 * 1024 * 1024 * 1024;
+var SHA256 = /^[0-9a-f]{64}$/u;
 var semanticIndexSchema = 1;
 var qmdIndexerVersion = "2.5.3+hraness.aa993dceb3ef8cfb71d470554ca437570f5a2b3c";
 var collectionName = "kb";
@@ -1275,15 +1287,172 @@ async function sha256EmbeddingModelFile(path) {
     await handle.close();
   }
 }
-async function verifiedEmbeddingModelSource(path, dependencies) {
-  if (path === undefined)
-    return recommendedEmbeddingModel;
-  const absolutePath = resolve3(path);
-  const digest = await (dependencies.digestEmbeddingModelFile ?? sha256EmbeddingModelFile)(absolutePath);
-  if (digest !== recommendedEmbeddingModelSha256) {
-    throw new Error("The local embedding model does not match the pinned recommended model SHA-256.");
+var verifiedEmbeddingModelLeaseStates = new WeakMap;
+async function writeEmbeddingModelBytes(destination, bytes) {
+  let offset = 0;
+  while (offset < bytes.byteLength) {
+    const written = await destination.write(bytes, offset, bytes.byteLength - offset, null);
+    if (written.bytesWritten < 1)
+      throw new Error("The embedding model snapshot write stalled.");
+    offset += written.bytesWritten;
   }
-  return absolutePath;
+}
+async function verifiedIndexEmbeddingModelSource(path, dependencies) {
+  if (path === undefined) {
+    return Object.freeze({ source: recommendedEmbeddingModel, release: () => Promise.resolve() });
+  }
+  const sourcePath = resolve3(path);
+  const directory = await mkdtemp(join3(tmpdir(), "hraness-kb-embedding-model-"));
+  const destinationPath = join3(directory, "pinned-model.gguf");
+  let source;
+  let destination;
+  try {
+    source = await open3(sourcePath, constants3.O_RDONLY | constants3.O_NOFOLLOW);
+    destination = await open3(destinationPath, constants3.O_WRONLY | constants3.O_CREAT | constants3.O_EXCL | constants3.O_NOFOLLOW, 256);
+    const before = await source.stat();
+    if (!before.isFile())
+      throw new TypeError("The embedding model must be a regular file.");
+    if (before.size > MAX_EMBEDDING_MODEL_BYTES) {
+      throw new RangeError(`The embedding model exceeds ${MAX_EMBEDDING_MODEL_BYTES.toLocaleString("en-US")} bytes.`);
+    }
+    const hash = createHash2("sha256");
+    const buffer = new Uint8Array(1024 * 1024);
+    let observed = 0;
+    for (;; ) {
+      const { bytesRead } = await source.read(buffer, 0, buffer.byteLength, null);
+      if (bytesRead === 0)
+        break;
+      observed += bytesRead;
+      if (observed > MAX_EMBEDDING_MODEL_BYTES) {
+        throw new RangeError(`The embedding model exceeds ${MAX_EMBEDDING_MODEL_BYTES.toLocaleString("en-US")} bytes.`);
+      }
+      const bytes = buffer.subarray(0, bytesRead);
+      hash.update(bytes);
+      await writeEmbeddingModelBytes(destination, bytes);
+    }
+    const after = await source.stat();
+    const copied = await destination.stat();
+    if (after.dev !== before.dev || after.ino !== before.ino || after.size !== before.size || observed !== before.size || copied.size !== observed) {
+      throw new Error("The embedding model changed while its private snapshot was created; retry.");
+    }
+    await destination.sync();
+    await destination.close();
+    destination = undefined;
+    await source.close();
+    source = undefined;
+    const digest = dependencies.digestEmbeddingModelFile === undefined ? hash.digest("hex") : await dependencies.digestEmbeddingModelFile(destinationPath);
+    if (digest !== recommendedEmbeddingModelSha256) {
+      throw new Error("The local embedding model does not match the pinned recommended model SHA-256.");
+    }
+    await chmod(destinationPath, 256);
+    let released = false;
+    return Object.freeze({
+      source: destinationPath,
+      release: async () => {
+        if (released)
+          return;
+        released = true;
+        await rm3(directory, { recursive: true, force: true });
+      }
+    });
+  } catch (error) {
+    await destination?.close().catch(() => {
+      return;
+    });
+    await source?.close().catch(() => {
+      return;
+    });
+    await rm3(directory, { recursive: true, force: true });
+    throw error;
+  }
+}
+function releaseEmbeddingModelReference(state) {
+  if (state.references < 1) {
+    throw new Error("Verified embedding-model lease reference accounting underflowed.");
+  }
+  state.references -= 1;
+  if (state.references !== 0)
+    return Promise.resolve();
+  state.cleanupPromise ??= state.cleanup();
+  return state.cleanupPromise;
+}
+function retainVerifiedEmbeddingModelLease(lease) {
+  const state = verifiedEmbeddingModelLeaseStates.get(lease);
+  if (state === undefined) {
+    throw new TypeError("embeddingModelLease must be created by createVerifiedEmbeddingModelLease.");
+  }
+  if (!state.acceptingReaders) {
+    throw new Error("The verified embedding-model lease is closed.");
+  }
+  state.references += 1;
+  let released = false;
+  return Object.freeze({
+    source: state.source,
+    release: () => {
+      if (released)
+        return Promise.resolve();
+      released = true;
+      return releaseEmbeddingModelReference(state);
+    }
+  });
+}
+async function createVerifiedEmbeddingModelLease(embeddingModelFile, dependencies = {}) {
+  if (typeof embeddingModelFile !== "string" || embeddingModelFile.trim() === "") {
+    throw new TypeError("embeddingModelFile must be a non-empty path string.");
+  }
+  const copied = await verifiedIndexEmbeddingModelSource(embeddingModelFile, dependencies);
+  const state = {
+    source: copied.source,
+    cleanup: copied.release,
+    references: 1,
+    acceptingReaders: true
+  };
+  let ownerClosePromise;
+  const lease = Object.freeze({
+    model: recommendedEmbeddingModel,
+    close: () => {
+      if (ownerClosePromise !== undefined)
+        return ownerClosePromise;
+      state.acceptingReaders = false;
+      ownerClosePromise = releaseEmbeddingModelReference(state);
+      return ownerClosePromise;
+    }
+  });
+  verifiedEmbeddingModelLeaseStates.set(lease, state);
+  return lease;
+}
+function requiredStoreLocalVectorBoundary(value) {
+  if (value === undefined)
+    return false;
+  if (typeof value !== "boolean") {
+    throw new TypeError("requireStoreLocalVectorBoundary must be a boolean.");
+  }
+  return value;
+}
+async function sessionEmbeddingModelSource(options, dependencies) {
+  if (options.embeddingModelFile !== undefined && options.embeddingModelLease !== undefined) {
+    throw new TypeError("embeddingModelFile and embeddingModelLease are mutually exclusive.");
+  }
+  if (options.embeddingModelLease !== undefined) {
+    return retainVerifiedEmbeddingModelLease(options.embeddingModelLease);
+  }
+  if (options.embeddingModelFile === undefined) {
+    return Object.freeze({
+      source: recommendedEmbeddingModel,
+      release: () => Promise.resolve()
+    });
+  }
+  const owner = await createVerifiedEmbeddingModelLease(options.embeddingModelFile, dependencies);
+  try {
+    const retained = retainVerifiedEmbeddingModelLease(owner);
+    await owner.close();
+    return retained;
+  } catch (error) {
+    await owner.close().catch(() => {
+      return;
+    });
+    throw error;
+  }
 }
 function cacheHome(dependencies) {
   const configured = dependencies.cacheHome ?? process.env.XDG_CACHE_HOME;
@@ -1404,7 +1573,14 @@ function boundUnknownMethod(owner, name, label) {
     return await returned;
   };
 }
-function internalVectorBoundary(store, modelIdentity) {
+function measuredDuration(startedAt, finishedAt) {
+  if (!Number.isFinite(startedAt) || !Number.isFinite(finishedAt) || finishedAt < startedAt) {
+    throw new Error("The query-embedding monotonic clock returned an invalid interval.");
+  }
+  const duration = finishedAt - startedAt;
+  return duration;
+}
+function internalVectorBoundary(store, modelIdentity, now) {
   if (store.internal === undefined)
     return null;
   const internal = boundaryRecord(store.internal, "QMD store.internal");
@@ -1412,29 +1588,70 @@ function internalVectorBoundary(store, modelIdentity) {
   const getHashesNeedingEmbedding = boundUnknownMethod(internal, "getHashesNeedingEmbedding", "QMD store.internal");
   const searchVec = boundUnknownMethod(internal, "searchVec", "QMD store.internal");
   const embed = boundUnknownMethod(llm, "embed", "QMD store.internal.llm");
-  const session = Object.freeze({ embed });
+  const countTokens = boundUnknownMethod(llm, "countTokens", "QMD store.internal.llm");
   return {
     pendingEmbeddingCount: async () => boundaryCount(await getHashesNeedingEmbedding(modelIdentity), "QMD store.internal.getHashesNeedingEmbedding result"),
-    searchVector: async (query, options) => parseSearchResults(await searchVec(query, modelIdentity, options.limit, options.collection, session), options.limit)
+    searchVector: async (query, options) => {
+      let calls = 0;
+      let inputTokens = 0;
+      let durationMs = 0;
+      const session = Object.freeze({
+        countTokens: async (text) => boundaryCount(await countTokens(boundaryString(text, "QMD query embedding text")), "QMD store.internal.llm.countTokens result"),
+        embed: async (text, embedOptions) => {
+          const exactText = boundaryString(text, "QMD query embedding text");
+          if (calls !== 0) {
+            throw new Error("QMD query-vector search must perform exactly one query embedding.");
+          }
+          inputTokens = boundaryCount(await countTokens(exactText), "QMD store.internal.llm.countTokens result");
+          calls = 1;
+          const startedAt = now();
+          try {
+            return await embed(exactText, embedOptions);
+          } finally {
+            durationMs = measuredDuration(startedAt, now());
+          }
+        }
+      });
+      const results = parseSearchResults(await searchVec(query, modelIdentity, options.limit, options.collection, session), options.limit);
+      if (calls !== 1) {
+        throw new Error(`QMD query-vector search must perform exactly one query embedding; observed ${calls}.`);
+      }
+      return {
+        results,
+        accounting: Object.freeze({ calls, inputTokens, durationMs })
+      };
+    }
   };
 }
-function parseSearchStore(value, modelIdentity) {
+function parseSearchStore(value, modelIdentity, options) {
   const store = boundaryRecord(value, "QMD store");
   const close = boundUnknownMethod(store, "close", "QMD store");
   const embed = boundUnknownMethod(store, "embed", "QMD store");
   const searchLex = boundUnknownMethod(store, "searchLex", "QMD store");
   const searchVector = boundUnknownMethod(store, "searchVector", "QMD store");
   const update = boundUnknownMethod(store, "update", "QMD store");
-  const internalVector = internalVectorBoundary(store, modelIdentity);
+  let internalVector = null;
+  try {
+    internalVector = internalVectorBoundary(store, modelIdentity, options.now);
+  } catch (error) {
+    if (options.requireStoreLocalVectorBoundary)
+      throw error;
+  }
+  if (options.requireStoreLocalVectorBoundary && internalVector === null) {
+    throw new Error("QMD store-local vector search is required, but store.internal.searchVec with its LLM boundary is unavailable.");
+  }
   return {
     close: async () => {
       await close();
     },
-    embed: async (options) => parseEmbeddingResult(await embed(options)),
-    searchLex: async (query, options) => parseSearchResults(await searchLex(query, options), options.limit),
-    searchVector: internalVector?.searchVector ?? (async (query, options) => parseSearchResults(await searchVector(query, options), options.limit)),
-    update: async (options) => {
-      const result = parseUpdateResult(await update(options));
+    embed: async (options2) => parseEmbeddingResult(await embed(options2)),
+    searchLex: async (query, options2) => parseSearchResults(await searchLex(query, options2), options2.limit),
+    searchVector: internalVector?.searchVector ?? (async (query, vectorOptions) => ({
+      results: parseSearchResults(await searchVector(query, vectorOptions), vectorOptions.limit),
+      accounting: null
+    })),
+    update: async (options2) => {
+      const result = parseUpdateResult(await update(options2));
       if (internalVector === null)
         return result;
       return {
@@ -1443,6 +1660,23 @@ function parseSearchStore(value, modelIdentity) {
       };
     }
   };
+}
+function parseWarmSearchStore(value, now) {
+  const store = boundaryRecord(value, "QMD warm search store");
+  const close = boundUnknownMethod(store, "close", "QMD warm search store");
+  const searchLex = boundUnknownMethod(store, "searchLex", "QMD warm search store");
+  const internalVector = internalVectorBoundary(store, recommendedEmbeddingModel, now);
+  if (internalVector === null) {
+    throw new Error("QMD warm search requires store.internal.searchVec with its store-local LLM boundary.");
+  }
+  return Object.freeze({
+    close: async () => {
+      await close();
+    },
+    pendingEmbeddingCount: internalVector.pendingEmbeddingCount,
+    searchLex: async (query, options) => parseSearchResults(await searchLex(query, options), options.limit),
+    searchVector: internalVector.searchVector
+  });
 }
 async function closeMalformedStore(value) {
   if (!isRecord2(value))
@@ -1455,13 +1689,175 @@ async function closeMalformedStore(value) {
     await returned;
   } catch {}
 }
-async function openedSearchStore(value, modelIdentity) {
+async function openedSearchStore(value, modelIdentity, options) {
   try {
-    return parseSearchStore(value, modelIdentity);
+    return parseSearchStore(value, modelIdentity, options);
   } catch (error) {
     await closeMalformedStore(value);
     throw error;
   }
+}
+async function openedWarmSearchStore(value, now) {
+  try {
+    return parseWarmSearchStore(value, now);
+  } catch (error) {
+    await closeMalformedStore(value);
+    throw error;
+  }
+}
+function sameStableFileMetadata(left, right) {
+  return left.dev === right.dev && left.ino === right.ino && left.mode === right.mode && left.nlink === right.nlink && left.size === right.size && left.mtimeNs === right.mtimeNs && left.ctimeNs === right.ctimeNs;
+}
+function missingFile(error) {
+  return isRecord2(error) && error.code === "ENOENT";
+}
+async function writeAll(handle, bytes, length, position) {
+  let written = 0;
+  while (written < length) {
+    const result = await handle.write(bytes, written, length - written, position + written);
+    if (result.bytesWritten === 0) {
+      throw new Error("The isolated QMD snapshot stopped accepting bytes.");
+    }
+    written += result.bytesWritten;
+  }
+}
+async function copyStableSnapshotFile(source, destination, label, maximumBytes, expected) {
+  if (!Number.isSafeInteger(expected.bytes) || expected.bytes < 0 || expected.bytes > maximumBytes || !SHA256.test(expected.sha256))
+    throw new TypeError(`${label} seal is invalid.`);
+  const pathBefore = await lstat3(source, { bigint: true });
+  if (pathBefore.isSymbolicLink() || !pathBefore.isFile() || pathBefore.nlink !== 1n || pathBefore.size > BigInt(maximumBytes) || pathBefore.size !== BigInt(expected.bytes)) {
+    throw new Error(`${label} must be one bounded, singly linked regular file.`);
+  }
+  const sourceHandle = await open3(source, constants3.O_RDONLY | constants3.O_NOFOLLOW);
+  let destinationHandle;
+  try {
+    const before = await sourceHandle.stat({ bigint: true });
+    if (!sameStableFileMetadata(pathBefore, before)) {
+      throw new Error(`${label} changed before its isolated read snapshot was opened.`);
+    }
+    destinationHandle = await open3(destination, constants3.O_WRONLY | constants3.O_CREAT | constants3.O_EXCL | constants3.O_NOFOLLOW, 384);
+    const buffer = new Uint8Array(1024 * 1024);
+    const hash = createHash2("sha256");
+    let copied = 0;
+    while (copied < Number(before.size)) {
+      const requested = Math.min(buffer.byteLength, Number(before.size) - copied);
+      const { bytesRead } = await sourceHandle.read(buffer, 0, requested, copied);
+      if (bytesRead === 0) {
+        throw new Error(`${label} ended before its declared size.`);
+      }
+      await writeAll(destinationHandle, buffer, bytesRead, copied);
+      hash.update(buffer.subarray(0, bytesRead));
+      copied += bytesRead;
+    }
+    await destinationHandle.sync();
+    const [after, pathAfter] = await Promise.all([
+      sourceHandle.stat({ bigint: true }),
+      lstat3(source, { bigint: true })
+    ]);
+    if (copied !== Number(before.size) || !sameStableFileMetadata(before, after) || !sameStableFileMetadata(after, pathAfter)) {
+      throw new Error(`${label} changed while its isolated read snapshot was copied.`);
+    }
+    const observed = Object.freeze({ bytes: copied, sha256: hash.digest("hex") });
+    if (observed.bytes !== expected.bytes || observed.sha256 !== expected.sha256) {
+      throw new Error(`${label} does not match its sealed byte commitment.`);
+    }
+    return observed;
+  } finally {
+    await Promise.allSettled([
+      sourceHandle.close(),
+      destinationHandle?.close() ?? Promise.resolve()
+    ]);
+  }
+}
+async function assertAbsentSnapshotSidecar(path, label) {
+  try {
+    await lstat3(path);
+  } catch (error) {
+    if (missingFile(error))
+      return;
+    throw error;
+  }
+  throw new Error(`${label} appeared while the isolated read snapshot was copied.`);
+}
+async function createIsolatedQmdDatabaseSnapshot(database, seal) {
+  const directory = await mkdtemp(join3(tmpdir(), "hraness-kb-qmd-reader."));
+  await chmod(directory, 448);
+  let cleaned = false;
+  const cleanup = async () => {
+    if (cleaned)
+      return;
+    cleaned = true;
+    await rm3(directory, { recursive: true, force: true });
+  };
+  try {
+    const isolatedDatabase = join3(directory, "snapshot.sqlite");
+    if (seal.wal !== null || seal.shm !== null || seal.journal !== null) {
+      throw new TypeError("Strict warm semantic snapshots require checkpointed SQLite state.");
+    }
+    const sourceWal = `${database}-wal`;
+    const sourceShm = `${database}-shm`;
+    const sourceJournal = `${database}-journal`;
+    await Promise.all([
+      assertAbsentSnapshotSidecar(sourceWal, "Semantic database WAL"),
+      assertAbsentSnapshotSidecar(sourceShm, "Semantic database SHM"),
+      assertAbsentSnapshotSidecar(sourceJournal, "Semantic database rollback journal")
+    ]);
+    const databaseSeal = await copyStableSnapshotFile(database, isolatedDatabase, "Semantic database", MAX_SEMANTIC_READ_SNAPSHOT_BYTES, seal.database);
+    await Promise.all([
+      assertAbsentSnapshotSidecar(sourceWal, "Semantic database WAL"),
+      assertAbsentSnapshotSidecar(sourceShm, "Semantic database SHM"),
+      assertAbsentSnapshotSidecar(sourceJournal, "Semantic database rollback journal")
+    ]);
+    if (databaseSeal.bytes > MAX_SEMANTIC_READ_SNAPSHOT_BYTES) {
+      throw new RangeError("Semantic database exceeds the read-snapshot byte bound.");
+    }
+    return Object.freeze({ database: isolatedDatabase, cleanup });
+  } catch (error) {
+    await cleanup();
+    throw error;
+  }
+}
+function aggregateCloseFailures(settlements, label) {
+  const failures = settlements.filter((result) => result.status === "rejected");
+  if (failures.length > 0) {
+    throw new AggregateError(failures.map(({ reason }) => reason), `${label} did not close cleanly.`);
+  }
+}
+async function closeIsolatedStore(close, snapshot2, label) {
+  const settlements = [];
+  try {
+    await close();
+    settlements.push({ status: "fulfilled", value: undefined });
+  } catch (reason) {
+    settlements.push({ status: "rejected", reason });
+  }
+  try {
+    await snapshot2.cleanup();
+    settlements.push({ status: "fulfilled", value: undefined });
+  } catch (reason) {
+    settlements.push({ status: "rejected", reason });
+  }
+  aggregateCloseFailures(settlements, label);
+}
+function isolatedWarmSearchStore(store, snapshot2) {
+  let closePromise;
+  return Object.freeze({
+    ...store,
+    close: () => {
+      closePromise ??= closeIsolatedStore(store.close, snapshot2, "Isolated QMD warm store");
+      return closePromise;
+    }
+  });
+}
+function isolatedAttestationStore(store, snapshot2) {
+  let closePromise;
+  return Object.freeze({
+    ...store,
+    close: () => {
+      closePromise ??= closeIsolatedStore(store.close, snapshot2, "Isolated QMD attestation store");
+      return closePromise;
+    }
+  });
 }
 function storeConfig(root, embeddingModelSource) {
   return {
@@ -1483,13 +1879,394 @@ async function defaultCreateStore(options) {
   const createStore = boundUnknownMethod(module, "createStore", "QMD module");
   return await createStore(options);
 }
-async function openStore(root, database, embeddingModelSource, dependencies) {
+async function defaultCreateWarmSearchStore(options) {
+  const loaded = await import(qmdModuleSpecifier);
+  const module = boundaryRecord(loaded, "QMD module");
+  const createStore = boundUnknownMethod(module, "createStore", "QMD module");
+  const created = await createStore({ dbPath: options.dbPath });
+  let localLlm;
+  try {
+    const store = boundaryRecord(created, "QMD warm search store");
+    const internal = boundaryRecord(store.internal, "QMD warm search store.internal");
+    const previousLlm = boundaryRecord(internal.llm, "QMD warm search store.internal.llm");
+    const previousDispose = boundUnknownMethod(previousLlm, "dispose", "QMD warm search store.internal.llm");
+    const llmSpecifier = new URL("./llm.js", import.meta.resolve(qmdModuleSpecifier)).href;
+    const loadedLlm = await import(llmSpecifier);
+    const llmModule = boundaryRecord(loadedLlm, "QMD LLM module");
+    if (typeof llmModule.LlamaCpp !== "function") {
+      throw new Error("QMD LLM module.LlamaCpp must be a constructor.");
+    }
+    const constructed = Reflect.construct(llmModule.LlamaCpp, [{
+      embedModel: options.embeddingModelSource,
+      inactivityTimeoutMs: 300000,
+      disposeModelsOnInactivity: true
+    }]);
+    localLlm = boundaryRecord(constructed, "QMD warm local LLM");
+    if (localLlm.embedModelName !== options.embeddingModelSource) {
+      throw new Error("QMD warm local LLM did not retain the verified model source.");
+    }
+    const localDispose = boundUnknownMethod(localLlm, "dispose", "QMD warm local LLM");
+    if (!Reflect.set(internal, "llm", localLlm)) {
+      throw new Error("QMD warm store rejected its verified local LLM boundary.");
+    }
+    await previousDispose();
+    const close = boundUnknownMethod(store, "close", "QMD warm search store");
+    let closed = false;
+    return Object.freeze({
+      ...store,
+      internal,
+      close: async () => {
+        if (closed)
+          return;
+        closed = true;
+        const settlements = await Promise.allSettled([localDispose(), close()]);
+        const failures = settlements.filter((result) => result.status === "rejected");
+        if (failures.length > 0) {
+          throw new AggregateError(failures.map(({ reason }) => reason), "QMD warm store did not close cleanly.");
+        }
+      }
+    });
+  } catch (error) {
+    if (localLlm !== undefined) {
+      const dispose = localLlm.dispose;
+      if (typeof dispose === "function") {
+        await Promise.resolve(Reflect.apply(dispose, localLlm, [])).catch(() => {
+          return;
+        });
+      }
+    }
+    await closeMalformedStore(created);
+    throw error;
+  }
+}
+async function defaultCreateAttestationStore(options) {
+  const loaded = await import(qmdModuleSpecifier);
+  const module = boundaryRecord(loaded, "QMD module");
+  const createStore = boundUnknownMethod(module, "createStore", "QMD module");
+  return await createStore(options);
+}
+async function defaultOpenCheckpointDatabase(database) {
+  const moduleSpecifier = "bun:sqlite";
+  const loaded = await import(moduleSpecifier);
+  const module = boundaryRecord(loaded, "Bun SQLite module");
+  if (typeof module.Database !== "function") {
+    throw new TypeError("Bun SQLite module.Database must be a constructor.");
+  }
+  const opened = boundaryRecord(Reflect.construct(module.Database, [database, { create: false, strict: true }]), "Bun SQLite checkpoint database");
+  const query = boundUnknownMethod(opened, "query", "Bun SQLite checkpoint database");
+  const close = boundUnknownMethod(opened, "close", "Bun SQLite checkpoint database");
+  return Object.freeze({
+    checkpoint: async () => {
+      const walStatement = boundaryRecord(await query("PRAGMA wal_checkpoint(TRUNCATE)"), "Bun SQLite WAL checkpoint statement");
+      const walGet = boundUnknownMethod(walStatement, "get", "Bun SQLite WAL checkpoint statement");
+      const modeStatement = boundaryRecord(await query("PRAGMA journal_mode = DELETE"), "Bun SQLite journal-mode statement");
+      const modeGet = boundUnknownMethod(modeStatement, "get", "Bun SQLite journal-mode statement");
+      return Object.freeze({ wal: await walGet(), mode: await modeGet() });
+    },
+    close: async () => {
+      await close();
+    }
+  });
+}
+async function openedCheckpointDatabase(value) {
+  try {
+    const database = boundaryRecord(value, "Semantic checkpoint database");
+    const checkpoint = boundUnknownMethod(database, "checkpoint", "Semantic checkpoint database");
+    const close = boundUnknownMethod(database, "close", "Semantic checkpoint database");
+    return Object.freeze({
+      checkpoint: async () => {
+        return await checkpoint();
+      },
+      close: async () => {
+        await close();
+      }
+    });
+  } catch (error) {
+    await closeMalformedStore(value);
+    throw error;
+  }
+}
+function parseSemanticAttestationStore(value) {
+  const store = boundaryRecord(value, "QMD attestation store");
+  const close = boundUnknownMethod(store, "close", "QMD attestation store");
+  const internal = boundaryRecord(store.internal, "QMD attestation store.internal");
+  const llm = boundaryRecord(internal.llm, "QMD attestation store.internal.llm");
+  const getHashesNeedingEmbedding = boundUnknownMethod(internal, "getHashesNeedingEmbedding", "QMD attestation store.internal");
+  boundUnknownMethod(internal, "searchVec", "QMD attestation store.internal");
+  boundUnknownMethod(llm, "countTokens", "QMD attestation store.internal.llm");
+  boundUnknownMethod(llm, "embed", "QMD attestation store.internal.llm");
+  return Object.freeze({
+    close: async () => {
+      await close();
+    },
+    pendingEmbeddingCount: async () => boundaryCount(await getHashesNeedingEmbedding(recommendedEmbeddingModel), "QMD attestation store.internal.getHashesNeedingEmbedding result")
+  });
+}
+async function openedSemanticAttestationStore(value) {
+  try {
+    return parseSemanticAttestationStore(value);
+  } catch (error) {
+    await closeMalformedStore(value);
+    throw error;
+  }
+}
+async function openStore(root, database, embeddingModelSource, dependencies, requireStoreLocalVectorBoundary = false) {
   await mkdir2(dirname3(database), { recursive: true });
   const created = await (dependencies.createStore ?? defaultCreateStore)({
     dbPath: database,
     config: storeConfig(root, embeddingModelSource)
   });
-  return await openedSearchStore(created, recommendedEmbeddingModel);
+  return await openedSearchStore(created, recommendedEmbeddingModel, {
+    requireStoreLocalVectorBoundary,
+    now: dependencies.now ?? performance.now.bind(performance)
+  });
+}
+async function assertExactWarmProjectionFile(path, expected, label) {
+  const handle = await open3(path, constants3.O_RDONLY | constants3.O_NOFOLLOW);
+  try {
+    const before = await handle.stat();
+    if (!before.isFile() || before.nlink !== 1 || before.size !== expected.byteLength) {
+      throw new Error(`${label} does not match the immutable warm projection.`);
+    }
+    const observed = await handle.readFile();
+    const after = await handle.stat();
+    if (after.dev !== before.dev || after.ino !== before.ino || after.size !== before.size || !observed.equals(expected)) {
+      throw new Error(`${label} does not match the immutable warm projection.`);
+    }
+  } finally {
+    await handle.close();
+  }
+}
+async function assertExistingWarmProjection(description, notes) {
+  let canonicalGeneration;
+  try {
+    canonicalGeneration = await realpath3(description.generationPath);
+  } catch (error) {
+    throw new Error("The immutable warm semantic projection is absent.", { cause: error });
+  }
+  if (canonicalGeneration !== description.generationPath) {
+    throw new Error("The immutable warm semantic projection changed identity.");
+  }
+  await assertExactWarmProjectionFile(join3(canonicalGeneration, "manifest.json"), Buffer.from(description.manifestText, "utf8"), "Semantic projection manifest");
+  const notesByPath = new Map(notes.map((note) => [note.path, note]));
+  if (notesByPath.size !== description.manifest.notes.length) {
+    throw new Error("The immutable warm semantic projection note population drifted.");
+  }
+  for (const entry of description.manifest.notes) {
+    const note = notesByPath.get(entry.path);
+    if (note === undefined) {
+      throw new Error(`Semantic projection note ${JSON.stringify(entry.path)} is absent.`);
+    }
+    const expected = Buffer.from(note.content, "utf8");
+    if (expected.byteLength !== entry.bytes || createHash2("sha256").update(expected).digest("hex") !== entry.sha256) {
+      throw new Error(`Semantic projection note ${JSON.stringify(entry.path)} drifted.`);
+    }
+    await assertExactWarmProjectionFile(resolve3(canonicalGeneration, ...entry.path.split("/")), expected, `Semantic projection note ${JSON.stringify(entry.path)}`);
+  }
+}
+async function openWarmSearchStore(database, databaseSnapshotSeal, embeddingModelSource, dependencies) {
+  const snapshot2 = await createIsolatedQmdDatabaseSnapshot(database, databaseSnapshotSeal);
+  try {
+    const created = await (dependencies.createWarmSearchStore ?? defaultCreateWarmSearchStore)({
+      dbPath: snapshot2.database,
+      embeddingModelSource
+    });
+    const store = await openedWarmSearchStore(created, dependencies.now ?? performance.now.bind(performance));
+    return isolatedWarmSearchStore(store, snapshot2);
+  } catch (error) {
+    await snapshot2.cleanup();
+    throw error;
+  }
+}
+async function openAttestationStore(database, databaseSnapshotSeal, dependencies) {
+  const snapshot2 = await createIsolatedQmdDatabaseSnapshot(database, databaseSnapshotSeal);
+  try {
+    const created = await (dependencies.createAttestationStore ?? defaultCreateAttestationStore)({ dbPath: snapshot2.database });
+    const store = await openedSemanticAttestationStore(created);
+    return isolatedAttestationStore(store, snapshot2);
+  } catch (error) {
+    await snapshot2.cleanup();
+    throw error;
+  }
+}
+async function checkpointSemanticWarmCache(options, dependencies = {}) {
+  const root = await resolvedDirectory(options.root);
+  const database = await resolveSemanticDatabase(databaseFor(root, options.database, dependencies), root);
+  const before = await lstat3(database);
+  if (before.isSymbolicLink() || !before.isFile() || before.nlink !== 1) {
+    throw new TypeError("The semantic database to checkpoint must be a singly linked regular file.");
+  }
+  const opened = await (dependencies.openCheckpointDatabase ?? defaultOpenCheckpointDatabase)(database);
+  const checkpoint = await openedCheckpointDatabase(opened);
+  try {
+    const outcome = boundaryRecord(await checkpoint.checkpoint(), "Semantic checkpoint result");
+    const wal = boundaryRecord(outcome.wal, "Semantic checkpoint result.wal");
+    const busy = boundaryCount(wal.busy, "Semantic checkpoint result.wal.busy");
+    const log = boundaryCount(wal.log, "Semantic checkpoint result.wal.log");
+    const checkpointed = boundaryCount(wal.checkpointed, "Semantic checkpoint result.wal.checkpointed");
+    const mode = boundaryRecord(outcome.mode, "Semantic checkpoint result.mode");
+    if (busy !== 0 || log !== checkpointed) {
+      throw new Error("Semantic WAL checkpoint did not copy every committed frame.");
+    }
+    if (boundaryString(mode.journal_mode, "Semantic checkpoint result.mode.journal_mode") !== "delete") {
+      throw new Error("Semantic database did not leave WAL journal mode.");
+    }
+  } catch (error) {
+    try {
+      await checkpoint.close();
+    } catch (cleanupError) {
+      throw new AggregateError([error, cleanupError], "Semantic database checkpoint and cleanup both failed.", { cause: error });
+    }
+    throw error;
+  }
+  await checkpoint.close();
+  for (const sidecar of [`${database}-wal`, `${database}-shm`]) {
+    let metadata;
+    try {
+      metadata = await lstat3(sidecar);
+    } catch (error) {
+      if (missingFile(error))
+        continue;
+      throw error;
+    }
+    if (metadata.isSymbolicLink() || !metadata.isFile() || metadata.nlink !== 1) {
+      throw new TypeError("Semantic checkpoint sidecars must be singly linked regular files.");
+    }
+    await rm3(sidecar);
+  }
+  await Promise.all([
+    assertAbsentSnapshotSidecar(`${database}-wal`, "Semantic database WAL"),
+    assertAbsentSnapshotSidecar(`${database}-shm`, "Semantic database SHM"),
+    assertAbsentSnapshotSidecar(`${database}-journal`, "Semantic database rollback journal")
+  ]);
+  return Object.freeze({ database, wal: null, shm: null, journal: null });
+}
+async function attestSemanticWarmCache(options, dependencies = {}) {
+  const embeddingModel = retainVerifiedEmbeddingModelLease(options.embeddingModelLease);
+  try {
+    const root = await resolvedDirectory(options.root);
+    const database = await resolveSemanticDatabase(databaseFor(root, options.database, dependencies), root);
+    if (Buffer.byteLength(database, "utf8") > MAX_SEMANTIC_DATABASE_IDENTITY_BYTES) {
+      throw new RangeError(`Semantic database identity exceeds ${MAX_SEMANTIC_DATABASE_IDENTITY_BYTES.toLocaleString("en-US")} UTF-8 bytes.`);
+    }
+    let databaseState;
+    try {
+      databaseState = await stat(database);
+    } catch (error) {
+      throw new Error("The warm semantic database must already exist.", { cause: error });
+    }
+    if (!databaseState.isFile()) {
+      throw new Error("The warm semantic database must already be a regular file.");
+    }
+    const store = await openAttestationStore(database, options.databaseSnapshotSeal, dependencies);
+    try {
+      const pendingEmbeddings = await store.pendingEmbeddingCount();
+      if (pendingEmbeddings !== 0) {
+        throw new Error(`Warm semantic cache is not ready: ${pendingEmbeddings} embedding input(s) remain pending.`);
+      }
+      return Object.freeze({
+        model: recommendedEmbeddingModel,
+        database,
+        pendingEmbeddings: 0
+      });
+    } finally {
+      await store.close();
+    }
+  } finally {
+    await embeddingModel.release();
+  }
+}
+async function openSemanticWarmSearchSession(options, dependencies = {}) {
+  const embeddingModel = retainVerifiedEmbeddingModelLease(options.embeddingModelLease);
+  let store;
+  try {
+    const root = await resolvedDirectory(options.root);
+    const database = await resolveSemanticDatabase(databaseFor(root, options.database, dependencies), root);
+    const databaseState = await stat(database).catch((error) => {
+      throw new Error("The warm semantic database must already exist.", { cause: error });
+    });
+    if (!databaseState.isFile()) {
+      throw new Error("The warm semantic database must already be a regular file.");
+    }
+    const snapshot2 = await semanticSnapshot(root, dependencies);
+    const description = await describeSemanticProjection(database, root, snapshot2.notes, semanticIndexIdentity);
+    await assertExistingWarmProjection(description, snapshot2.notes);
+    store = await openWarmSearchStore(database, options.databaseSnapshotSeal, embeddingModel.source, dependencies);
+    const pendingEmbeddings = await store.pendingEmbeddingCount();
+    if (pendingEmbeddings !== 0) {
+      throw new Error(`Warm semantic cache is not ready: ${pendingEmbeddings} embedding input(s) remain pending.`);
+    }
+    const notesByPath = new Map(snapshot2.notes.map((note) => [note.path, note]));
+    const contentHashesByPath = new Map(description.manifest.notes.map(({ path, sha256 }) => [path, sha256]));
+    const notesByQmdPath = qmdNoteLookup(snapshot2.notes, contentHashesByPath);
+    const connectionsById = new Map(snapshot2.analysis.noteConnections.map((connection) => [connection.id, connection]));
+    const update = Object.freeze({
+      collections: 1,
+      indexed: 0,
+      updated: 0,
+      unchanged: snapshot2.notes.length,
+      removed: 0,
+      needsEmbedding: 0
+    });
+    const context = {
+      root,
+      projectionRoot: description.generationPath,
+      database,
+      store,
+      update,
+      ensureEmbedding: () => Promise.resolve(null),
+      notesByPath,
+      notesByQmdPath,
+      contentHashesByPath,
+      connectionsById
+    };
+    let tail = Promise.resolve();
+    let closeRequested = false;
+    let closePromise;
+    const serialize = (operation) => {
+      const result = tail.then(operation);
+      tail = result.then(() => {
+        return;
+      }, () => {
+        return;
+      });
+      return result;
+    };
+    const ownedStore = store;
+    store = undefined;
+    return Object.freeze({
+      root,
+      database,
+      model: recommendedEmbeddingModel,
+      update,
+      search: (searchOptions) => {
+        if (closeRequested) {
+          return Promise.reject(new Error("Semantic warm search session is closed."));
+        }
+        return serialize(() => executeSemanticSearch(context, searchOptions));
+      },
+      close: () => {
+        if (closePromise !== undefined)
+          return closePromise;
+        closeRequested = true;
+        closePromise = serialize(async () => {
+          try {
+            await ownedStore.close();
+          } finally {
+            await embeddingModel.release();
+          }
+        });
+        return closePromise;
+      }
+    });
+  } catch (error) {
+    try {
+      await store?.close();
+    } finally {
+      await embeddingModel.release();
+    }
+    throw error;
+  }
 }
 function databaseFor(root, requested, dependencies) {
   if (requested === undefined)
@@ -1510,30 +2287,35 @@ async function semanticSnapshot(root, dependencies) {
   return await (dependencies.scanVault ?? ((vaultRoot) => scanVault(vaultRoot, { mentionScope: false })))(root);
 }
 async function indexSemanticVault(options, dependencies = {}) {
-  const root = await resolvedDirectory(options.root);
-  const databaseCandidate = await resolveSemanticDatabase(databaseFor(root, options.database, dependencies), root);
-  const snapshot2 = await semanticSnapshot(root, dependencies);
-  const description = await describeSemanticProjection(databaseCandidate, root, snapshot2.notes, semanticIndexIdentity);
-  const database = description.database;
-  return await withSemanticGenerationWriterLease(database, description.manifest.generation, async () => {
-    const projection = await prepareSemanticProjection(description, snapshot2.notes);
-    let store;
-    try {
-      store = await openStore(projection.root, database, recommendedEmbeddingModel, dependencies);
-      const update = await store.update({ collections: [collectionName] });
-      const embedding = await embedChanged(store, update, options.force ?? false);
-      return { root, database, model: recommendedEmbeddingModel, update, embedding };
-    } finally {
+  const embeddingModel = await verifiedIndexEmbeddingModelSource(options.embeddingModelFile, dependencies);
+  try {
+    const root = await resolvedDirectory(options.root);
+    const databaseCandidate = await resolveSemanticDatabase(databaseFor(root, options.database, dependencies), root);
+    const snapshot2 = await semanticSnapshot(root, dependencies);
+    const description = await describeSemanticProjection(databaseCandidate, root, snapshot2.notes, semanticIndexIdentity);
+    const database = description.database;
+    return await withSemanticGenerationWriterLease(database, description.manifest.generation, async () => {
+      const projection = await prepareSemanticProjection(description, snapshot2.notes);
+      let store;
       try {
-        await store?.close();
+        store = await openStore(projection.root, database, embeddingModel.source, dependencies);
+        const update = await store.update({ collections: [collectionName] });
+        const embedding = await embedChanged(store, update, options.force ?? false);
+        return { root, database, model: recommendedEmbeddingModel, update, embedding };
       } finally {
-        await projection.release();
+        try {
+          await store?.close();
+        } finally {
+          await projection.release();
+        }
       }
-    }
-  }, {
-    ...dependencies.writerLease,
-    excludeReaders: options.force === true
-  });
+    }, {
+      ...dependencies.writerLease,
+      excludeReaders: options.force === true
+    });
+  } finally {
+    await embeddingModel.release();
+  }
 }
 function qmdEmojiToHex(value) {
   return value.replace(/(?:\p{So}\p{Mn}?|\p{Sk})+/gu, (run) => [...run].filter((character) => /\p{So}|\p{Sk}/u.test(character)).map((character) => character.codePointAt(0)?.toString(16) ?? "").join("-"));
@@ -1748,6 +2530,7 @@ async function executeSemanticSearch(context, options) {
   const candidateLimit = boundedCandidateLimit(options.candidateLimit, limit);
   const minScore = boundedScore(options.minScore);
   const embedding = mode === "keyword" ? null : await context.ensureEmbedding();
+  let queryEmbedding = mode === "keyword" ? Object.freeze({ calls: 0, inputTokens: 0, durationMs: 0 }) : null;
   let hits;
   let rawRequested;
   let rawReturned;
@@ -1759,26 +2542,30 @@ async function executeSemanticSearch(context, options) {
       collection: collectionName,
       limit: candidateLimit
     });
-    const vector = await context.store.searchVector(query, {
+    const vectorSearch = await context.store.searchVector(query, {
       collection: collectionName,
       limit: candidateLimit
     });
-    const fused = fusedHybridDocuments(lexical, vector, candidateLimit);
+    queryEmbedding = vectorSearch.accounting;
+    const fused = fusedHybridDocuments(lexical, vectorSearch.results, candidateLimit);
     const considered = fused.filter(({ score }) => score >= minScore);
     rawRequested = candidateLimit;
     rawReturned = fused.length;
     rawThresholdRejected = fused.length - considered.length;
-    rawExhausted = fused.length < candidateLimit && lexical.length < candidateLimit && vector.length < candidateLimit;
+    rawExhausted = fused.length < candidateLimit && lexical.length < candidateLimit && vectorSearch.results.length < candidateLimit;
     hits = await Promise.all(considered.map((result) => hybridSearchHit(context.projectionRoot, query, result, context.notesByPath, context.notesByQmdPath, context.contentHashesByPath, context.connectionsById)));
     rawDiscarded = considered.length - hits.filter((hit) => hit !== null).length;
   } else {
-    const matches = mode === "semantic" ? await context.store.searchVector(query, {
+    const vectorSearch = mode === "semantic" ? await context.store.searchVector(query, {
       collection: collectionName,
       limit: candidateLimit
-    }) : await context.store.searchLex(query, {
+    }) : null;
+    const matches = vectorSearch === null ? await context.store.searchLex(query, {
       collection: collectionName,
       limit: candidateLimit
-    });
+    }) : vectorSearch.results;
+    if (vectorSearch !== null)
+      queryEmbedding = vectorSearch.accounting;
     rawRequested = candidateLimit;
     rawReturned = matches.length;
     const considered = matches.filter(({ score }) => score >= minScore);
@@ -1796,6 +2583,7 @@ async function executeSemanticSearch(context, options) {
     query,
     update: context.update,
     embedding,
+    queryEmbedding,
     rawWindow: {
       requested: rawRequested,
       returned: rawReturned,
@@ -1807,11 +2595,16 @@ async function executeSemanticSearch(context, options) {
   };
 }
 async function openSemanticSearchSession(options, dependencies = {}) {
-  const embeddingModelSource = await verifiedEmbeddingModelSource(options.embeddingModelFile, dependencies);
   const root = await resolvedDirectory(options.root);
   const databaseCandidate = await resolveSemanticDatabase(databaseFor(root, options.database, dependencies), root);
   const snapshot2 = await semanticSnapshot(root, dependencies);
   const description = await describeSemanticProjection(databaseCandidate, root, snapshot2.notes, semanticIndexIdentity);
+  const notesByPath = new Map(snapshot2.notes.map((note) => [note.path, note]));
+  const contentHashesByPath = new Map(description.manifest.notes.map(({ path, sha256 }) => [path, sha256]));
+  const notesByQmdPath = qmdNoteLookup(snapshot2.notes, contentHashesByPath);
+  const connectionsById = new Map(snapshot2.analysis.noteConnections.map((connection) => [connection.id, connection]));
+  const requireStoreLocalVectorBoundary = requiredStoreLocalVectorBoundary(options.requireStoreLocalVectorBoundary);
+  const embeddingModel = await sessionEmbeddingModelSource(options, dependencies);
   const database = description.database;
   let retained;
   let initialized;
@@ -1820,7 +2613,7 @@ async function openSemanticSearchSession(options, dependencies = {}) {
       const projection2 = await prepareSemanticProjection(description, snapshot2.notes);
       let store2;
       try {
-        store2 = await openStore(projection2.root, database, embeddingModelSource, dependencies);
+        store2 = await openStore(projection2.root, database, embeddingModel.source, dependencies, requireStoreLocalVectorBoundary);
         retained = { store: store2, projection: projection2 };
         const update2 = await store2.update({ collections: [collectionName] });
         return { store: store2, projection: projection2, update: update2 };
@@ -1841,13 +2634,12 @@ async function openSemanticSearchSession(options, dependencies = {}) {
     await retained?.projection.release().catch(() => {
       return;
     });
+    await embeddingModel.release().catch(() => {
+      return;
+    });
     throw error;
   }
   const { store, projection, update } = initialized;
-  const notesByPath = new Map(snapshot2.notes.map((note) => [note.path, note]));
-  const contentHashesByPath = new Map(description.manifest.notes.map(({ path, sha256 }) => [path, sha256]));
-  const notesByQmdPath = qmdNoteLookup(snapshot2.notes, contentHashesByPath);
-  const connectionsById = new Map(snapshot2.analysis.noteConnections.map((connection) => [connection.id, connection]));
   let embeddingPromise;
   const ensureEmbedding = () => {
     embeddingPromise ??= update.needsEmbedding === 0 ? Promise.resolve(null) : withSemanticGenerationWriterLease(database, projection.manifest.generation, async () => {
@@ -1899,7 +2691,11 @@ async function openSemanticSearchSession(options, dependencies = {}) {
         try {
           await store.close();
         } finally {
-          await projection.release();
+          try {
+            await projection.release();
+          } finally {
+            await embeddingModel.release();
+          }
         }
       });
       return closePromise;
@@ -1929,4 +2725,4 @@ async function searchSemanticVault(options, dependencies = {}) {
   }
 }
 
-export { MAX_SCANNED_NOTES, MAX_NOTE_UTF8_BYTES, MAX_VAULT_UTF8_BYTES, VaultScanBudgetError, defaultIgnoredDirectories, markdownFiles, readVaultNotes, scanVault, refreshVault, recommendedEmbeddingModel, recommendedEmbeddingModelSha256, MAX_EMBEDDING_MODEL_BYTES, qmdIndexerVersion, sha256EmbeddingModelFile, semanticDatabasePath, indexSemanticVault, openSemanticSearchSession, searchSemanticVault };
+export { MAX_SCANNED_NOTES, MAX_NOTE_UTF8_BYTES, MAX_VAULT_UTF8_BYTES, VaultScanBudgetError, defaultIgnoredDirectories, markdownFiles, readVaultNotes, scanVault, refreshVault, recommendedEmbeddingModel, recommendedEmbeddingModelSha256, MAX_EMBEDDING_MODEL_BYTES, MAX_SEMANTIC_DATABASE_IDENTITY_BYTES, qmdIndexerVersion, sha256EmbeddingModelFile, createVerifiedEmbeddingModelLease, semanticDatabasePath, checkpointSemanticWarmCache, attestSemanticWarmCache, openSemanticWarmSearchSession, indexSemanticVault, openSemanticSearchSession, searchSemanticVault };

@@ -32,7 +32,10 @@ import type {
   SemanticSearchResult,
   SemanticSearchSession,
   SemanticSessionSearchOptions,
+  VerifiedEmbeddingModelLease,
 } from "./semantic.js";
+import { recommendedEmbeddingModel } from "./semantic.js";
+import { openKnowledgeBase } from "./sdk.js";
 import { scanVault } from "./vault.js";
 
 const HEAD = "a".repeat(40);
@@ -328,6 +331,51 @@ async function adapterRepositoryFixture(): Promise<{
     "keyword.md": "# Keyword\n\nKeyword fixture.\n",
     "semantic.md": "# Semantic\n\nSemantic fixture.\n",
     "hybrid.md": "# Hybrid\n\nSTRUCTURED_HYBRID_TOKEN belongs here.\n",
+    "identity-title.md": [
+      "# Collision title marker",
+      "",
+      "An unrelated body sentence repeats Collision title marker.",
+      "",
+    ].join("\n"),
+    "identity-title-only.md": [
+      "# Isolated Quartz Sentinel",
+      "",
+      "Completely unrelated prose.",
+      "",
+    ].join("\n"),
+    "identity-alias.md": [
+      "---",
+      "aliases: [Collision alias marker]",
+      "---",
+      "# Alias identity",
+      "",
+      "An unrelated body sentence repeats Collision alias marker.",
+      "",
+    ].join("\n"),
+    "identity-tag.md": [
+      "---",
+      "tags: [collision-tag-marker]",
+      "---",
+      "# Tag identity",
+      "",
+      "An unrelated body sentence repeats collision-tag-marker.",
+      "",
+    ].join("\n"),
+    "identity-metadata.md": [
+      "---",
+      "status: collision-metadata-marker",
+      "---",
+      "# Metadata identity",
+      "",
+      "An unrelated body sentence repeats collision-metadata-marker.",
+      "",
+    ].join("\n"),
+    "identity-path-marker.md": [
+      "# Path identity",
+      "",
+      "An unrelated body sentence repeats notes/identity-path-marker.",
+      "",
+    ].join("\n"),
     "selected.md": [
       "---",
       "type: note",
@@ -336,7 +384,7 @@ async function adapterRepositoryFixture(): Promise<{
       "# Selected metadata",
       "",
     ].join("\n"),
-    "graph-a.md": "# Graph A\n\n[[notes/graph-b]]\n",
+    "graph-a.md": "# Graph A\n\n[[notes/graph-b]]\n\n[[notes/graph-b]]\n",
     "graph-b.md": "# Graph B\n\n[[notes/graph-a]]\n",
     "direct-history.md": "# Direct history\n",
     "searched-history.md": "# Searched history\n",
@@ -414,11 +462,64 @@ async function retrieve(
 }
 
 describe("built-in knowledge-base evaluation retrievers", () => {
+  test("binds identity matches and independently preserves real content evidence", async () => {
+    const fixture = await adapterRepositoryFixture();
+    const manifest = corpus();
+    const evaluation = await openKnowledgeBaseEvaluation({
+      corpus: manifest,
+      repository: fixture.repository,
+      root: fixture.root,
+      runGit: gitFixture().provider,
+    });
+
+    const cases = [
+      ["Collision title marker", { kind: "title", title: "Collision title marker" }],
+      ["Collision alias marker", { kind: "frontmatter-field-any", fields: ["aliases", "alias"] }],
+      ["collision-tag-marker", { kind: "frontmatter-field", field: "tags" }],
+      ["collision-metadata-marker", {
+        kind: "frontmatter-value",
+        value: "collision-metadata-marker",
+      }],
+      ["notes/identity-path-marker", {
+        kind: "source-path",
+        sourcePath: "notes/identity-path-marker.md",
+      }],
+    ] as const;
+    for (const [text, locator] of cases) {
+      const result = await retrieve(evaluation, manifest.frozen, "exact", { text });
+      const first = result.hits[0]?.evidence as {
+        readonly provenance?: readonly { readonly locator: Readonly<Record<string, unknown>> }[];
+      } | undefined;
+      expect(first?.provenance?.map((candidate) => candidate.locator)).toContainEqual(locator);
+      expect(first?.provenance?.some((candidate) => candidate.locator.kind === "line")).toBe(true);
+    }
+
+    const identityOnly = await retrieve(evaluation, manifest.frozen, "exact", {
+      text: "Isolated Quartz Sentinel",
+    });
+    const identityOnlyEvidence = identityOnly.hits[0]?.evidence as {
+      readonly provenance?: readonly { readonly locator: Readonly<Record<string, unknown>> }[];
+    } | undefined;
+    expect(identityOnlyEvidence?.provenance?.map(({ locator }) => locator)).toContainEqual({
+      kind: "title",
+      title: "Isolated Quartz Sentinel",
+    });
+    expect(identityOnlyEvidence?.provenance?.map(({ locator }) => locator)).toContainEqual({
+      kind: "line",
+      line: 1,
+    });
+
+    await evaluation.close();
+  });
+
   test("opens one scan and session, runs every fixed lane, preserves evidence, and closes lazily opened state", async () => {
     const fixture = await adapterRepositoryFixture();
     const manifest = corpus();
     const git = gitFixture();
-    const embeddingModelFile = join(fixture.repository, "verified-model.gguf");
+    const embeddingModelLease = Object.freeze({
+      model: recommendedEmbeddingModel,
+      close: () => Promise.resolve(),
+    }) as VerifiedEmbeddingModelLease;
     const structuredTextQueries: string[] = [];
     let scans = 0;
     let semanticOpens = 0;
@@ -435,11 +536,13 @@ describe("built-in knowledge-base evaluation retrievers", () => {
           return Promise.reject(new Error("fixture semantic lane unavailable"));
         }
         const mode = options.mode ?? "semantic";
-        const selected = mode === "keyword"
-          ? semanticHit("notes/keyword.md", "fts")
-          : mode === "semantic"
-            ? semanticHit("notes/semantic.md", "vec")
-            : semanticHit("notes/hybrid.md", "hybrid");
+        const selected = options.query === "Collision title marker"
+          ? { ...semanticHit("notes/identity-title.md", "hybrid"), line: 3 }
+          : mode === "keyword"
+            ? semanticHit("notes/keyword.md", "fts")
+            : mode === "semantic"
+              ? semanticHit("notes/semantic.md", "vec")
+              : semanticHit("notes/hybrid.md", "hybrid");
         return Promise.resolve({
           root: fixture.root,
           database: join(fixture.root, "semantic.sqlite"),
@@ -448,6 +551,9 @@ describe("built-in knowledge-base evaluation retrievers", () => {
           query: options.query,
           update: semanticUpdate,
           embedding: null,
+          queryEmbedding: mode === "keyword"
+            ? { calls: 0, inputTokens: 0, durationMs: 0 }
+            : { calls: 1, inputTokens: 13, durationMs: 3.25 },
           results: [selected],
         });
       },
@@ -460,7 +566,8 @@ describe("built-in knowledge-base evaluation retrievers", () => {
       corpus: manifest,
       repository: fixture.repository,
       root: fixture.root,
-      embeddingModelFile,
+      embeddingModelLease,
+      requireStoreLocalVectorBoundary: true,
       runGit: git.provider,
       scanVault: async (root, options) => {
         scans += 1;
@@ -468,7 +575,8 @@ describe("built-in knowledge-base evaluation retrievers", () => {
       },
       openSemanticSearchSession: (options) => {
         semanticOpens += 1;
-        expect(options.embeddingModelFile).toBe(embeddingModelFile);
+        expect(options.embeddingModelLease).toBe(embeddingModelLease);
+        expect(options.requireStoreLocalVectorBoundary).toBe(true);
         return Promise.resolve(semanticSession);
       },
       indexGitHistory: (options): Promise<GitHistoryIndex> => {
@@ -528,12 +636,43 @@ describe("built-in knowledge-base evaluation retrievers", () => {
     });
     expect(exact).toMatchObject({
       status: "ready",
-      hits: [{ documentId: "notes/exact", rank: 1, evidence: { mode: "exact" } }],
+      hits: [{
+        documentId: "notes/exact",
+        rank: 1,
+        evidence: {
+          mode: "exact",
+          provenance: [{
+            targetDocumentId: "notes/exact",
+            evidenceDocumentId: "notes/exact",
+            sourcePath: "notes/exact.md",
+            locator: { kind: "line", line: 3 },
+          }],
+        },
+      }],
       diagnostics: [{ lane: "exact", status: "ready" }],
-      resources: { resultCount: 1 },
+      resources: {
+        resultCount: 1,
+        queryEmbeddingCalls: 0,
+        queryEmbeddingInputTokens: 0,
+        queryEmbeddingDurationMs: 0,
+      },
     });
     expect(typeof exact.timings?.searchMs).toBe("number");
     expect(typeof exact.resources?.noteCount).toBe("number");
+
+    const hybridIdentity = await retrieve(evaluation, manifest.frozen, "hybrid", {
+      text: "Collision title marker",
+    });
+    const hybridIdentityEvidence = hybridIdentity.hits[0]?.evidence as {
+      readonly provenance?: readonly { readonly locator: Readonly<Record<string, unknown>> }[];
+    } | undefined;
+    const hybridIdentityLocators = hybridIdentityEvidence?.provenance?.map(({ locator }) => locator);
+    expect(hybridIdentityLocators).toContainEqual({
+      kind: "title",
+      title: "Collision title marker",
+    });
+    expect(hybridIdentityLocators).toContainEqual({ kind: "line", line: 1 });
+    expect(hybridIdentityLocators).toContainEqual({ kind: "line", line: 3 });
 
     const keyword = await retrieve(evaluation, manifest.frozen, "keyword", {
       text: "STRUCTURED_KEYWORD_TOKEN",
@@ -542,6 +681,11 @@ describe("built-in knowledge-base evaluation retrievers", () => {
       status: "ready",
       hits: [{ documentId: "notes/keyword", rank: 1 }],
       diagnostics: [{ lane: "qmd", status: "ready" }],
+      resources: {
+        queryEmbeddingCalls: 0,
+        queryEmbeddingInputTokens: 0,
+        queryEmbeddingDurationMs: 0,
+      },
     });
 
     const semantic = await retrieve(evaluation, manifest.frozen, "semantic", {
@@ -550,6 +694,11 @@ describe("built-in knowledge-base evaluation retrievers", () => {
     expect(semantic).toMatchObject({
       status: "ready",
       hits: [{ documentId: "notes/semantic", rank: 1 }],
+      resources: {
+        queryEmbeddingCalls: 1,
+        queryEmbeddingInputTokens: 13,
+        queryEmbeddingDurationMs: 3.25,
+      },
     });
 
     const hybrid = await retrieve(evaluation, manifest.frozen, "hybrid", {
@@ -564,6 +713,11 @@ describe("built-in knowledge-base evaluation retrievers", () => {
           evidence: [{ kind: "exact" }, { kind: "qmd" }],
         },
       }],
+      resources: {
+        queryEmbeddingCalls: 1,
+        queryEmbeddingInputTokens: 13,
+        queryEmbeddingDurationMs: 3.25,
+      },
     });
 
     const metadata = await retrieve(evaluation, manifest.frozen, "metadata", {
@@ -590,6 +744,24 @@ describe("built-in knowledge-base evaluation retrievers", () => {
       { documentId: "notes/graph-a", rank: 2 },
     ]);
     expect(graph.hits[0]?.evidence).toHaveProperty("neighborhoods");
+    expect(graph.hits.every((hit) => {
+      const evidence = hit.evidence as {
+        readonly neighborhoods?: readonly {
+          readonly connections?: readonly {
+            readonly edge?: { readonly source: string; readonly target: string };
+            readonly relation?: { readonly source: string; readonly target: string };
+          }[];
+        }[];
+      };
+      return evidence.neighborhoods?.every((neighborhood) =>
+        neighborhood.connections?.every(({ edge, relation }) => {
+          const connection = edge ?? relation;
+          return connection?.source === hit.documentId
+            || connection?.target === hit.documentId
+            || connection?.source === `${hit.documentId}.md`
+            || connection?.target === `${hit.documentId}.md`;
+        }) === true) === true;
+    })).toBe(true);
 
     const pathContext = await retrieve(evaluation, manifest.frozen, "path-context", {
       context: { repositoryPath: "src/file.ts" },
@@ -604,10 +776,20 @@ describe("built-in knowledge-base evaluation retrievers", () => {
     expect(pathContext.hits[0]?.evidence).toMatchObject({
       kind: "agent-context",
       scope: "src",
+      provenance: [{
+        targetDocumentId: fixture.contextId,
+        evidenceDocumentId: fixture.contextId,
+        locator: { kind: "frontmatter-field", field: "scope" },
+      }],
     });
     expect(pathContext.hits[1]?.evidence).toMatchObject({
       kind: "repository-memory",
       record: { matchedScope: "src/file.ts", match: "exact" },
+      provenance: [{
+        targetDocumentId: "notes/file-memory",
+        evidenceDocumentId: "notes/file-memory",
+        locator: { kind: "frontmatter-field", field: "repository_scopes" },
+      }],
     });
     expect(pathContext.hits[2]?.evidence).toMatchObject({
       kind: "repository-memory",
@@ -628,10 +810,13 @@ describe("built-in knowledge-base evaluation retrievers", () => {
       history: { id: "notes/direct-history" },
       search: { id: "notes/direct-history" },
     });
+    expect(history.hits.every(({ evidence }) =>
+      !Object.prototype.hasOwnProperty.call(evidence as object, "provenance"))).toBe(true);
     expect(typeof history.timings?.searchHistoryMs).toBe("number");
     expect(typeof history.timings?.historyMs).toBe("number");
 
     expect(structuredTextQueries).toEqual([
+      "Collision title marker",
       "STRUCTURED_KEYWORD_TOKEN",
       "STRUCTURED_SEMANTIC_TOKEN",
       "STRUCTURED_HYBRID_TOKEN",
@@ -688,6 +873,105 @@ describe("built-in knowledge-base evaluation retrievers", () => {
       contextInspections: 0,
       memoryBuilds: 0,
     });
+    await evaluation.close();
+  });
+
+  test("retains graph provenance from every seed and every authored relation", async () => {
+    const fixture = await adapterRepositoryFixture();
+    const manifest = corpus();
+    const graphA = Object.freeze({
+      id: "notes/graph-a",
+      path: "notes/graph-a.md",
+      title: "Graph A",
+      distance: 0,
+      inboundContextualCount: 0,
+      outboundContextualCount: 1,
+      inboundRelationCount: 0,
+      outboundRelationCount: 1,
+    });
+    const graphB = Object.freeze({
+      id: "notes/graph-b",
+      path: "notes/graph-b.md",
+      title: "Graph B",
+      distance: 1,
+      inboundContextualCount: 1,
+      outboundContextualCount: 0,
+      inboundRelationCount: 1,
+      outboundRelationCount: 0,
+    });
+    const evaluation = await openKnowledgeBaseEvaluation({
+      corpus: manifest,
+      repository: fixture.repository,
+      root: fixture.root,
+      runGit: gitFixture().provider,
+      openKnowledgeBase: async (options, dependencies) => {
+        const session = await openKnowledgeBase(options, dependencies);
+        return Object.freeze({
+          ...session,
+          links: (seed: string) => {
+            if (seed === "missing-locator") {
+              return Object.freeze({
+                note: seed,
+                direction: "both" as const,
+                depth: 1,
+                limit: 20,
+                truncated: false,
+                nodes: Object.freeze([graphB]),
+                edges: Object.freeze([{
+                  source: "notes/not-in-neighborhood.md",
+                  target: graphB.path,
+                  line: 3,
+                }]),
+                relations: Object.freeze([]),
+              });
+            }
+            const relationLine = seed === "valid-locator-one" ? 3 : 5;
+            return Object.freeze({
+              note: seed,
+              direction: "both" as const,
+              depth: 1,
+              limit: 20,
+              truncated: false,
+              nodes: Object.freeze([graphA, graphB]),
+              edges: Object.freeze([{
+                source: graphA.path,
+                target: graphB.path,
+                line: 3,
+              }]),
+              relations: Object.freeze([{
+                source: graphA.id,
+                target: graphB.id,
+                predicate: "supports",
+                provenance: Object.freeze({
+                  kind: "frontmatter" as const,
+                  source: graphA.path,
+                  line: relationLine,
+                  authoredTarget: graphB.id,
+                }),
+              }]),
+            });
+          },
+        });
+      },
+    });
+
+    const graph = await retrieve(evaluation, manifest.frozen, "graph", {
+      graph: {
+        seeds: ["missing-locator", "valid-locator-one", "valid-locator-two"],
+        depth: 1,
+      },
+    });
+    const evidence = graph.hits.find(({ documentId }) => documentId === graphB.id)?.evidence as {
+      readonly provenance?: readonly {
+        readonly sourcePath: string;
+        readonly locator: { readonly kind: "line"; readonly line: number };
+      }[];
+    } | undefined;
+    expect(evidence?.provenance?.map(({ sourcePath, locator }) => ({ sourcePath, locator }))).toEqual([
+      { sourcePath: graphA.path, locator: { kind: "line", line: 3 } },
+      { sourcePath: graphA.path, locator: { kind: "line", line: 5 } },
+    ]);
+
     await evaluation.close();
   });
 

@@ -3,7 +3,7 @@ import {
   openSemanticSearchSession,
   recommendedEmbeddingModel,
   scanVault
-} from "./index-b4vcr4gt.js";
+} from "./index-gq6ywf7s.js";
 import {
   GitHistoryError,
   gitHistoryForNotes,
@@ -31,6 +31,7 @@ import {
 } from "./index-4962kvds.js";
 
 // src/sdk.ts
+import { resolve } from "path";
 var MAX_SEARCH_RESULTS = 100;
 var MAX_SEARCH_CANDIDATES = 500;
 var DEFAULT_SEARCH_RESULTS = 10;
@@ -171,12 +172,22 @@ function checkedHistoryRequest(value) {
   };
 }
 async function openKnowledgeBase(options, dependencies = {}) {
+  if (options.embeddingModelFile !== undefined && options.embeddingModelLease !== undefined) {
+    throw new TypeError("embeddingModelFile and embeddingModelLease are mutually exclusive.");
+  }
+  if (dependencies.semanticSession !== undefined && dependencies.openSemanticSearchSession !== undefined) {
+    throw new TypeError("semanticSession and openSemanticSearchSession dependencies are mutually exclusive.");
+  }
   const snapshot = await (dependencies.scanVault ?? scanVault)(options.root, { ...options.scan ?? {}, mentionScope: false });
   const notesById = new Map(snapshot.notes.map((note) => [note.id, note]));
   const notesByPath = new Map(snapshot.notes.map((note) => [note.path, note]));
+  const injectedSemantic = dependencies.semanticSession;
+  if (injectedSemantic !== undefined && (resolve(injectedSemantic.root) !== resolve(snapshot.root) || options.database !== undefined && resolve(injectedSemantic.database) !== resolve(options.database) || injectedSemantic.model !== recommendedEmbeddingModel)) {
+    throw new TypeError("The preopened semantic session does not match the knowledge-base snapshot, database, and model.");
+  }
   let closeRequested = false;
   let closePromise;
-  let semanticPromise;
+  let semanticPromise = injectedSemantic === undefined ? undefined : Promise.resolve(injectedSemantic);
   let gitPromise;
   const assertOpen = () => {
     if (closeRequested)
@@ -187,7 +198,11 @@ async function openKnowledgeBase(options, dependencies = {}) {
     semanticPromise ??= (dependencies.openSemanticSearchSession ?? openSemanticSearchSession)({
       root: snapshot.root,
       ...options.database === undefined ? {} : { database: options.database },
-      ...options.embeddingModelFile === undefined ? {} : { embeddingModelFile: options.embeddingModelFile }
+      ...options.embeddingModelFile === undefined ? {} : { embeddingModelFile: options.embeddingModelFile },
+      ...options.embeddingModelLease === undefined ? {} : { embeddingModelLease: options.embeddingModelLease },
+      ...options.requireStoreLocalVectorBoundary === undefined ? {} : {
+        requireStoreLocalVectorBoundary: options.requireStoreLocalVectorBoundary
+      }
     }, {
       ...dependencies.semantic ?? {},
       scanVault: () => Promise.resolve(snapshot)
@@ -273,11 +288,18 @@ async function openKnowledgeBase(options, dependencies = {}) {
     const semanticById = new Map;
     const diagnostics = includeExact ? [{ lane: "exact", status: "ready", results: exact.length }] : [];
     let model = null;
+    let queryEmbedding = Object.freeze({
+      calls: 0,
+      inputTokens: 0,
+      durationMs: 0
+    });
     const selectedQmdMode = qmdMode(mode);
     if (selectedQmdMode !== null) {
       if (allowedIds.size === 0) {
         diagnostics.push({ lane: "qmd", status: "ready", results: 0 });
       } else {
+        if (selectedQmdMode !== "keyword")
+          queryEmbedding = null;
         try {
           const session = await semantic();
           model = session.model;
@@ -289,6 +311,7 @@ async function openKnowledgeBase(options, dependencies = {}) {
             candidateLimit,
             ...minScore === undefined ? {} : { minScore }
           });
+          queryEmbedding = result.queryEmbedding ?? (selectedQmdMode === "keyword" ? queryEmbedding : null);
           let acceptedRank = 0;
           let discardedCandidates = result.rawWindow?.discarded ?? 0;
           for (const hit of result.results) {
@@ -358,6 +381,8 @@ async function openKnowledgeBase(options, dependencies = {}) {
         evidence.push({
           kind: "qmd",
           rank: semanticMatch.rank,
+          path: semanticMatch.hit.path,
+          ...semanticMatch.hit.line === undefined ? {} : { line: semanticMatch.hit.line },
           source: semanticMatch.hit.source,
           score: semanticMatch.hit.score,
           ...semanticMatch.hit.signals === undefined ? {} : { signals: semanticMatch.hit.signals }
@@ -451,6 +476,7 @@ async function openKnowledgeBase(options, dependencies = {}) {
         notes: snapshot.notes.length,
         model: selectedQmdMode === null ? null : model ?? recommendedEmbeddingModel,
         elapsedMs: performance.now() - startedAt,
+        queryEmbedding,
         lanes: diagnostics
       }
     };

@@ -37,7 +37,7 @@ import {
   knowledgeBaseEvaluationRetrieverIds,
   openKnowledgeBaseEvaluation,
   verifyFrozenEvaluationSnapshot
-} from "./index-gr1qf1b5.js";
+} from "./index-sn2jpyc1.js";
 import {
   DEFAULT_SEARCH_RESULTS,
   MAX_SEARCH_CANDIDATES,
@@ -46,17 +46,22 @@ import {
   MAX_SEARCH_RESULTS,
   openKnowledgeBase,
   packSearchContext
-} from "./index-1qtgx1er.js";
+} from "./index-98agr5ks.js";
 import {
   MAX_EMBEDDING_MODEL_BYTES,
   MAX_NOTE_UTF8_BYTES,
   MAX_SCANNED_NOTES,
+  MAX_SEMANTIC_DATABASE_IDENTITY_BYTES,
   MAX_VAULT_UTF8_BYTES,
   VaultScanBudgetError,
+  attestSemanticWarmCache,
+  checkpointSemanticWarmCache,
+  createVerifiedEmbeddingModelLease,
   defaultIgnoredDirectories,
   indexSemanticVault,
   markdownFiles,
   openSemanticSearchSession,
+  openSemanticWarmSearchSession,
   qmdIndexerVersion,
   readVaultNotes,
   recommendedEmbeddingModel,
@@ -66,7 +71,7 @@ import {
   searchSemanticVault,
   semanticDatabasePath,
   sha256EmbeddingModelFile
-} from "./index-b4vcr4gt.js";
+} from "./index-gq6ywf7s.js";
 import {
   MAX_BOOTSTRAP_RESAMPLES,
   MAX_EVALUATION_DIAGNOSTICS,
@@ -277,6 +282,7 @@ export {
   parseAgentContextMarker,
   pairedBootstrapConfidenceInterval,
   packSearchContext,
+  openSemanticWarmSearchSession,
   openSemanticSearchSession,
   openKnowledgeBaseEvaluation,
   openKnowledgeBase,
@@ -311,12 +317,14 @@ export {
   defaultIgnoredDirectories,
   defaultAgentGuideIgnoredDirectories,
   deepestRepositoryScopeMatch,
+  createVerifiedEmbeddingModelLease,
   createSyntheticRankFusionFixture,
   createRepresentativeRetrievalFixture,
   createNote,
   createConceptNote,
   compareAgentGuideAudits,
   classifyRepositoryMemoryRecord,
+  checkpointSemanticWarmCache,
   catalogStart,
   catalogEnd,
   canonicalRepositoryPath,
@@ -328,6 +336,7 @@ export {
   auditAgentGuides,
   auditAgentGuideSource,
   auditAgentGuideRepository,
+  attestSemanticWarmCache,
   analyzeVault,
   analyzeAuthoredRepositoryScopes,
   analyzeAgentContexts,
@@ -361,6 +370,7 @@ export {
   MAX_SOURCE_INBOX_NOTES,
   MAX_SOURCE_INBOX_CONNECTIONS,
   MAX_SOURCE_DISPOSITION_EVIDENCE,
+  MAX_SEMANTIC_DATABASE_IDENTITY_BYTES,
   MAX_SEARCH_RESULTS,
   MAX_SEARCH_RELATED_SEEDS,
   MAX_SEARCH_QUERY_TERMS,

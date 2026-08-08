@@ -1,3 +1,5 @@
+import { resolve } from "node:path";
+
 import type { MetadataObject, Note } from "./graph.js";
 import { lookupNote } from "./graph.js";
 import {
@@ -41,9 +43,11 @@ import {
   openSemanticSearchSession,
   recommendedEmbeddingModel,
   type SemanticDependencies,
+  type SemanticQueryEmbeddingAccounting,
   type SemanticSearchHit,
   type SemanticSearchMode,
   type SemanticSearchSession,
+  type VerifiedEmbeddingModelLease,
 } from "./semantic.js";
 import {
   scanVault,
@@ -106,6 +110,10 @@ export type KnowledgeBaseExactEvidence = {
 export type KnowledgeBaseQmdEvidence = {
   readonly kind: "qmd";
   readonly rank: number;
+  /** Exact live-vault path returned by the QMD row. */
+  readonly path?: string;
+  /** One-based source line for the QMD snippet when the backend exposes it. */
+  readonly line?: number;
   readonly source: SemanticSearchHit["source"];
   /** Backend-local score. It is not comparable across search modes. */
   readonly score: number;
@@ -150,6 +158,8 @@ export type KnowledgeBaseSearchResult = {
     readonly notes: number;
     readonly model: string | null;
     readonly elapsedMs: number;
+    /** Exact query-vector work; null only when an optional backend fallback hid it. */
+    readonly queryEmbedding?: SemanticQueryEmbeddingAccounting | null;
     readonly lanes: readonly KnowledgeBaseSearchDiagnostic[];
   };
 };
@@ -169,6 +179,10 @@ export type OpenKnowledgeBaseOptions = {
   readonly database?: string;
   /** Verified local bytes for the pinned semantic model. */
   readonly embeddingModelFile?: string;
+  /** Shared opaque lease for verified local bytes. Mutually exclusive with embeddingModelFile. */
+  readonly embeddingModelLease?: VerifiedEmbeddingModelLease;
+  /** Require QMD's measurable store-local query-vector boundary. */
+  readonly requireStoreLocalVectorBoundary?: boolean;
   readonly scan?: Omit<ScanVaultOptions, "mentionScope">;
 };
 
@@ -176,6 +190,8 @@ export type KnowledgeBaseDependencies = {
   readonly scanVault?: typeof scanVault;
   readonly semantic?: SemanticDependencies;
   readonly openSemanticSearchSession?: typeof openSemanticSearchSession;
+  /** Already-open query session whose ownership transfers after identity validation. */
+  readonly semanticSession?: SemanticSearchSession;
   readonly git?: GitHistoryDependencies;
   readonly indexGitHistory?: typeof indexGitHistory;
 };
@@ -407,15 +423,46 @@ export async function openKnowledgeBase(
   options: OpenKnowledgeBaseOptions,
   dependencies: KnowledgeBaseDependencies = {},
 ): Promise<KnowledgeBaseSession> {
+  if (options.embeddingModelFile !== undefined && options.embeddingModelLease !== undefined) {
+    throw new TypeError(
+      "embeddingModelFile and embeddingModelLease are mutually exclusive.",
+    );
+  }
+  if (
+    dependencies.semanticSession !== undefined
+    && dependencies.openSemanticSearchSession !== undefined
+  ) {
+    throw new TypeError(
+      "semanticSession and openSemanticSearchSession dependencies are mutually exclusive.",
+    );
+  }
   const snapshot: VaultSnapshot = await (dependencies.scanVault ?? scanVault)(
     options.root,
     { ...(options.scan ?? {}), mentionScope: false },
   );
   const notesById = new Map(snapshot.notes.map((note) => [note.id, note]));
   const notesByPath = new Map(snapshot.notes.map((note) => [note.path, note]));
+  const injectedSemantic = dependencies.semanticSession;
+  if (
+    injectedSemantic !== undefined
+    && (
+      resolve(injectedSemantic.root) !== resolve(snapshot.root)
+      || (
+        options.database !== undefined
+        && resolve(injectedSemantic.database) !== resolve(options.database)
+      )
+      || injectedSemantic.model !== recommendedEmbeddingModel
+    )
+  ) {
+    throw new TypeError(
+      "The preopened semantic session does not match the knowledge-base snapshot, database, and model.",
+    );
+  }
   let closeRequested = false;
   let closePromise: Promise<void> | undefined;
-  let semanticPromise: Promise<SemanticSearchSession> | undefined;
+  let semanticPromise: Promise<SemanticSearchSession> | undefined = injectedSemantic === undefined
+    ? undefined
+    : Promise.resolve(injectedSemantic);
   let gitPromise: Promise<GitHistoryIndexResult> | undefined;
 
   const assertOpen = (): void => {
@@ -431,6 +478,15 @@ export async function openKnowledgeBase(
         ...(options.embeddingModelFile === undefined
           ? {}
           : { embeddingModelFile: options.embeddingModelFile }),
+        ...(options.embeddingModelLease === undefined
+          ? {}
+          : { embeddingModelLease: options.embeddingModelLease }),
+        ...(options.requireStoreLocalVectorBoundary === undefined
+          ? {}
+          : {
+              requireStoreLocalVectorBoundary:
+                options.requireStoreLocalVectorBoundary,
+            }),
       },
       {
         ...(dependencies.semantic ?? {}),
@@ -569,11 +625,17 @@ export async function openKnowledgeBase(
       ? [{ lane: "exact", status: "ready", results: exact.length }]
       : [];
     let model: string | null = null;
+    let queryEmbedding: SemanticQueryEmbeddingAccounting | null = Object.freeze({
+      calls: 0,
+      inputTokens: 0,
+      durationMs: 0,
+    });
     const selectedQmdMode = qmdMode(mode);
     if (selectedQmdMode !== null) {
       if (allowedIds.size === 0) {
         diagnostics.push({ lane: "qmd", status: "ready", results: 0 });
       } else {
+        if (selectedQmdMode !== "keyword") queryEmbedding = null;
         try {
           const session = await semantic();
           model = session.model;
@@ -587,6 +649,8 @@ export async function openKnowledgeBase(
               ? {}
               : { minScore }),
           });
+          queryEmbedding = result.queryEmbedding
+            ?? (selectedQmdMode === "keyword" ? queryEmbedding : null);
           let acceptedRank = 0;
           let discardedCandidates = result.rawWindow?.discarded ?? 0;
           for (const hit of result.results) {
@@ -673,6 +737,8 @@ export async function openKnowledgeBase(
         evidence.push({
           kind: "qmd",
           rank: semanticMatch.rank,
+          path: semanticMatch.hit.path,
+          ...(semanticMatch.hit.line === undefined ? {} : { line: semanticMatch.hit.line }),
           source: semanticMatch.hit.source,
           score: semanticMatch.hit.score,
           ...(semanticMatch.hit.signals === undefined
@@ -791,6 +857,7 @@ export async function openKnowledgeBase(
         notes: snapshot.notes.length,
         model: selectedQmdMode === null ? null : model ?? recommendedEmbeddingModel,
         elapsedMs: performance.now() - startedAt,
+        queryEmbedding,
         lanes: diagnostics,
       },
     };
