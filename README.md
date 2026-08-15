@@ -6,7 +6,7 @@ a knowledge base for coding agents.
 ## install
 
 ```sh
-bun add --global github:hraness/kb#v0.14.0
+bun add --global github:hraness/kb#v0.15.0
 ```
 
 ## about
@@ -169,20 +169,22 @@ Copy this prompt into Codex, Claude Code, or another coding agent:
 
 ```text
 Install hraness/kb and its bundled Agent Skills from
-https://github.com/hraness/kb at the immutable v0.14.0 tag. Follow the repository
+https://github.com/hraness/kb at the immutable v0.15.0 tag. Follow the repository
 README, install the `kb` CLI, copy or link the skills I need into this agent
 runner's configured skills directory, and verify the installation with
 `kb doctor` and `kb --help`. Do not initialize or modify a vault until I ask.
 ```
 
-The repository and packed package carry the same skill directories, so an agent
-can inspect the tagged instructions before placing them in its runner-specific
-discovery path.
+The repository and packed package carry the same skill directories. A project
+dependency installs them under `node_modules/@hraness/kb/skills/`, so an agent
+can inspect the tagged instructions before copying or linking the selected
+directory into its runner-specific discovery path. Installation leaves the
+skills inert and does not edit project or user configuration.
 
-Install the CLI from the immutable `v0.14.0` tag:
+Install the CLI from the immutable `v0.15.0` tag:
 
 ```sh
-bun add --global github:hraness/kb#v0.14.0
+bun add --global github:hraness/kb#v0.15.0
 kb --help
 ```
 
@@ -191,7 +193,7 @@ For programmatic use, declare the same pinned source in a project:
 ```json
 {
   "dependencies": {
-    "@hraness/kb": "github:hraness/kb#v0.14.0"
+    "@hraness/kb": "github:hraness/kb#v0.15.0"
   }
 }
 ```
@@ -206,7 +208,7 @@ bun link
 kb --help
 ```
 
-HTTP and Archive.today capture work with the installed JavaScript dependencies. Rendered capture additionally needs a local Chromium-compatible browser. [yt-dlp](https://github.com/yt-dlp/yt-dlp) adds YouTube metadata, thumbnails, and transcripts; full audio or video localization is opt-in and some formats also need [FFmpeg](https://ffmpeg.org). PDF ingestion uses the open-source Poppler tools `pdfinfo` and `pdftohtml`; [Tesseract](https://github.com/tesseract-ocr/tesseract) adds local OCR for scans and screenshots. URL metadata backfill requires Rust on macOS or Linux to build the immutable, fixed-network, memory-confined `metadata-search-engine-rs` helper included in the source tree.
+HTTP and Archive.today capture work with the installed JavaScript dependencies. Rendered capture additionally needs a local Chromium-compatible browser. [yt-dlp](https://github.com/yt-dlp/yt-dlp) adds YouTube metadata, thumbnails, and transcripts; full audio or video localization is opt-in and some formats also need [FFmpeg](https://ffmpeg.org). PDF ingestion uses the open-source Poppler tools `pdfinfo` and `pdftohtml`; [Tesseract](https://github.com/tesseract-ocr/tesseract) adds local OCR for scans and screenshots. URL metadata backfill requires Rust on macOS or Linux to build the immutable, fixed-network, memory-confined `metadata-search-engine-rs` helper included in the installed package. Run `kb url-metadata tool build` once, then use `kb url-metadata backfill` from any working directory.
 
 Structural commands and exact search read the current Markdown directly and
 need no service, model, or graph database. KB pins
@@ -283,6 +285,8 @@ or `kb search` to expand the question deliberately.
 | `kb context <repository-path> --root <vault> --repo <repository>` | List inherited guides root to nearest, reciprocal hubs nearest to root, and grouped repository-scoped current and historical memory. Use `--kind auto\|file\|directory` to control path interpretation. |
 | `kb inbox --root <vault>` | List recent captures without a maintained-note disposition. This is advisory and never creates links or fails merely because a source is a leaf. |
 | `kb evaluate <manifest.json> --root <vault> --repo <repository>` | Verify an exact frozen Git/vault snapshot and run built-in exact, QMD, metadata, graph, path-context, and Git retrievers with raw evidence, latency, resource counters, metrics, and paired intervals. |
+| `kb-evaluation-builder --anchor-seal\|--build --config <file> --artifact-root <directory>` | Anchor or build a frozen evaluation corpus through the installed package boundary. |
+| `kb url-metadata tool build\|check` | Build or validate the pinned Rust metadata-search helper through the installed package boundary. |
 | `kb url-metadata backfill --root <vault>` | Add resumable `url-metadata.json` sidecars for saved external URLs through the pinned metadata search helper and optional read-only Archive.today discovery. |
 | `kb agents identity <repository-scope>` | Derive the normalized scope, canonical hub ID and path, owning guide path, and exact reciprocal marker without writing files. |
 | `kb agents check --root <vault> --repo <repository>` | Validate context identities, exact scopes, reciprocal markers, real guide paths, collisions, confinement, and guide shape. Unmapped guides remain valid. |
@@ -374,7 +378,14 @@ lower-level entry points include
 `@hraness/kb/agent-context`,
 `@hraness/kb/agent-guide-audit`, `@hraness/kb/attachments`,
 `@hraness/kb/authoring`, `@hraness/kb/evaluation`,
-`@hraness/kb/evaluation-kb`,
+`@hraness/kb/evaluation-kb`, and `@hraness/kb/evaluation-builder`. The builder
+entry point owns frozen-corpus authoring, evidence compilation, implementation
+commitments, seal validation, and the bounded v2 evaluation mechanics. A
+consumer keeps its corpus, build configuration, repository-specific retriever
+descriptors, and promotion expectations in its own repository. The installed
+`kb-evaluation-builder` binary exposes the same build lifecycle without a
+source checkout.
+Other focused entries include
 `@hraness/kb/graph`, `@hraness/kb/navigation`, `@hraness/kb/percolate`,
 `@hraness/kb/query`, `@hraness/kb/repository-memory`,
 `@hraness/kb/source-inbox`, and `@hraness/kb/semantic`; web-capture orchestration and
@@ -397,8 +408,9 @@ agent-context validation, `query-kb` for loading repository-path context
 before bounded exact, metadata, hybrid, graph, or Git retrieval,
 `percolate-kb` for reviewing and promoting reusable concepts and typed
 relationships, and `plan-kb` for creating and growing durable implementation
-plans. Copy or link a skill
-directory into the location used by your agent runner. They invoke the installed
-`kb` command and do not depend on a repository checkout path.
+plans. From a project dependency, copy or link the desired directory from
+`node_modules/@hraness/kb/skills/<skill-name>/` into the location used by your
+agent runner. They invoke the installed `kb` command and do not depend on a
+repository checkout path.
 
 See [Design](docs/design.md), [Agent workflow](docs/agent-workflow.md), [PDF capture](docs/pdf.md), and [Contributing](CONTRIBUTING.md) for the durable contracts and development gate. hraness/kb is available under the [MIT License](LICENSE).

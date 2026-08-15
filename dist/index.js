@@ -14,6 +14,14 @@ import {
   initVault
 } from "./index-mqx4nd6v.js";
 import {
+  MAX_SOURCE_DISPOSITION_EVIDENCE,
+  MAX_SOURCE_INBOX_CONNECTIONS,
+  MAX_SOURCE_INBOX_NOTES,
+  MAX_SOURCE_INBOX_PREFIXES,
+  MAX_SOURCE_INBOX_RESULTS,
+  sourceInbox
+} from "./index-pj501bh1.js";
+import {
   DEFAULT_PERCOLATION_LIMIT,
   DEFAULT_PERCOLATION_MIN_SUPPORT,
   MAX_PERCOLATION_EVIDENCE_PER_CANDIDATE,
@@ -25,19 +33,11 @@ import {
   percolateVault
 } from "./index-egdc3x6v.js";
 import {
-  MAX_SOURCE_DISPOSITION_EVIDENCE,
-  MAX_SOURCE_INBOX_CONNECTIONS,
-  MAX_SOURCE_INBOX_NOTES,
-  MAX_SOURCE_INBOX_PREFIXES,
-  MAX_SOURCE_INBOX_RESULTS,
-  sourceInbox
-} from "./index-pj501bh1.js";
-import {
   FrozenEvaluationSnapshotError,
   knowledgeBaseEvaluationRetrieverIds,
   openKnowledgeBaseEvaluation,
   verifyFrozenEvaluationSnapshot
-} from "./index-sn2jpyc1.js";
+} from "./index-y6djytnb.js";
 import {
   DEFAULT_SEARCH_RESULTS,
   MAX_SEARCH_CANDIDATES,
@@ -46,7 +46,7 @@ import {
   MAX_SEARCH_RESULTS,
   openKnowledgeBase,
   packSearchContext
-} from "./index-98agr5ks.js";
+} from "./index-2hsmrc38.js";
 import {
   MAX_EMBEDDING_MODEL_BYTES,
   MAX_NOTE_UTF8_BYTES,
@@ -71,7 +71,7 @@ import {
   searchSemanticVault,
   semanticDatabasePath,
   sha256EmbeddingModelFile
-} from "./index-gq6ywf7s.js";
+} from "./index-etpd4zz0.js";
 import {
   MAX_BOOTSTRAP_RESAMPLES,
   MAX_EVALUATION_DIAGNOSTICS,
@@ -144,7 +144,7 @@ import {
   createSyntheticRankFusionFixture,
   evaluateRanking,
   evaluateRetrievalBenchmark
-} from "./index-ct7haw4a.js";
+} from "./index-9mmghyga.js";
 import {
   MAX_SEARCH_QUERY_BYTES,
   MAX_SEARCH_QUERY_TERMS,
@@ -152,7 +152,13 @@ import {
   fuseRankedCandidates,
   searchExactVault,
   validateSearchQuery
-} from "./index-4cknf4jw.js";
+} from "./index-tthfg4xy.js";
+import {
+  MAX_NAVIGATION_INDEXED_CONNECTIONS,
+  MAX_NAVIGATION_RETURNED_CONNECTIONS,
+  NavigationBudgetError,
+  navigateLinks
+} from "./index-d13v9ckt.js";
 import {
   MAX_QUERY_FILTERS,
   MAX_QUERY_FILTER_VALUES,
@@ -195,12 +201,6 @@ import {
   terminalPlanStatuses,
   validateRepositoryScopeSelection
 } from "./index-06c9ctr6.js";
-import {
-  MAX_NAVIGATION_INDEXED_CONNECTIONS,
-  MAX_NAVIGATION_RETURNED_CONNECTIONS,
-  NavigationBudgetError,
-  navigateLinks
-} from "./index-d13v9ckt.js";
 import {
   AgentContextRepositoryPathError,
   RepositoryScopeError,

@@ -11,6 +11,11 @@ import {
   initVault
 } from "./index-mqx4nd6v.js";
 import {
+  MAX_SOURCE_INBOX_PREFIXES,
+  MAX_SOURCE_INBOX_RESULTS,
+  sourceInbox
+} from "./index-pj501bh1.js";
+import {
   MAX_PERCOLATION_MENTIONS,
   MAX_PERCOLATION_MENTION_PAIRS,
   MAX_PERCOLATION_NOTES,
@@ -18,14 +23,9 @@ import {
   percolateVault
 } from "./index-egdc3x6v.js";
 import {
-  MAX_SOURCE_INBOX_PREFIXES,
-  MAX_SOURCE_INBOX_RESULTS,
-  sourceInbox
-} from "./index-pj501bh1.js";
-import {
   knowledgeBaseEvaluationRetrieverIds,
   openKnowledgeBaseEvaluation
-} from "./index-sn2jpyc1.js";
+} from "./index-y6djytnb.js";
 import {
   DEFAULT_SEARCH_RESULTS,
   MAX_SEARCH_CANDIDATES,
@@ -33,7 +33,7 @@ import {
   MAX_SEARCH_RELATED_SEEDS,
   MAX_SEARCH_RESULTS,
   openKnowledgeBase
-} from "./index-98agr5ks.js";
+} from "./index-2hsmrc38.js";
 import {
   indexSemanticVault,
   qmdIndexerVersion,
@@ -42,7 +42,7 @@ import {
   refreshVault,
   scanVault,
   sha256EmbeddingModelFile
-} from "./index-gq6ywf7s.js";
+} from "./index-etpd4zz0.js";
 import {
   MAX_EVALUATION_RESULTS_PER_QUERY,
   MAX_EVALUATION_TIMEOUT_MS,
@@ -64,7 +64,10 @@ import {
 } from "./index-2fr3hf9q.js";
 import {
   validateSearchQuery
-} from "./index-4cknf4jw.js";
+} from "./index-tthfg4xy.js";
+import {
+  navigateLinks
+} from "./index-d13v9ckt.js";
 import {
   MAX_QUERY_FILTERS,
   MAX_QUERY_TAGS,
@@ -76,9 +79,6 @@ import {
   buildRepositoryMemoryContext,
   repositoryMemoryGroupKeys
 } from "./index-06c9ctr6.js";
-import {
-  navigateLinks
-} from "./index-d13v9ckt.js";
 import {
   agentContextGuidePath,
   agentContextMarkerForScope,
@@ -119,21 +119,487 @@ import"./index-5n05se68.js";
 // src/cli.ts
 import { open } from "fs/promises";
 import { cpus, release, totalmem } from "os";
-import { relative, resolve as resolve2 } from "path";
+import { relative, resolve as resolve3 } from "path";
 import { format } from "util";
 
 // src/clip/url-metadata-cli.ts
-import { resolve } from "path";
+import { resolve as resolve2 } from "path";
+
+// src/clip/metadata-search-tool/runner.ts
+import { randomUUID } from "crypto";
+import {
+  closeSync,
+  constants,
+  fchmodSync,
+  fstatSync,
+  fsyncSync,
+  lstatSync,
+  mkdirSync,
+  mkdtempSync,
+  openSync,
+  readSync,
+  renameSync,
+  rmSync,
+  writeSync
+} from "fs";
+import { tmpdir } from "os";
+import { basename, dirname, isAbsolute, join, resolve } from "path";
+var TEMPORARY_DIRECTORY_PREFIX = "hraness-kb-metadata-search-tool-";
+var MAX_EXECUTABLE_BYTES = 64 * 1024 * 1024;
+var COPY_BUFFER_BYTES = 64 * 1024;
+function noFollowFlag() {
+  return typeof constants.O_NOFOLLOW === "number" ? constants.O_NOFOLLOW : 0;
+}
+function directoryFlag() {
+  return typeof constants.O_DIRECTORY === "number" ? constants.O_DIRECTORY : 0;
+}
+function errorCode(error) {
+  return typeof error === "object" && error !== null && "code" in error && typeof error.code === "string" ? error.code : undefined;
+}
+function maybeLstat(path) {
+  try {
+    return lstatSync(path, { bigint: true });
+  } catch (error) {
+    if (errorCode(error) === "ENOENT")
+      return null;
+    throw error;
+  }
+}
+function sameDirectoryIdentity(left, right) {
+  return left.dev === right.dev && left.ino === right.ino;
+}
+function sameFileIdentity(left, right) {
+  return sameDirectoryIdentity(left, right) && left.size === right.size && left.mtimeNs === right.mtimeNs && left.ctimeNs === right.ctimeNs;
+}
+function sameInstalledFile(left, right) {
+  return sameDirectoryIdentity(left, right) && left.size === right.size && left.mtimeNs === right.mtimeNs;
+}
+function assertOwnedByCurrentUser(stat, label) {
+  if (process.platform === "win32" || typeof process.getuid !== "function")
+    return;
+  if (stat.uid !== BigInt(process.getuid())) {
+    throw new Error(`${label} must be owned by the current user`);
+  }
+}
+function assertDirectory(stat, label) {
+  if (stat === null || stat.isSymbolicLink() || !stat.isDirectory()) {
+    throw new Error(`${label} must be a real directory`);
+  }
+  assertOwnedByCurrentUser(stat, label);
+}
+function openBoundDirectory(path, label) {
+  const before = maybeLstat(path);
+  assertDirectory(before, label);
+  const descriptor = openSync(path, constants.O_RDONLY | directoryFlag() | noFollowFlag());
+  try {
+    const opened = fstatSync(descriptor, { bigint: true });
+    if (!opened.isDirectory() || !sameDirectoryIdentity(before, opened)) {
+      throw new Error(`${label} changed while it was opened`);
+    }
+    return { path, descriptor, identity: opened };
+  } catch (error) {
+    closeSync(descriptor);
+    throw error;
+  }
+}
+function assertDirectoryBinding(binding, label) {
+  const byPath = maybeLstat(binding.path);
+  assertDirectory(byPath, label);
+  const byDescriptor = fstatSync(binding.descriptor, { bigint: true });
+  if (!sameDirectoryIdentity(binding.identity, byPath) || !sameDirectoryIdentity(binding.identity, byDescriptor)) {
+    throw new Error(`${label} changed during installation`);
+  }
+}
+function ensurePrivateDirectory(path, label) {
+  let created = false;
+  try {
+    mkdirSync(path, { mode: 448 });
+    created = true;
+  } catch (error) {
+    if (errorCode(error) !== "EEXIST")
+      throw error;
+  }
+  const before = maybeLstat(path);
+  assertDirectory(before, label);
+  const binding = openBoundDirectory(path, label);
+  try {
+    if (process.platform !== "win32") {
+      fchmodSync(binding.descriptor, 448);
+    }
+    const identity = fstatSync(binding.descriptor, { bigint: true });
+    return { binding: { ...binding, identity }, created };
+  } catch (error) {
+    closeSync(binding.descriptor);
+    throw error;
+  }
+}
+function assertExecutableSource(stat, platform) {
+  if (!stat.isFile() || stat.isSymbolicLink()) {
+    throw new Error("Cargo release output must be a regular file");
+  }
+  if (stat.nlink !== 1n) {
+    throw new Error("Cargo release output must not be hard-linked");
+  }
+  if (stat.size < 1n || stat.size > BigInt(MAX_EXECUTABLE_BYTES)) {
+    throw new Error(`Cargo release output must contain 1-${MAX_EXECUTABLE_BYTES} bytes`);
+  }
+  if (platform !== "win32" && (stat.mode & 0o111n) === 0n) {
+    throw new Error("Cargo release output must be executable");
+  }
+  assertOwnedByCurrentUser(stat, "Cargo release output");
+}
+function assertExistingDestination(stat, platform) {
+  assertExecutableSource(stat, platform);
+  if (platform !== "win32" && (stat.mode & 0o777n) !== 0o700n) {
+    throw new Error("installed metadata-search executable has unsafe permissions");
+  }
+}
+function writeAll(descriptor, buffer, length) {
+  let offset = 0;
+  while (offset < length) {
+    const written = writeSync(descriptor, buffer, offset, length - offset);
+    if (written < 1)
+      throw new Error("could not write the staged executable");
+    offset += written;
+  }
+}
+function copyValidatedExecutable(sourcePath, stagingPath, platform) {
+  const sourceDescriptor = openSync(sourcePath, constants.O_RDONLY | noFollowFlag());
+  let stagingDescriptor = null;
+  let staged = null;
+  let complete = false;
+  try {
+    const sourceBefore = fstatSync(sourceDescriptor, { bigint: true });
+    assertExecutableSource(sourceBefore, platform);
+    stagingDescriptor = openSync(stagingPath, constants.O_CREAT | constants.O_EXCL | constants.O_WRONLY | noFollowFlag(), 448);
+    if (platform !== "win32")
+      fchmodSync(stagingDescriptor, 448);
+    const buffer = Buffer.allocUnsafe(COPY_BUFFER_BYTES);
+    let copiedBytes = 0;
+    const expectedBytes = Number(sourceBefore.size);
+    while (copiedBytes < expectedBytes) {
+      const bytesRead = readSync(sourceDescriptor, buffer, 0, Math.min(buffer.byteLength, expectedBytes - copiedBytes), null);
+      if (bytesRead < 1) {
+        throw new Error("Cargo release output changed while it was copied");
+      }
+      writeAll(stagingDescriptor, buffer, bytesRead);
+      copiedBytes += bytesRead;
+    }
+    if (readSync(sourceDescriptor, buffer, 0, 1, null) !== 0) {
+      throw new Error("Cargo release output grew while it was copied");
+    }
+    const sourceAfter = fstatSync(sourceDescriptor, { bigint: true });
+    if (!sameFileIdentity(sourceBefore, sourceAfter)) {
+      throw new Error("Cargo release output changed while it was copied");
+    }
+    const sourceByPath = maybeLstat(sourcePath);
+    if (sourceByPath === null || !sameFileIdentity(sourceBefore, sourceByPath)) {
+      throw new Error("Cargo release output path changed while it was copied");
+    }
+    fsyncSync(stagingDescriptor);
+    staged = fstatSync(stagingDescriptor, { bigint: true });
+    if (!staged.isFile() || staged.nlink !== 1n || staged.size !== sourceBefore.size) {
+      throw new Error("staged metadata-search executable failed validation");
+    }
+    complete = true;
+    return staged;
+  } finally {
+    if (stagingDescriptor !== null) {
+      if (!complete)
+        staged = fstatSync(stagingDescriptor, { bigint: true });
+      closeSync(stagingDescriptor);
+    }
+    closeSync(sourceDescriptor);
+    if (!complete) {
+      removeIdentityBoundFile(stagingPath, staged, "incomplete staged executable");
+    }
+  }
+}
+function assertDestinationUnchanged(destinationPath, expected, platform) {
+  const current = maybeLstat(destinationPath);
+  if (expected === null) {
+    if (current !== null) {
+      throw new Error("metadata-search executable destination appeared during installation");
+    }
+    return;
+  }
+  if (current === null || !sameFileIdentity(expected, current)) {
+    throw new Error("metadata-search executable destination changed during installation");
+  }
+  assertExistingDestination(current, platform);
+}
+function removeIdentityBoundFile(path, expected, label) {
+  const current = maybeLstat(path);
+  if (current === null)
+    return;
+  if (expected === null || current.isDirectory() || !sameFileIdentity(expected, current)) {
+    throw new Error(`refusing to remove a replaced ${label}`);
+  }
+  rmSync(path, { force: true });
+}
+function metadataSearchExecutableName(platform = process.platform) {
+  return platform === "win32" ? "kb-url-metadata-search.exe" : "kb-url-metadata-search";
+}
+function metadataSearchToolCommand(action, targetDirectory, toolDirectory = import.meta.dir) {
+  if (!isAbsolute(targetDirectory)) {
+    throw new Error("metadata-search tool target directory must be absolute");
+  }
+  if (!isAbsolute(toolDirectory)) {
+    throw new Error("metadata-search tool directory must be absolute");
+  }
+  return Object.freeze([
+    "cargo",
+    action,
+    ...action === "check" ? ["--all-targets"] : ["--release"],
+    "--locked",
+    "--manifest-path",
+    join(toolDirectory, "Cargo.toml"),
+    "--target-dir",
+    targetDirectory
+  ]);
+}
+function installMetadataSearchExecutable(input) {
+  const toolDirectory = resolve(input.toolDirectory);
+  const platform = input.platform ?? process.platform;
+  const executableName = metadataSearchExecutableName(platform);
+  const sourcePath = resolve(input.sourcePath);
+  const targetDirectory = join(toolDirectory, "target");
+  const releaseDirectory = join(targetDirectory, "release");
+  const destinationPath = join(releaseDirectory, executableName);
+  const stagingName = `.${executableName}.${process.pid}.${randomUUID()}.tmp`;
+  const backupName = `.${executableName}.${process.pid}.${randomUUID()}.backup`;
+  const stagingPath = join(toolDirectory, stagingName);
+  const backupPath = join(toolDirectory, backupName);
+  const syncDirectory = input.syncDirectory ?? ((descriptor) => fsyncSync(descriptor));
+  const toolBinding = openBoundDirectory(toolDirectory, "metadata-search tool directory");
+  let targetBinding = null;
+  let releaseBinding = null;
+  let stagedIdentity = null;
+  let backupIdentity = null;
+  let committed = false;
+  let backupDestroyed = false;
+  let installFailure = null;
+  let installedPath = null;
+  const cleanupErrors = [];
+  try {
+    const target = ensurePrivateDirectory(targetDirectory, "metadata-search target directory");
+    targetBinding = target.binding;
+    assertDirectoryBinding(toolBinding, "metadata-search tool directory");
+    syncDirectory(toolBinding.descriptor, "tool-after-target");
+    const release = ensurePrivateDirectory(releaseDirectory, "metadata-search release directory");
+    releaseBinding = release.binding;
+    assertDirectoryBinding(targetBinding, "metadata-search target directory");
+    syncDirectory(targetBinding.descriptor, "target-after-release");
+    const previousDestination = maybeLstat(destinationPath);
+    if (previousDestination !== null) {
+      assertExistingDestination(previousDestination, platform);
+      backupIdentity = copyValidatedExecutable(destinationPath, backupPath, platform);
+    }
+    stagedIdentity = copyValidatedExecutable(sourcePath, stagingPath, platform);
+    input.beforeInstall?.({
+      sourcePath,
+      targetDirectory,
+      releaseDirectory,
+      destinationPath
+    });
+    assertDirectoryBinding(toolBinding, "metadata-search tool directory");
+    assertDirectoryBinding(targetBinding, "metadata-search target directory");
+    assertDirectoryBinding(releaseBinding, "metadata-search release directory");
+    assertDestinationUnchanged(destinationPath, previousDestination, platform);
+    const stagedByPath = maybeLstat(stagingPath);
+    if (stagedByPath === null || !sameFileIdentity(stagedIdentity, stagedByPath)) {
+      throw new Error("staged metadata-search executable changed before installation");
+    }
+    if (backupIdentity !== null) {
+      const backup = maybeLstat(backupPath);
+      if (backup === null || !sameFileIdentity(backupIdentity, backup)) {
+        throw new Error("metadata-search executable backup changed before installation");
+      }
+    }
+    input.beforeCommit?.({
+      sourcePath,
+      targetDirectory,
+      releaseDirectory,
+      destinationPath
+    });
+    assertDirectoryBinding(toolBinding, "metadata-search tool directory");
+    assertDirectoryBinding(targetBinding, "metadata-search target directory");
+    assertDirectoryBinding(releaseBinding, "metadata-search release directory");
+    assertDestinationUnchanged(destinationPath, previousDestination, platform);
+    const commitStaging = maybeLstat(stagingPath);
+    if (commitStaging === null || !sameFileIdentity(stagedIdentity, commitStaging)) {
+      throw new Error("staged metadata-search executable changed before commit");
+    }
+    if (backupIdentity !== null) {
+      const commitBackup = maybeLstat(backupPath);
+      if (commitBackup === null || !sameFileIdentity(backupIdentity, commitBackup)) {
+        throw new Error("metadata-search executable backup changed before commit");
+      }
+    }
+    syncDirectory(toolBinding.descriptor, "tool-before-commit");
+    syncDirectory(releaseBinding.descriptor, "release-before-commit");
+    renameSync(stagingPath, destinationPath);
+    committed = true;
+    assertDirectoryBinding(toolBinding, "metadata-search tool directory");
+    assertDirectoryBinding(targetBinding, "metadata-search target directory");
+    assertDirectoryBinding(releaseBinding, "metadata-search release directory");
+    const installed = maybeLstat(destinationPath);
+    if (installed === null || !sameInstalledFile(stagedIdentity, installed)) {
+      throw new Error("installed metadata-search executable failed identity validation");
+    }
+    assertExistingDestination(installed, platform);
+    syncDirectory(releaseBinding.descriptor, "release-after-commit");
+    syncDirectory(toolBinding.descriptor, "tool-after-commit");
+    if (backupIdentity !== null) {
+      const backup = maybeLstat(backupPath);
+      if (backup === null || !sameFileIdentity(backupIdentity, backup)) {
+        throw new Error("metadata-search executable backup changed during installation");
+      }
+      rmSync(backupPath, { force: true });
+      backupDestroyed = true;
+      syncDirectory(toolBinding.descriptor, "tool-after-backup-removal");
+      backupIdentity = null;
+    }
+    installedPath = destinationPath;
+  } catch (error) {
+    let reportedError = error;
+    if (committed && !backupDestroyed && releaseBinding !== null && stagedIdentity !== null) {
+      try {
+        const installed = maybeLstat(destinationPath);
+        if (installed === null || !sameInstalledFile(stagedIdentity, installed)) {
+          throw new Error("refusing to replace an unrecognized failed install");
+        }
+        if (backupIdentity === null) {
+          rmSync(destinationPath, { force: true });
+        } else {
+          const backup = maybeLstat(backupPath);
+          if (backup === null || !sameFileIdentity(backupIdentity, backup)) {
+            throw new Error("refusing to restore an unrecognized executable backup");
+          }
+          renameSync(backupPath, destinationPath);
+          backupIdentity = null;
+        }
+        syncDirectory(releaseBinding.descriptor, "release-after-rollback");
+        syncDirectory(toolBinding.descriptor, "tool-after-rollback");
+      } catch (rollbackError) {
+        reportedError = new AggregateError([error, rollbackError], "metadata-search executable installation and rollback both failed");
+      }
+    }
+    installFailure = { error: reportedError };
+  } finally {
+    const attemptCleanup = (action) => {
+      try {
+        action();
+      } catch (error) {
+        cleanupErrors.push(error);
+      }
+    };
+    attemptCleanup(() => removeIdentityBoundFile(stagingPath, stagedIdentity, "staging executable"));
+    attemptCleanup(() => removeIdentityBoundFile(backupPath, backupIdentity, "executable backup"));
+    if (releaseBinding !== null) {
+      const releaseDescriptor = releaseBinding.descriptor;
+      attemptCleanup(() => closeSync(releaseDescriptor));
+    }
+    if (targetBinding !== null) {
+      const targetDescriptor = targetBinding.descriptor;
+      attemptCleanup(() => closeSync(targetDescriptor));
+    }
+    attemptCleanup(() => closeSync(toolBinding.descriptor));
+  }
+  const errors = [
+    ...installFailure === null ? [] : [installFailure.error],
+    ...cleanupErrors
+  ];
+  if (errors.length === 1)
+    throw errors[0];
+  if (errors.length > 1) {
+    const details = errors.map((error) => error instanceof Error ? error.message : "unknown error").join("; ");
+    throw new AggregateError(errors, `metadata-search executable installation or cleanup failed: ${details}`);
+  }
+  if (installedPath === null) {
+    throw new Error("metadata-search executable installation produced no outcome");
+  }
+  return installedPath;
+}
+function defaultTemporaryDirectory() {
+  return mkdtempSync(join(tmpdir(), TEMPORARY_DIRECTORY_PREFIX));
+}
+function assertTemporaryDirectoryIdentity(path, expected) {
+  const current = maybeLstat(path);
+  assertDirectory(current, "Cargo target directory");
+  if (!sameDirectoryIdentity(expected, current)) {
+    throw new Error("Cargo target directory changed before cleanup");
+  }
+}
+function removeOwnedTemporaryDirectory(path, identity) {
+  const resolvedPath = resolve(path);
+  const resolvedTemporaryRoot = resolve(tmpdir());
+  if (dirname(resolvedPath) !== resolvedTemporaryRoot || !basename(resolvedPath).startsWith(TEMPORARY_DIRECTORY_PREFIX)) {
+    throw new Error("refusing to remove an unexpected Cargo target directory");
+  }
+  assertTemporaryDirectoryIdentity(resolvedPath, identity);
+  rmSync(resolvedPath, { recursive: true, force: true });
+}
+function defaultCargoRunner(command, options) {
+  const result = Bun.spawnSync({
+    cmd: [...command],
+    cwd: options.cwd,
+    env: options.environment,
+    stdin: "inherit",
+    stdout: "inherit",
+    stderr: "inherit"
+  });
+  return result.exitCode;
+}
+function runMetadataSearchTool(action, dependencies = {}) {
+  const toolDirectory = resolve(dependencies.toolDirectory ?? import.meta.dir);
+  const platform = dependencies.platform ?? process.platform;
+  const createTemporaryDirectory = dependencies.createTemporaryDirectory ?? defaultTemporaryDirectory;
+  const removeTemporaryDirectory = dependencies.removeTemporaryDirectory ?? removeOwnedTemporaryDirectory;
+  const runCargo = dependencies.runCargo ?? defaultCargoRunner;
+  const createdTargetDirectory = createTemporaryDirectory();
+  if (!isAbsolute(createdTargetDirectory)) {
+    throw new Error("metadata-search tool temporary directory must be absolute");
+  }
+  const targetDirectory = resolve(createdTargetDirectory);
+  const targetIdentity = maybeLstat(targetDirectory);
+  assertDirectory(targetIdentity, "Cargo target directory");
+  try {
+    const command = metadataSearchToolCommand(action, targetDirectory, toolDirectory);
+    const exitCode = runCargo(command, {
+      cwd: toolDirectory,
+      environment: { ...process.env, CARGO_INCREMENTAL: "0" }
+    });
+    if (exitCode !== 0 || action === "check")
+      return exitCode;
+    installMetadataSearchExecutable({
+      sourcePath: join(targetDirectory, "release", metadataSearchExecutableName(platform)),
+      toolDirectory,
+      platform,
+      beforeInstall: dependencies.beforeInstall,
+      beforeCommit: dependencies.beforeCommit,
+      syncDirectory: dependencies.syncDirectory
+    });
+    return 0;
+  } finally {
+    assertTemporaryDirectoryIdentity(targetDirectory, targetIdentity);
+    removeTemporaryDirectory(targetDirectory, targetIdentity);
+  }
+}
+if (false) {}
+
+// src/clip/url-metadata-cli.ts
 var urlMetadataUsage = `kb url-metadata \u2014 backfill bounded metadata for saved URLs
 
 Usage:
+  kb url-metadata tool <build|check>
   kb url-metadata backfill [--root <vault>] [--search-binary <path>] [--refresh]
     [--archive | --no-archive] [--delay-ms <milliseconds>]
     [--max-results <count>] [--timeout <milliseconds>] [--json]
 
-From the @hraness/kb package directory, build the search helper from the immutable
-metadata-search-engine-rs revision:
-  bun run url-metadata:tool:build
+Build or validate the immutable metadata-search-engine-rs helper directly from
+an installed @hraness/kb package:
+  kb url-metadata tool build
 `;
 var defaultOutput = {
   stdout: (value) => process.stdout.write(value),
@@ -147,12 +613,12 @@ function integer(value, minimum, maximum) {
 }
 function metadataSearchBinaryPath(packageRoot = findKbPackageRoot(), platform = process.platform) {
   const executable = platform === "win32" ? "kb-url-metadata-search.exe" : "kb-url-metadata-search";
-  return resolve(packageRoot, "src", "clip", "metadata-search-tool", "target", "release", executable);
+  return resolve2(packageRoot, "src", "clip", "metadata-search-tool", "target", "release", executable);
 }
 function defaultBinaryPath(environment) {
   const configured = environment.HRANESS_KB_METADATA_SEARCH_BINARY;
   if (configured !== undefined && configured.trim() !== "")
-    return resolve(configured);
+    return resolve2(configured);
   return metadataSearchBinaryPath();
 }
 function parseUrlMetadataArguments(arguments_, environment = process.env) {
@@ -161,8 +627,23 @@ function parseUrlMetadataArguments(arguments_, environment = process.env) {
   if (command === undefined || command === "help" || command === "--help" || command === "-h") {
     return { ok: true, value: { kind: "help" } };
   }
+  if (command === "tool") {
+    const action = arguments_[1];
+    if (arguments_.length !== 2 || action !== "build" && action !== "check") {
+      return {
+        ok: false,
+        message: "url-metadata tool accepts exactly one build or check action",
+        json: jsonRequested
+      };
+    }
+    return { ok: true, value: { kind: "tool", action } };
+  }
   if (command !== "backfill") {
-    return { ok: false, message: "url-metadata accepts only the backfill subcommand", json: jsonRequested };
+    return {
+      ok: false,
+      message: "url-metadata accepts only the tool or backfill subcommand",
+      json: jsonRequested
+    };
   }
   let root = "kb";
   let binaryPath = defaultBinaryPath(environment);
@@ -191,7 +672,7 @@ function parseUrlMetadataArguments(arguments_, environment = process.env) {
       if (argument === "--root")
         root = value;
       else if (argument === "--search-binary")
-        binaryPath = resolve(value);
+        binaryPath = resolve2(value);
       else if (argument === "--delay-ms") {
         const parsed = integer(value, 0, 60000);
         if (parsed === null)
@@ -259,6 +740,11 @@ ${urlMetadataUsage}`);
     return 0;
   }
   try {
+    if (parsed.value.kind === "tool") {
+      return (dependencies.runTool ?? runMetadataSearchTool)(parsed.value.action, {
+        toolDirectory: resolve2(findKbPackageRoot(), "src", "clip", "metadata-search-tool")
+      });
+    }
     const provider = (dependencies.createSearchProvider ?? ((binaryPath) => createRustMetadataSearchProvider({ binaryPath })))(parsed.value.binaryPath);
     const report = await (dependencies.backfill ?? backfillSavedUrlMetadata)({
       vaultRoot: parsed.value.root,
@@ -277,9 +763,9 @@ ${urlMetadataUsage}`);
     return report.statusCounts.unavailable > 0 ? 3 : 0;
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
-    if (parsed.value.json)
+    if (parsed.value.kind === "backfill" && parsed.value.json) {
       output.stdout(terminalJson({ ok: false, error: message }));
-    else
+    } else
       output.stderr(`error: ${sanitizeTerminalText(message)}
 `);
     return 1;
@@ -321,6 +807,7 @@ var usage = `kb \u2014 auditable capture and derived links for Markdown vaults
 Usage:
   kb init [directory] [--json]
   kb clip <url|current> [capture options]
+  kb url-metadata tool <build|check>
   kb url-metadata backfill [metadata options]
   kb inspect <url> [capture options]
   kb pdf <file-or-url> [PDF options]
@@ -1748,7 +2235,7 @@ async function runEvaluation(command, output, dependencies) {
   if (queryCount * command.retrievers.length > MAX_CLI_EVALUATION_RUNS) {
     throw new RangeError(`CLI evaluation accepts at most ${MAX_CLI_EVALUATION_RUNS} retriever/query runs.`);
   }
-  const embeddingModelFile = command.modelFile === undefined ? undefined : resolve2(command.modelFile);
+  const embeddingModelFile = command.modelFile === undefined ? undefined : resolve3(command.modelFile);
   const digestEvaluationModel = dependencies.digestEvaluationModel ?? sha256EmbeddingModelFile;
   const modelSha256 = embeddingModelFile === undefined ? null : await digestEvaluationModel(embeddingModelFile);
   if (modelSha256 !== null && modelSha256 !== recommendedEmbeddingModelSha256) {

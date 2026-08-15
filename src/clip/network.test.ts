@@ -13,7 +13,7 @@ import {
   type Socket,
 } from "node:net";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { delimiter, join, resolve } from "node:path";
 import { Readable } from "node:stream";
 
 import {
@@ -30,6 +30,39 @@ import {
 } from "./network.js";
 
 const publicAddress = { address: "1.1.1.1", family: 4 } as const;
+
+function resolveGenuineNodeExecutable(): string {
+  const executableName = process.platform === "win32" ? "node.exe" : "node";
+  const identityProbe = [
+    "if (typeof Bun !== 'undefined'",
+    "|| process.versions.bun !== undefined",
+    "|| !process.versions.node?.startsWith('24.')) process.exit(1)",
+  ].join(" ");
+  const candidates = [...new Set(
+    (process.env.PATH ?? "")
+      .split(delimiter)
+      .filter((directory) => directory.length > 0)
+      .map((directory) => resolve(directory, executableName)),
+  )];
+  for (const executable of candidates) {
+    try {
+      const probe = Bun.spawnSync([
+        executable,
+        "--input-type=commonjs",
+        "-e",
+        identityProbe,
+      ], {
+        stdin: "ignore",
+        stdout: "ignore",
+        stderr: "ignore",
+      });
+      if (probe.exitCode === 0) return executable;
+    } catch {
+      // Continue past absent, inaccessible, or incompatible PATH candidates.
+    }
+  }
+  throw new Error("the real TLS integration fixture requires genuine Node 24 on PATH");
+}
 
 function generateTlsFixture(root: string): {
   readonly certificateAuthority: string;
@@ -558,14 +591,10 @@ describe("pinned network transport", () => {
   });
 
   test("verifies TLS SNI and certificates while pooling by exact origin and pinned IP", async () => {
+    const nodeExecutable = resolveGenuineNodeExecutable();
     const fixtureRoot = mkdtempSync(join(tmpdir(), "wrench-real-tls-"));
     chmodSync(fixtureRoot, 0o700);
     const eventsPath = join(fixtureRoot, "events.jsonl");
-    const nodeExecutable = Bun.which("node");
-    if (nodeExecutable === null) {
-      rmSync(fixtureRoot, { recursive: true, force: true });
-      throw new Error("the real TLS integration fixture requires Node");
-    }
     const tls = generateTlsFixture(fixtureRoot);
     const serverScript = `
 const { appendFileSync } = require("node:fs");

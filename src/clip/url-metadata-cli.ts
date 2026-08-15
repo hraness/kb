@@ -7,18 +7,23 @@ import {
   type UrlMetadataBackfillReport,
 } from "./url-metadata-backfill.js";
 import { findKbPackageRoot } from "./package-root.js";
+import {
+  runMetadataSearchTool,
+  type MetadataSearchToolAction,
+} from "./metadata-search-tool/runner.js";
 import { sanitizeTerminalText } from "./terminal.js";
 
 export const urlMetadataUsage = `kb url-metadata — backfill bounded metadata for saved URLs
 
 Usage:
+  kb url-metadata tool <build|check>
   kb url-metadata backfill [--root <vault>] [--search-binary <path>] [--refresh]
     [--archive | --no-archive] [--delay-ms <milliseconds>]
     [--max-results <count>] [--timeout <milliseconds>] [--json]
 
-From the @hraness/kb package directory, build the search helper from the immutable
-metadata-search-engine-rs revision:
-  bun run url-metadata:tool:build
+Build or validate the immutable metadata-search-engine-rs helper directly from
+an installed @hraness/kb package:
+  kb url-metadata tool build
 `;
 
 type Output = {
@@ -33,6 +38,7 @@ const defaultOutput: Output = {
 
 type ParsedUrlMetadataArguments =
   | { readonly kind: "help" }
+  | { readonly kind: "tool"; readonly action: MetadataSearchToolAction }
   | {
       readonly kind: "backfill";
       readonly root: string;
@@ -52,6 +58,7 @@ type ParseResult =
 export type UrlMetadataCliDependencies = {
   readonly createSearchProvider?: (binaryPath: string) => SearchProvider;
   readonly backfill?: typeof backfillSavedUrlMetadata;
+  readonly runTool?: typeof runMetadataSearchTool;
 };
 
 function integer(value: string, minimum: number, maximum: number): number | null {
@@ -85,8 +92,26 @@ export function parseUrlMetadataArguments(
   if (command === undefined || command === "help" || command === "--help" || command === "-h") {
     return { ok: true, value: { kind: "help" } };
   }
+  if (command === "tool") {
+    const action = arguments_[1];
+    if (
+      arguments_.length !== 2
+      || (action !== "build" && action !== "check")
+    ) {
+      return {
+        ok: false,
+        message: "url-metadata tool accepts exactly one build or check action",
+        json: jsonRequested,
+      };
+    }
+    return { ok: true, value: { kind: "tool", action } };
+  }
   if (command !== "backfill") {
-    return { ok: false, message: "url-metadata accepts only the backfill subcommand", json: jsonRequested };
+    return {
+      ok: false,
+      message: "url-metadata accepts only the tool or backfill subcommand",
+      json: jsonRequested,
+    };
   }
 
   let root = "kb";
@@ -186,6 +211,19 @@ export async function main(
     return 0;
   }
   try {
+    if (parsed.value.kind === "tool") {
+      return (dependencies.runTool ?? runMetadataSearchTool)(
+        parsed.value.action,
+        {
+          toolDirectory: resolve(
+            findKbPackageRoot(),
+            "src",
+            "clip",
+            "metadata-search-tool",
+          ),
+        },
+      );
+    }
     const provider = (dependencies.createSearchProvider ?? ((binaryPath) =>
       createRustMetadataSearchProvider({ binaryPath })))(parsed.value.binaryPath);
     const report = await (dependencies.backfill ?? backfillSavedUrlMetadata)({
@@ -202,7 +240,9 @@ export async function main(
     return report.statusCounts.unavailable > 0 ? 3 : 0;
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
-    if (parsed.value.json) output.stdout(terminalJson({ ok: false, error: message }));
+    if (parsed.value.kind === "backfill" && parsed.value.json) {
+      output.stdout(terminalJson({ ok: false, error: message }));
+    }
     else output.stderr(`error: ${sanitizeTerminalText(message)}\n`);
     return 1;
   }

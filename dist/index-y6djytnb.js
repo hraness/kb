@@ -2,10 +2,10 @@
 import {
   MAX_SEARCH_RESULTS,
   openKnowledgeBase
-} from "./index-98agr5ks.js";
+} from "./index-2hsmrc38.js";
 import {
   scanVault
-} from "./index-gq6ywf7s.js";
+} from "./index-etpd4zz0.js";
 import {
   MAX_EVALUATION_EVIDENCE_BYTES,
   redactEvaluationMachinePaths

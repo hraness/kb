@@ -1,6 +1,6 @@
 # Contents
 
-- `src/` – deterministic Markdown graph and attachment analysis, typed metadata and exact repository-scope queries, local hybrid retrieval, bounded Git provenance, code-mode sessions and DAG workflows, synthetic and real-corpus retrieval evaluation, safe single-note authoring, percolation, repository-memory routing and audits, the advisory source inbox, structural navigation, initialization, CLI, capture, URL intelligence, and diagnostic code with colocated tests.
+- `src/` – deterministic Markdown graph and attachment analysis, typed metadata and exact repository-scope queries, local hybrid retrieval, bounded Git provenance, code-mode sessions and DAG workflows, frozen-corpus evaluation authoring and execution, safe single-note authoring, percolation, repository-memory routing and audits, the advisory source inbox, structural navigation, initialization, CLI, capture, URL intelligence, and diagnostic code with colocated tests.
 - `src/workflows/` – reusable code-mode decision-context, change-explanation, and plan-radar workflows with bounded parallel execution.
 - `dist/` – committed Bun-targeted ESM entrypoints plus the compiled Defuddle worker.
 - `skills/save-url-kb/` – reusable agent workflow for bounded, auditable source capture.
@@ -23,6 +23,7 @@
 - Keep QMD state optional, local, dynamically loaded, and rebuildable from Markdown. The default hybrid path may combine local full-text and vector ranks, but query expansion and reranking remain opt-in costs. Join every match to current authored metadata and graph state.
 - Pin required QMD compatibility behavior to an immutable public Hraness fork commit. Verify the installed bytes in focused tests and update or return to upstream only when equivalent store-local model behavior is published.
 - Keep exact matches and QMD results inspectable as separate retrieval evidence. Return graph neighbors and Git history as context and provenance, not silent relevance boosts, authored links, or inferred facts.
+- Keep `@hraness/kb/evaluation-builder` as the cohesive public boundary for frozen-corpus authoring, evidence compilation, implementation commitments, seal validation, and v2 evaluation mechanics. Keep repository-specific corpora, configurations, retriever descriptors, and promotion expectations in the consumer.
 - Treat a code-mode session as a read-only snapshot that shares one vault scan. Reopen it after Markdown changes. Validate workflow DAGs before execution, cap nodes and concurrency, serialize QMD nodes, and bound Git workers below the global limit.
 - Keep bundled workflows free of hidden writes and process-global state. Require explicit vault and repository inputs and return structured results that agents can inspect or compose.
 - Keep `AGENTS.md` normative and always loaded for ownership, prohibitions, required commands, invariants, and gates. Optional `type: agent-context` hubs under `scopes/` are pull-based rationale, history, examples, evidence, and links; they cannot override a guide or become the sole home of a load-bearing edit rule.
@@ -34,6 +35,7 @@
 - Keep parallel note edits sharded by source file. Serialize same-note local writers, make replacements atomic and revision-checked, let edit lanes check graph policy without refreshing a catalog, and reserve the single managed catalog write for integration. An authored catalog mode must never rewrite the front door.
 - Restrict generated edits to marked, tool-owned regions; preserve concurrent authored changes when refreshing; and fail closed on malformed markers, unsafe paths, or invalid local attachments.
 - Treat capture inputs and outputs as hostile. Keep network, browser, subprocess, byte, item, depth, path, credential, and terminal boundaries bounded and covered by named regressions.
+- Keep the six `skills/` directories byte-identical between the repository and packed package. They remain inert after installation and must be usable from `node_modules/@hraness/kb/skills/` without a source checkout.
 - Keep Archive.today-family discovery read-only and exactly bound to the requested source URL at every redirect hop. Preserve useful structured provider results ahead of archive fallback, and keep search-derived metadata in a separately owned sidecar with categorical provenance and failure states. Resolve fixed search-engine hosts through the public-network boundary, disable redirects, serialize engines, and confine the helper's process memory.
 - Keep security-sensitive runtime forks pinned to immutable commits and exercise their behavior through the standalone install gate.
 - Pair concrete behavior tests with property tests for parsing, resolution, ordering, path confinement, and round-trip laws.

@@ -1,10 +1,10 @@
 // @bun
 import {
-  queryVault
-} from "./index-48pz4jpc.js";
-import {
   navigateLinks
 } from "./index-d13v9ckt.js";
+import {
+  queryVault
+} from "./index-48pz4jpc.js";
 import {
   lookupNote
 } from "./index-4962kvds.js";

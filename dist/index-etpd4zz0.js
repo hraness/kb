@@ -2,7 +2,7 @@
 import {
   fuseRankedCandidates,
   validateSearchQuery
-} from "./index-4cknf4jw.js";
+} from "./index-tthfg4xy.js";
 import {
   MAX_ANALYZED_NOTES,
   analyzeVault,

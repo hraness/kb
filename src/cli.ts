@@ -173,6 +173,7 @@ export const usage = `kb — auditable capture and derived links for Markdown va
 Usage:
   kb init [directory] [--json]
   kb clip <url|current> [capture options]
+  kb url-metadata tool <build|check>
   kb url-metadata backfill [metadata options]
   kb inspect <url> [capture options]
   kb pdf <file-or-url> [PDF options]

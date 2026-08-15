@@ -2,6 +2,7 @@ import { describe, expect, test } from "bun:test";
 import { resolve } from "node:path";
 
 import type { SearchProvider } from "./metadata-search.js";
+import type { MetadataSearchToolAction } from "./metadata-search-tool/runner.js";
 import type { UrlMetadataBackfillReport } from "./url-metadata-backfill.js";
 import { main, metadataSearchBinaryPath, parseUrlMetadataArguments, urlMetadataUsage } from "./url-metadata-cli.js";
 
@@ -27,7 +28,7 @@ describe("URL metadata CLI", () => {
     expect(metadataSearchBinaryPath("C:\\public\\kb", "win32")).toEndWith(
       "src/clip/metadata-search-tool/target/release/kb-url-metadata-search.exe",
     );
-    expect(urlMetadataUsage).toContain("bun run url-metadata:tool:build");
+    expect(urlMetadataUsage).toContain("kb url-metadata tool build");
     expect(urlMetadataUsage).not.toContain("cargo build");
     expect(urlMetadataUsage).not.toContain("packages/kb/src");
   });
@@ -44,7 +45,7 @@ describe("URL metadata CLI", () => {
       "--json",
     ], {});
     expect(parsed.ok).toBeTrue();
-    if (!parsed.ok || parsed.value.kind === "help") return;
+    if (!parsed.ok || parsed.value.kind !== "backfill") return;
     expect(parsed.value).toMatchObject({
       root: "vault",
       binaryPath: resolve("./search-helper"),
@@ -63,6 +64,25 @@ describe("URL metadata CLI", () => {
     expect(parseUrlMetadataArguments(["backfill", "--max-results", "21"], {}).ok).toBeFalse();
     expect(parseUrlMetadataArguments(["backfill", "--timeout", "499"], {}).ok).toBeFalse();
     expect(parseUrlMetadataArguments(["backfill", "--unknown"], {}).ok).toBeFalse();
+    expect(parseUrlMetadataArguments(["tool"], {}).ok).toBeFalse();
+    expect(parseUrlMetadataArguments(["tool", "build", "extra"], {}).ok).toBeFalse();
+  });
+
+  test("builds and checks the helper through the installed CLI boundary", async () => {
+    const actions: MetadataSearchToolAction[] = [];
+    const runTool = (action: MetadataSearchToolAction): number => {
+      actions.push(action);
+      return action === "build" ? 0 : 7;
+    };
+    expect(await main(["tool", "build"], {}, {
+      stdout: () => undefined,
+      stderr: () => undefined,
+    }, { runTool })).toBe(0);
+    expect(await main(["tool", "check"], {}, {
+      stdout: () => undefined,
+      stderr: () => undefined,
+    }, { runTool })).toBe(7);
+    expect(actions).toEqual(["build", "check"]);
   });
 
   test("delegates one configured provider and renders a deterministic human report", async () => {

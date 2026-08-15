@@ -3,7 +3,7 @@ import {
   openSemanticSearchSession,
   recommendedEmbeddingModel,
   scanVault
-} from "./index-gq6ywf7s.js";
+} from "./index-etpd4zz0.js";
 import {
   GitHistoryError,
   gitHistoryForNotes,
@@ -18,14 +18,14 @@ import {
   fuseRankedCandidates,
   searchExactVault,
   validateSearchQuery
-} from "./index-4cknf4jw.js";
-import {
-  queryVault
-} from "./index-48pz4jpc.js";
+} from "./index-tthfg4xy.js";
 import {
   NavigationBudgetError,
   navigateLinks
 } from "./index-d13v9ckt.js";
+import {
+  queryVault
+} from "./index-48pz4jpc.js";
 import {
   lookupNote
 } from "./index-4962kvds.js";
