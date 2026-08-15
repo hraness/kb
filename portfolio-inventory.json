@@ -11,7 +11,22 @@
       "version": "0.15.0"
     }
   ],
-  "dependencies": [],
+  "dependencies": [
+    {
+      "from": "@hraness/kb",
+      "scope": "runtime",
+      "specifier": "git+https://github.com/hraness/sweet-cookie.git#112dce1a3c3dd165310616ca63dd2f6cc652b212",
+      "to": "@steipete/sweet-cookie",
+      "sourceRepository": "hraness/sweet-cookie"
+    },
+    {
+      "from": "@hraness/kb",
+      "scope": "runtime",
+      "specifier": "git+https://github.com/hraness/qmd.git#aa993dceb3ef8cfb71d470554ca437570f5a2b3c",
+      "to": "@tobilu/qmd",
+      "sourceRepository": "hraness/qmd"
+    }
+  ],
   "deployments": [],
   "brands": [],
   "publications": [

@@ -11,7 +11,7 @@
 - `skills/percolate-kb/` – reusable agent workflow for promoting evidence-backed concepts and typed relationships.
 - `docs/` – design, capture, and agent-workflow documentation.
 - `.github/workflows/` – read-only branch validation and checks-gated immutable GitHub Release automation.
-- `portfolio-inventory.json` and `scripts/check-portfolio-inventory.ts` – canonical public package inventory and its standalone consistency gate.
+- `portfolio-inventory.json`, `scripts/check-portfolio-inventory.ts`, and `scripts/check-installed-command-docs.ts` – canonical public package inventory and standalone public-command consistency gates.
 - `README.md`, `CONTRIBUTING.md`, `SECURITY.md`, and `LICENSE` – public usage, project policy, threat model, and terms.
 - `package.json`, `tsconfig.json`, and `bun.lock` – standalone package and frozen verification configuration.
 
@@ -39,7 +39,7 @@
 - Keep the six `skills/` directories byte-identical between the repository and packed package. They remain inert after installation and must be usable from `node_modules/@hraness/kb/skills/` without a source checkout.
 - Keep Archive.today-family discovery read-only and exactly bound to the requested source URL at every redirect hop. Preserve useful structured provider results ahead of archive fallback, and keep search-derived metadata in a separately owned sidecar with categorical provenance and failure states. Resolve fixed search-engine hosts through the public-network boundary, disable redirects, serialize engines, and confine the helper's process memory.
 - Keep security-sensitive runtime forks pinned to immutable commits and exercise their behavior through the standalone install gate.
-- Keep `portfolio-inventory.json` byte-canonical and consistent with the public package identity, version, repository, and direct `@hraness/*` dependency edges.
+- Keep `portfolio-inventory.json` byte-canonical and consistent with the public package identity, version, repository, direct `@hraness/*` dependency edges, and Hraness-owned dependencies pinned by exact immutable GitHub specifiers.
 - Pair concrete behavior tests with property tests for parsing, resolution, ordering, path confinement, and round-trip laws.
 - Run `bun test src/benchmark.test.ts src/evaluation.test.ts src/evaluation-kb.test.ts src/search.test.ts src/sdk.test.ts` when changing rank fusion, retrieval defaults, frozen-corpus execution, or built-in evaluation adapters. The six-case synthetic rank-fusion fixture is a deterministic regression, not a retrieval-quality or performance benchmark. Keep real-corpus manifests versioned, judgments independent of rankings, raw lane evidence intact, and performance claims tied to named hardware and measured runs. Run `bun run check` before handing off a change; it must leave committed `dist/` and `bun.lock` unchanged.
 - Treat a `v*` tag as a release request, not a completed release. Before tagging, confirm repository-level immutable releases are enabled; use a strictly increasing stable package version, keep the tag equal to `v<package.json version>` on `main`, and let the read-only verification job complete before its write-scoped publisher creates the Release. Do not create the next tag until that workflow and Release are verified because GitHub concurrency is not a durable queue. After tagging, verify the matching non-draft immutable Release is Latest.

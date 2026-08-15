@@ -109,10 +109,10 @@ Source evidence is stored as sanitized inert HTML. Screenshots are viewport pixe
 
 ## Backfill saved-URL metadata
 
-From a package checkout, build the pinned Rust metadata-search helper and backfill every saved external URL into a separate tool-owned sidecar:
+With KB installed, build the pinned Rust metadata-search helper and backfill every saved external URL into a separate tool-owned sidecar:
 
 ```sh
-bun run url-metadata:tool:build
+kb url-metadata tool build
 kb url-metadata backfill --root "$KB_ROOT" --json
 ```
 

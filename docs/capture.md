@@ -155,7 +155,7 @@ The URL metadata command enriches every external URL record under `articles/`, i
 Build the isolated Rust helper, then run the resumable backfill:
 
 ```sh
-bun run url-metadata:tool:build
+kb url-metadata tool build
 kb url-metadata backfill --root .
 ```
 
