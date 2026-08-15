@@ -1,0 +1,24 @@
+{
+  "contract": "hraness.portfolio-inventory/v1",
+  "formatVersion": 1,
+  "repository": "hraness/kb",
+  "components": [
+    {
+      "kind": "package",
+      "name": "@hraness/kb",
+      "path": ".",
+      "visibility": "public",
+      "version": "0.15.0"
+    }
+  ],
+  "dependencies": [],
+  "deployments": [],
+  "brands": [],
+  "publications": [
+    {
+      "component": "@hraness/kb",
+      "packageName": "@hraness/kb",
+      "repository": "hraness/kb"
+    }
+  ]
+}
