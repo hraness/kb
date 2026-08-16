@@ -1,3 +1,4 @@
+<!-- kb:context scopes/repository--cdb4ee2aea69 -->
 # Contents
 
 - `src/` – deterministic Markdown graph and attachment analysis, typed metadata and exact repository-scope queries, local hybrid retrieval, bounded Git provenance, code-mode sessions and DAG workflows, frozen-corpus evaluation authoring and execution, safe single-note authoring, percolation, repository-memory routing and audits, the advisory source inbox, structural navigation, initialization, CLI, capture, URL intelligence, and diagnostic code with colocated tests.
@@ -9,6 +10,9 @@
 - `skills/query-kb/` – reusable agent workflow for loading repository-path context before bounded metadata, graph, keyword, or semantic retrieval.
 - `skills/plan-kb/` – reusable agent workflow for creating and growing durable implementation plans.
 - `skills/percolate-kb/` – reusable agent workflow for promoting evidence-backed concepts and typed relationships.
+- `.agents/skills/phase-orchestrator/` – portable phased execution with Codex collaboration agents and explicit join gates.
+- `kb/` – this source repository's authored rationale, maintained synthesis, and implementation plans; it is separate from the package's graph implementation and fixtures.
+- `WRITING.md` and `STYLE.md` – internal and public prose contracts.
 - `docs/` – design, capture, and agent-workflow documentation.
 - `.github/workflows/` – read-only branch validation and checks-gated immutable GitHub Release automation.
 - `portfolio-inventory.json`, `scripts/check-portfolio-inventory.ts`, and `scripts/check-installed-command-docs.ts` – canonical public package inventory and standalone public-command consistency gates.
@@ -18,6 +22,14 @@
 # Guidelines
 
 - Use Bun 1.3.14 for repository commands and keep the authored Markdown compatible with Obsidian and ordinary text tooling.
+- Follow `WRITING.md` for internal prose and `STYLE.md` for public prose.
+- Apply unreasonably robust programming when agent work is cheap. Model invalid states out of existence, parse every foreign value from `unknown`, and pair readable deterministic regressions with property tests for parsing, resolution, ordering, path confinement, and round trips.
+- Pin Hraness dependencies to reviewed immutable releases or full commits. Never connect repositories through sibling paths, Git submodules, or coordinated `main` assumptions; upgrade each consumer independently.
+- Extract a shared package only after two concrete consumers require the same stable interface. Keep every shared package product-neutral and free of product imports.
+- Keep this package headless. It must not depend on `@hraness/ui` or `@hraness/design-kit`; consumers own any accessible primitives, stable visual composition, product layout, and content layered over KB data.
+- Keep Direct deterministic compositions and adapters development-only and outside every production dependency graph, packed file set, and public export.
+- Freeze public CLI, metadata, graph, and workflow interfaces before parallel lanes begin. Give package manifests, lockfiles, committed `dist/`, skill mirrors, and other convergence surfaces one owner while lanes edit disjoint paths.
+- Keep mandatory rules in the closest `AGENTS.md`, current procedures in `docs/`, executable contracts in types and tests, and pull-based rationale, evidence, synthesis, and plans in this repository's `kb/` vault.
 - Treat this repository as the complete project. Files and Git prose may use only its public names, paths, commands, and examples; do not refer to or infer a non-public source repository.
 - Keep Markdown authoritative and graph maintenance deterministic and local-first. Derive focused metadata, backlink, traversal, and percolation views directly from the current files; never commit a second graph database, event log, or generated fact file.
 - Keep concepts as ordinary `type: concept` notes and source-owned typed relationships as compact frontmatter. Never write reciprocal, inferred, transitive, or similarity-derived edges into notes.
