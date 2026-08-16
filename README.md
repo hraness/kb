@@ -6,7 +6,7 @@ a knowledge base for coding agents.
 ## install
 
 ```sh
-bun add --global github:hraness/kb#v0.15.0
+bun add --global github:hraness/kb#v0.15.1
 ```
 
 ## about
@@ -169,7 +169,7 @@ Copy this prompt into Codex, Claude Code, or another coding agent:
 
 ```text
 Install hraness/kb and its bundled Agent Skills from
-https://github.com/hraness/kb at the immutable v0.15.0 tag. Follow the repository
+https://github.com/hraness/kb at the immutable v0.15.1 tag. Follow the repository
 README, install the `kb` CLI, copy or link the skills I need into this agent
 runner's configured skills directory, and verify the installation with
 `kb doctor` and `kb --help`. Do not initialize or modify a vault until I ask.
@@ -181,10 +181,10 @@ can inspect the tagged instructions before copying or linking the selected
 directory into its runner-specific discovery path. Installation leaves the
 skills inert and does not edit project or user configuration.
 
-Install the CLI from the immutable `v0.15.0` tag:
+Install the CLI from the immutable `v0.15.1` tag:
 
 ```sh
-bun add --global github:hraness/kb#v0.15.0
+bun add --global github:hraness/kb#v0.15.1
 kb --help
 ```
 
@@ -193,7 +193,7 @@ For programmatic use, declare the same pinned source in a project:
 ```json
 {
   "dependencies": {
-    "@hraness/kb": "github:hraness/kb#v0.15.0"
+    "@hraness/kb": "github:hraness/kb#v0.15.1"
   }
 }
 ```

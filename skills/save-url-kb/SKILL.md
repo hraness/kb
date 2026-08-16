@@ -105,6 +105,14 @@ accessible, non-DRM audio or video; the full payload is never downloaded by
 default. Missing optional metadata or transcript regions remain explicit in
 the capture status and warnings.
 
+## Review X posts and threads
+
+Use `--scope thread` for an X status URL even when the expected result is one long post. Preserve the complete root post or long-form article text, then distinguish same-author continuation posts from quoted posts and third-party replies. Do not flatten reply authorship or treat visible timeline neighbors as part of the requested thread.
+
+When the caller wants a reusable or republished record, review the author's public profile surface as a separate source boundary. Record the display name, `@handle`, canonical profile URL, public bio exactly as exposed, and public external profile link when present. Treat a blank or unavailable bio as missing; never infer one from post prose. If the downstream record needs durable profile provenance, capture the canonical profile URL separately instead of editing the status capture.
+
+Inspect localized X assets individually. Keep the root post's numbered photo assets distinct from the author avatar, profile banner, extractor-generated cover duplicates, quoted-post media, and third-party reply avatars or images. A media-tool warning does not mean normal inline photos are missing when those photos are already present in `assets/`; report the two artifact routes separately. Preserve `partial` whenever X does not expose a trustworthy item tree, even if the complete visible root post and its images were retained.
+
 Source evidence is stored as sanitized inert HTML. Screenshots are viewport pixels and can include everything visible in the tab, so inspect them before retaining or sharing a bundle.
 
 ## Backfill saved-URL metadata
