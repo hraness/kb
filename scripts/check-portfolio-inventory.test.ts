@@ -20,11 +20,24 @@ function manifest(dependencies: Record<string, string>): Record<string, unknown>
 }
 
 describe("portfolio inventory dependencies", () => {
-  test("derives Hraness ownership only from exact immutable GitHub specifiers", () => {
+  test("derives Hraness ownership only from exact immutable GitHub commits or stable tags", () => {
     expect(hranessSourceRepository(
       `git+https://github.com/hraness/qmd.git#${commit}`,
     )).toBe("hraness/qmd");
-    expect(hranessSourceRepository("github:hraness/qmd#main")).toBeUndefined();
+    expect(hranessSourceRepository(
+      "github:hraness/sweet-cookie#v0.4.2",
+    )).toBe("hraness/sweet-cookie");
+    for (const invalidSpecifier of [
+      "github:hraness/qmd#main",
+      "github:hraness/qmd#v2.5",
+      "github:hraness/qmd#v2.5.3-rc.1",
+      "github:hraness/qmd#v02.5.3",
+      "github:hraness/qmd#2.5.3",
+      "github:hraness/qmd.git#v2.5.3",
+      "github:other/qmd#v2.5.3",
+    ]) {
+      expect(hranessSourceRepository(invalidSpecifier)).toBeUndefined();
+    }
     expect(hranessSourceRepository(
       "git+https://github.com/other/qmd.git#0123456789abcdef0123456789abcdef01234567",
     )).toBeUndefined();
@@ -38,7 +51,7 @@ describe("portfolio inventory dependencies", () => {
       "ordinary-package": "1.0.0",
       "@tobilu/qmd": `git+https://github.com/hraness/qmd.git#${commit}`,
       "@hraness/ui": "^0.4.0",
-      "@steipete/sweet-cookie": `git+https://github.com/hraness/sweet-cookie.git#${commit}`,
+      "@steipete/sweet-cookie": "github:hraness/sweet-cookie#v0.4.2",
     }));
 
     expect(inventory.dependencies).toEqual([
@@ -51,7 +64,7 @@ describe("portfolio inventory dependencies", () => {
       {
         from: "@hraness/example",
         scope: "runtime",
-        specifier: `git+https://github.com/hraness/sweet-cookie.git#${commit}`,
+        specifier: "github:hraness/sweet-cookie#v0.4.2",
         to: "@steipete/sweet-cookie",
         sourceRepository: "hraness/sweet-cookie",
       },

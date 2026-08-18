@@ -9,7 +9,7 @@ import {
   renderAdapterCapabilities,
   renderDoctorReport,
   runDiagnosticCommand
-} from "../index-h2a142gc.js";
+} from "../index-xwsdr1v8.js";
 import"../index-bt118a7q.js";
 import"../index-hgve9rh2.js";
 import"../index-w2zc0vwa.js";

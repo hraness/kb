@@ -23,7 +23,7 @@ var homebrewSqliteLibraryPaths = [
 var dependencyVersions = {
   defuddle: "0.19.1",
   "agent-browser": "0.32.3",
-  "@steipete/sweet-cookie": "0.4.0",
+  "@steipete/sweet-cookie": "0.4.2",
   "@tobilu/qmd": expectedQmdVersion
 };
 var dependencyNames = [

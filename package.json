@@ -1,6 +1,6 @@
 {
   "name": "@hraness/kb",
-  "version": "0.15.1",
+  "version": "0.15.2",
   "description": "A knowledge base for coding agents, built from Markdown, backlinks, semantic search, and Git context.",
   "license": "MIT",
   "type": "module",
@@ -341,7 +341,7 @@
     "prepack": "bun run check"
   },
   "dependencies": {
-    "@steipete/sweet-cookie": "git+https://github.com/hraness/sweet-cookie.git#112dce1a3c3dd165310616ca63dd2f6cc652b212",
+    "@steipete/sweet-cookie": "github:hraness/sweet-cookie#v0.4.2",
     "@tobilu/qmd": "git+https://github.com/hraness/qmd.git#aa993dceb3ef8cfb71d470554ca437570f5a2b3c",
     "agent-browser": "0.32.3",
     "defuddle": "0.19.1",
