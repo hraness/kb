@@ -41,8 +41,11 @@ function asciiCompare(left: string, right: string): number {
 }
 
 export function hranessSourceRepository(specifier: string): string | undefined {
-  const match = /^git\+https:\/\/github\.com\/(hraness\/[A-Za-z0-9._-]+)\.git#[0-9a-f]{40}$/u.exec(specifier);
-  return match?.[1];
+  const commitMatch = /^git\+https:\/\/github\.com\/(hraness\/[A-Za-z0-9._-]+)\.git#[0-9a-f]{40}$/u.exec(specifier);
+  if (commitMatch?.[1] !== undefined) return commitMatch[1];
+  const stableTagMatch = /^github:(hraness\/[A-Za-z0-9._-]+)#v(?:0|[1-9][0-9]*)\.(?:0|[1-9][0-9]*)\.(?:0|[1-9][0-9]*)$/u.exec(specifier);
+  const sourceRepository = stableTagMatch?.[1];
+  return sourceRepository?.endsWith(".git") === true ? undefined : sourceRepository;
 }
 
 export function canonicalPortfolioInventory(value: unknown): Record<string, unknown> {

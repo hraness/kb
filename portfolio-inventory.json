@@ -8,14 +8,14 @@
       "name": "@hraness/kb",
       "path": ".",
       "visibility": "public",
-      "version": "0.15.1"
+      "version": "0.15.2"
     }
   ],
   "dependencies": [
     {
       "from": "@hraness/kb",
       "scope": "runtime",
-      "specifier": "git+https://github.com/hraness/sweet-cookie.git#112dce1a3c3dd165310616ca63dd2f6cc652b212",
+      "specifier": "github:hraness/sweet-cookie#v0.4.2",
       "to": "@steipete/sweet-cookie",
       "sourceRepository": "hraness/sweet-cookie"
     },
