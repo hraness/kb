@@ -1,8 +1,3 @@
----
-name: plan-kb
-description: Create or evolve a durable Markdown plan inside a hraness/kb vault. Use when a user asks for an implementation plan, proposal, RFC, migration plan, execution audit, phased checklist, or an update to an existing plan's decisions, progress, review findings, verification evidence, or final result.
----
-
 # Write a durable plan
 
 Keep the plan useful before, during, and after execution. It is the coordination
@@ -50,7 +45,7 @@ writable cache directory.
 
 ## Write from evidence
 
-Read [the plan structure reference](references/structure.md), then tailor it to
+Read [the plan structure reference](plan-structure.md), then tailor it to
 the work. Preserve these invariants:
 
 - State one concrete outcome and the current status.

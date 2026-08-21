@@ -4,13 +4,8 @@
 - `src/` – deterministic Markdown graph and attachment analysis, typed metadata and exact repository-scope queries, local hybrid retrieval, bounded Git provenance, code-mode sessions and DAG workflows, frozen-corpus evaluation authoring and execution, safe single-note authoring, percolation, repository-memory routing and audits, the advisory source inbox, structural navigation, initialization, CLI, capture, URL intelligence, and diagnostic code with colocated tests.
 - `src/workflows/` – reusable code-mode decision-context, change-explanation, and plan-radar workflows with bounded parallel execution.
 - `dist/` – committed Bun-targeted ESM entrypoints plus the compiled Defuddle worker.
-- `skills/save-url-kb/` – reusable agent workflow for bounded, auditable source capture.
-- `skills/save-pdf-kb/` – reusable agent workflow for converting local PDFs into auditable Markdown bundles.
-- `skills/refresh-kb/` – reusable agent workflow for refreshing the catalog, reviewing graph findings, and validating changed scope mappings.
-- `skills/query-kb/` – reusable agent workflow for loading repository-path context before bounded metadata, graph, keyword, or semantic retrieval.
-- `skills/plan-kb/` – reusable agent workflow for creating and growing durable implementation plans.
-- `skills/percolate-kb/` – reusable agent workflow for promoting evidence-backed concepts and typed relationships.
-- `.agents/skills/phase-orchestrator/` – portable phased execution with Codex collaboration agents and explicit join gates.
+- `skills/kb/` – the single public Agent Skill for querying, capturing into, planning in, percolating, refreshing, and validating a hraness/kb vault, with focused workflow references loaded on demand.
+- `.agents/skills/phase-orchestrator/` – internal phased execution with Codex collaboration agents and explicit join gates.
 - `kb/` – this source repository's authored rationale, maintained synthesis, and implementation plans; it is separate from the package's graph implementation and fixtures.
 - `WRITING.md` and `STYLE.md` – internal and public prose contracts.
 - `docs/` – design, capture, and agent-workflow documentation.
@@ -49,7 +44,7 @@
 - Keep parallel note edits sharded by source file. Serialize same-note local writers, make replacements atomic and revision-checked, let edit lanes check graph policy without refreshing a catalog, and reserve the single managed catalog write for integration. An authored catalog mode must never rewrite the front door.
 - Restrict generated edits to marked, tool-owned regions; preserve concurrent authored changes when refreshing; and fail closed on malformed markers, unsafe paths, or invalid local attachments.
 - Treat capture inputs and outputs as hostile. Keep network, browser, subprocess, byte, item, depth, path, credential, and terminal boundaries bounded and covered by named regressions.
-- Keep the six `skills/` directories byte-identical between the repository and packed package. They remain inert after installation and must be usable from `node_modules/@hraness/kb/skills/` without a source checkout.
+- Keep `skills/kb/` as the only public Agent Skill and byte-identical between the repository and packed package. It remains inert after installation and must be usable from `node_modules/@hraness/kb/skills/kb/` without a source checkout. Mark repository-only skills with supported internal metadata so public discovery omits them.
 - Keep Archive.today-family discovery read-only and exactly bound to the requested source URL at every redirect hop. Preserve useful structured provider results ahead of archive fallback, and keep search-derived metadata in a separately owned sidecar with categorical provenance and failure states. Resolve fixed search-engine hosts through the public-network boundary, disable redirects, serialize engines, and confine the helper's process memory.
 - Keep security-sensitive runtime forks pinned to immutable commits and exercise their behavior through the standalone install gate.
 - Keep `portfolio-inventory.json` byte-canonical and consistent with the public package identity, version, repository, direct `@hraness/*` dependency edges, and Hraness-owned dependencies pinned by exact immutable GitHub specifiers.

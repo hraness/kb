@@ -1,0 +1,4 @@
+interface:
+  display_name: "KB"
+  short_description: "Query, capture, plan, and maintain Markdown memory"
+  default_prompt: "Use $kb to work with this hraness/kb knowledge base and load only the workflow references needed for the request."

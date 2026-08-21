@@ -6,14 +6,7 @@ const packageName = "@hraness/kb";
 const importSpecifiers = ["@hraness/kb","@hraness/kb/agent-context","@hraness/kb/agent-guide-audit","@hraness/kb/attachments","@hraness/kb/authoring","@hraness/kb/benchmark","@hraness/kb/browser-profiles","@hraness/kb/capture","@hraness/kb/cli","@hraness/kb/clip/acquire","@hraness/kb/clip/args","@hraness/kb/clip/bounded-byte-buffer","@hraness/kb/clip/cli","@hraness/kb/clip/cookies","@hraness/kb/clip/doctor","@hraness/kb/clip/network","@hraness/kb/clip/network-proxy","@hraness/kb/clip/persist","@hraness/kb/clip/terminal","@hraness/kb/evaluation","@hraness/kb/evaluation-builder","@hraness/kb/evaluation-kb","@hraness/kb/git","@hraness/kb/graph","@hraness/kb/navigation","@hraness/kb/pdf","@hraness/kb/percolate","@hraness/kb/query","@hraness/kb/repository-memory","@hraness/kb/sdk","@hraness/kb/search","@hraness/kb/semantic","@hraness/kb/source-inbox","@hraness/kb/url-intelligence","@hraness/kb/workflow","@hraness/kb/workflows","@hraness/kb/workflows/decision-context","@hraness/kb/workflows/explain-change","@hraness/kb/workflows/plan-radar"];
 const binNames = ["kb", "kb-evaluation-builder"];
 const verificationPackages = ["@types/bun@^1.3.14","fast-check@^4.8.0","typescript@^6.0.3"];
-const skillNames = [
-  "percolate-kb",
-  "plan-kb",
-  "query-kb",
-  "refresh-kb",
-  "save-pdf-kb",
-  "save-url-kb",
-] as const;
+const skillNames = ["kb"] as const;
 const metadataSearchToolFiles = [
   "src/clip/metadata-search-tool/.gitignore",
   "src/clip/metadata-search-tool/Cargo.lock",
@@ -87,15 +80,27 @@ async function regularFiles(root: string, prefix = ""): Promise<string[]> {
 
 async function verifyInstalledSkills(consumer: string): Promise<void> {
   const sourceRoot = join(repository, "skills");
-  const installedRoot = join(
+  const installedPackageRoot = join(
     consumer,
     "node_modules",
     "@hraness",
     "kb",
+  );
+  const installedRoot = join(
+    installedPackageRoot,
     "skills",
   );
   const sourceFiles = await regularFiles(sourceRoot);
   const installedFiles = await regularFiles(installedRoot);
+  const sourceSkillEntrypoints = sourceFiles.filter(
+    (path) => path === "SKILL.md" || path.endsWith("/SKILL.md"),
+  );
+  const expectedSkillEntrypoints = skillNames.map((name) => `${name}/SKILL.md`);
+  if (JSON.stringify(sourceSkillEntrypoints) !== JSON.stringify(expectedSkillEntrypoints)) {
+    throw new Error(
+      `package source must contain exactly these Agent Skills: ${expectedSkillEntrypoints.join(", ")}`,
+    );
+  }
   if (JSON.stringify(installedFiles) !== JSON.stringify(sourceFiles)) {
     throw new Error("installed Agent Skill paths differ from the package source");
   }
@@ -118,6 +123,23 @@ async function verifyInstalledSkills(consumer: string): Promise<void> {
         throw new Error(`installed Agent Skill is incomplete: ${requiredPath}`);
       }
     }
+  }
+
+  const manifest = JSON.parse(
+    await readFile(join(installedPackageRoot, "package.json"), "utf8"),
+  ) as { readonly version?: unknown };
+  if (typeof manifest.version !== "string") {
+    throw new Error("installed package version is missing");
+  }
+  const [skill, metadata] = await Promise.all([
+    readFile(join(installedRoot, "kb", "SKILL.md"), "utf8"),
+    readFile(join(installedRoot, "kb", "agents", "openai.yaml"), "utf8"),
+  ]);
+  if (!skill.includes(`github:hraness/kb#v${manifest.version}`)) {
+    throw new Error("installed KB skill pin does not match the package version");
+  }
+  if (!metadata.includes("$kb")) {
+    throw new Error("installed KB skill metadata must invoke $kb explicitly");
   }
 }
 

@@ -1,8 +1,3 @@
----
-name: percolate-kb
-description: Review a hraness/kb Markdown vault for recurring ideas and missing structural connections, then promote evidence-backed concepts and typed relationships with the KB CLI. Use after materially adding or revising notes, when organizing an accumulated vault, or when an agent needs to turn repeated tags and prose references into an explicit queryable knowledge graph.
----
-
 # Percolate concepts and relationships
 
 Keep the graph authored, local, and reviewable. `kb percolate` proposes

@@ -45,7 +45,7 @@ if (import.meta.main) {
   }
   for (const requiredPath of [
     "docs/capture.md",
-    "skills/save-url-kb/SKILL.md",
+    "skills/kb/references/save-url.md",
   ]) {
     const file = files.find(({ path }) => path === requiredPath);
     if (!file?.contents.includes(canonicalMetadataToolBuildCommand)) {

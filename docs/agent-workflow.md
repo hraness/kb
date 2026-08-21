@@ -271,7 +271,7 @@ and `## Durable memory`: link each reusable conclusion to the maintained note,
 guide, documentation, or checked code contract that now owns it, or state that
 no durable promotion was needed.
 
-The packaged `plan-kb` Agent Skill provides the complete authoring workflow. It treats a plan as a growing implementation record, not a disposable checklist or a directory of satellite status documents.
+The packaged `kb` Agent Skill routes plan requests to the complete authoring workflow. It treats a plan as a growing implementation record, not a disposable checklist or a directory of satellite status documents.
 
 ## Link for meaning
 

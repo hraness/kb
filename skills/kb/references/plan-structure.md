@@ -1,4 +1,4 @@
-# Durable plan structure
+# Durable KB plan structure
 
 Use the smallest version that still makes execution and verification
 unambiguous. Omit empty optional sections; do not pad a small change into a
