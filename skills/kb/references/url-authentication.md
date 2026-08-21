@@ -1,4 +1,4 @@
-# Browser sessions and signed-in capture
+# Browser sessions and signed-in URL capture
 
 Use the browser state already available on the machine. Choose the route that matches where the page is currently readable.
 

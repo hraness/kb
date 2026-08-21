@@ -1,6 +1,8 @@
 ---
 name: phase-orchestrator
 description: Orchestrate phase-based implementation plans in Codex with dependency analysis, parallel sub-agent lanes, join gates, validation, review/fix loops, and final integration. Use when the user provides a plan, checklist, PRD, or phased task and explicitly asks Codex to execute it with phases, delegation, parallel agents, or orchestration in any repository.
+metadata:
+  internal: true
 ---
 
 # Phase Orchestrator

@@ -1,4 +1,4 @@
-# Review image-derived text
+# Review PDF image-derived text
 
 Read this guide when a PDF contains screenshots, scans, or mixed text and
 visual media.

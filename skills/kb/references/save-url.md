@@ -1,15 +1,3 @@
----
-name: save-url-kb
-description: >-
-  Capture public or signed-in web content into a local Markdown knowledge base
-  as an auditable source bundle with local assets. Use when the user asks to
-  clip, save, scrape, or archive an article, social post or thread, GitHub or
-  Discourse discussion, feed, inbox, private document, WhatsApp conversation,
-  YouTube page, or another page already visible in their browser. Supports URL
-  capture, the current signed-in tab, temporary browser-profile snapshots,
-  saved HTML, media, evidence, honest completeness, and knowledge-base linking.
----
-
 # Capture web content
 
 Use the installed `kb` CLI. Check the available local routes when the capture may need a browser or optional media tools:
@@ -61,7 +49,7 @@ kb clip https://example.com/article --html "$KB_SAVED_HTML" --output "$KB_ROOT/a
 kb clip https://example.com/article --html - --output "$KB_ROOT/articles" < page.html
 ```
 
-Read [references/authentication.md](references/authentication.md) for current-tab, profile, cookie, and saved-page selection details.
+Read [the browser authentication guide](url-authentication.md) for current-tab, profile, cookie, and saved-page selection details.
 
 ## Keep the boundary ingestion-only
 
@@ -128,7 +116,7 @@ The backfill runs serially with bounded output and time, resumes compatible side
 
 ## Report completeness literally
 
-Read [references/platforms.md](references/platforms.md) when selecting or explaining a route. Use `kb adapters --json` when software needs the installed capability matrix.
+Read [the platform routing guide](url-platforms.md) when selecting or explaining a route. Use `kb adapters --json` when software needs the installed capability matrix.
 
 Interpret status as follows:
 

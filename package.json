@@ -319,7 +319,7 @@
     "src/workflows/explain-change.ts",
     "src/workflows/index.ts",
     "src/workflows/plan-radar.ts",
-    "skills",
+    "skills/kb",
     "README.md",
     "LICENSE"
   ],

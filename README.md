@@ -1,6 +1,8 @@
 <!-- hraness:kb-landing:start -->
 # kb
 
+[![skills.sh](https://skills.sh/b/hraness/kb)](https://skills.sh/hraness/kb)
+
 a knowledge base for coding agents.
 
 ## install
@@ -115,7 +117,7 @@ kb pdf "/absolute/path/to/document.pdf" --output articles
 
 The resulting bundle is evidence, not final interpretation. A maintained note can cite several captures, record disagreement, and change when later evidence warrants it. The sources stay available for audit. This prevents an agent from silently replacing what a page said with what it now believes the page meant.
 
-The `plan-kb` skill creates a normal Markdown file under `kb/plans/` with an outcome, status, area, repository scopes, assumptions, dependencies, decisions, and verification method. The file grows during execution as agents record deviations, review findings, and reproducible evidence. Closeout adds a compact result and durable-memory disposition: each reusable conclusion links to the maintained note, guide, code contract, or runbook that now owns it, or says that no promotion was needed. Completed plans remain in Git as the history of the work. When a finding becomes a rule whose omission would make a future edit wrong, move that rule into the applicable `AGENTS.md` and retain the plan as its rationale.
+The `kb` Agent Skill routes vault planning requests to a focused durable-plan workflow. It creates a normal Markdown file under `kb/plans/` with an outcome, status, area, repository scopes, assumptions, dependencies, decisions, and verification method. The file grows during execution as agents record deviations, review findings, and reproducible evidence. Closeout adds a compact result and durable-memory disposition: each reusable conclusion links to the maintained note, guide, code contract, or runbook that now owns it, or says that no promotion was needed. Completed plans remain in Git as the history of the work. When a finding becomes a rule whose omission would make a future edit wrong, move that rule into the applicable `AGENTS.md` and retain the plan as its rationale.
 
 ### Search and connect with bounded signals
 
@@ -168,18 +170,30 @@ Treat the knowledge base as repository-adjacent durable memory. Authored Markdow
 Copy this prompt into Codex, Claude Code, or another coding agent:
 
 ```text
-Install hraness/kb and its bundled Agent Skills from
-https://github.com/hraness/kb at the immutable v0.15.2 tag. Follow the repository
-README, install the `kb` CLI, copy or link the skills I need into this agent
-runner's configured skills directory, and verify the installation with
-`kb doctor` and `kb --help`. Do not initialize or modify a vault until I ask.
+Install the `kb` Agent Skill from hraness/kb with the standard skills CLI. Use
+the skill's runtime instructions to install the `kb` CLI from the immutable
+v0.15.2 release only when the command is missing. Verify it with `kb doctor`
+and `kb --help`, but do not initialize or modify a vault until I ask.
 ```
 
-The repository and packed package carry the same skill directories. A project
-dependency installs them under `node_modules/@hraness/kb/skills/`, so an agent
-can inspect the tagged instructions before copying or linking the selected
-directory into its runner-specific discovery path. Installation leaves the
-skills inert and does not edit project or user configuration.
+Install the single public skill with either runner:
+
+```sh
+npx skills add hraness/kb
+bunx skills add hraness/kb
+```
+
+Both commands discover the same `kb` skill and install it into the selected
+agent runner. Skill installation is inert: it does not initialize a vault,
+refresh a catalog, or edit Markdown. When invoked, the skill uses an existing
+`kb` command or, when the command is missing, checks for Bun and installs the
+CLI from the immutable `v0.15.2` tag.
+
+The public skills CLI reads `skills/kb/` from the repository. Packages built
+from this source also include the same tree under
+`node_modules/@hraness/kb/skills/kb/`. The current `v0.15.2` runtime tag
+predates this consolidated skill, so use the skills CLI for runner discovery
+until a later tagged package includes it.
 
 Install the CLI from the immutable `v0.15.2` tag:
 
@@ -401,16 +415,23 @@ connection-pool boundary at `@hraness/kb/clip/network`, and the browser proxy at
 
 ## Agent skills
 
-The repository and packed package ship six reusable Agent Skills under
-`skills/`: `save-url-kb` for auditable web ingestion, `save-pdf-kb` for
-local and public remote PDF conversion, `refresh-kb` for graph and
-agent-context validation, `query-kb` for loading repository-path context
-before bounded exact, metadata, hybrid, graph, or Git retrieval,
-`percolate-kb` for reviewing and promoting reusable concepts and typed
-relationships, and `plan-kb` for creating and growing durable implementation
-plans. From a project dependency, copy or link the desired directory from
-`node_modules/@hraness/kb/skills/<skill-name>/` into the location used by your
-agent runner. They invoke the installed `kb` command and do not depend on a
-repository checkout path.
+The repository ships one reusable `kb` Agent Skill under `skills/kb/`. Its
+intent router loads focused references only when a task needs them: querying
+repository context and agent memory, capturing URLs or PDFs, writing durable
+plans, promoting concepts and typed relationships, or refreshing and checking
+a vault. The package smoke test keeps future tagged packages byte-identical to
+that source tree.
+
+```sh
+npx skills add hraness/kb
+# or
+bunx skills add hraness/kb
+```
+
+The skill invokes the installed `kb` command without depending on a repository
+checkout. Its runtime setup installs the pinned CLI only when the command is
+missing, and it never initializes or mutates a vault as an installation side
+effect. The repository's phase-orchestration skill remains available to local
+repository agents but is marked internal, so public skill discovery omits it.
 
 See [Design](docs/design.md), [Agent workflow](docs/agent-workflow.md), [PDF capture](docs/pdf.md), and [Contributing](CONTRIBUTING.md) for the durable contracts and development gate. hraness/kb is available under the [MIT License](LICENSE).

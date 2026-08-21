@@ -1,14 +1,3 @@
----
-name: save-pdf-kb
-description: >-
-  Convert a local or public remote PDF into an auditable Markdown knowledge-base bundle with the
-  original document, inferred headings, page provenance, OCR text, image
-  metadata, and local visual assets. Use when the user asks to save, import,
-  archive, extract, or turn a PDF into KB Markdown, especially scanned
-  documents and PDFs containing screenshots, Slack messages, charts, photos,
-  or a mix of native text and images.
----
-
 # Save a PDF to the knowledge base
 
 Use the installed `kb` CLI. Resolve `<vault>` to the directory containing its
@@ -59,7 +48,7 @@ image as an asset even when its text is converted to Markdown.
 For recognizable conversations, review the source image and turn OCR into
 readable message blocks with available platform, author, channel, and timestamp
 metadata. Preserve uncertain words explicitly instead of silently repairing
-them. Read [references/review.md](references/review.md) before refining
+them. Read [the image-derived text review guide](pdf-review.md) before refining
 screenshot-heavy or mixed-media PDFs.
 
 The first capture supplies stable image IDs and hashes in `capture.json`.
