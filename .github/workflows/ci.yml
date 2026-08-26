@@ -35,7 +35,8 @@ jobs:
             exit 1
           fi
       - run: bun pm pack --dry-run --ignore-scripts
-      - run: node --input-type=module -e 'const manifest = (await import("./package.json", { with: { type: "json" } })).default; await Promise.all(Object.values(manifest.exports).map(({ import: path }) => import(path)))'
+      - run: >-
+          node --input-type=module -e 'const manifest = (await import("./package.json", { with: { type: "json" } })).default; await Promise.all(Object.values(manifest.exports).map(({ import: path }) => import(path)))'
 
   required:
     name: Required

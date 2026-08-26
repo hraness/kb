@@ -371,6 +371,7 @@
     "kb:check": "bunx --bun github:hraness/kb#v0.15.1 check --root kb && bunx --bun github:hraness/kb#v0.15.1 agents check --root kb --repo .",
     "kb:catalog": "bunx --bun github:hraness/kb#v0.15.1 catalog --root kb",
     "build": "bun -e 'await (await import(\"node:fs/promises\")).rm(\"./dist\", { recursive: true, force: true })' && bun build ./src/index.ts ./src/agent-context.ts ./src/agent-guide-audit.ts ./src/attachments.ts ./src/authoring.ts ./src/benchmark.ts ./src/clip/browser-profiles.ts ./src/capture.ts ./src/cli.ts ./src/clip/acquire.ts ./src/clip/args.ts ./src/clip/bounded-byte-buffer.ts ./src/clip/bundle-reader.ts ./src/clip/cli.ts ./src/clip/cookies.ts ./src/clip/doctor.ts ./src/clip/jobs.ts ./src/clip/network.ts ./src/clip/network-proxy.ts ./src/clip/persist.ts ./src/clip/refresh.ts ./src/clip/terminal.ts ./src/evaluation.ts ./src/evaluation-builder.ts ./src/evaluation-kb.ts ./src/git.ts ./src/graph.ts ./src/navigation.ts ./src/pdf.ts ./src/percolate.ts ./src/portfolio.ts ./src/query.ts ./src/repository-memory.ts ./src/sdk.ts ./src/search.ts ./src/search-rules.ts ./src/semantic.ts ./src/source-inbox.ts ./src/untrusted-content.ts ./src/url-intelligence.ts ./src/workflow.ts ./src/workflows/index.ts ./src/workflows/decision-context.ts ./src/workflows/explain-change.ts ./src/workflows/plan-radar.ts ./src/clip/defuddle-worker.ts --outdir ./dist --root ./src --target bun --format esm --splitting --packages external",
+    "check:workflows": "bun ./scripts/check-workflow-yaml.ts",
     "check:installed-command-docs": "bun ./scripts/check-installed-command-docs.ts",
     "check:portfolio-inventory": "bun ./scripts/check-portfolio-inventory.ts",
     "typecheck": "tsc --noEmit",
@@ -379,7 +380,7 @@
     "url-metadata:tool:build": "bun ./dist/cli.js url-metadata tool build",
     "url-metadata:tool:check": "bun ./dist/cli.js url-metadata tool check",
     "test:package": "bun run ./scripts/package-smoke.ts",
-    "check": "bun run check:portfolio-inventory && bun run check:installed-command-docs && bun run typecheck && bun run build && bun run test:package && bun run test && bun run url-metadata:tool:check",
+    "check": "bun run check:workflows && bun run check:portfolio-inventory && bun run check:installed-command-docs && bun run typecheck && bun run build && bun run test:package && bun run test && bun run url-metadata:tool:check",
     "prepack": "bun run check"
   },
   "dependencies": {
