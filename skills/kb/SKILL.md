@@ -31,7 +31,7 @@ missing:
 ```sh
 command -v kb >/dev/null 2>&1 || {
   command -v bun >/dev/null 2>&1 || exit 1
-  bun add --global github:hraness/kb#v0.15.2
+  bun add --global github:hraness/kb#v0.16.0
 }
 kb --help
 ```

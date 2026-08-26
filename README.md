@@ -8,7 +8,7 @@ a knowledge base for coding agents.
 ## install
 
 ```sh
-bun add --global github:hraness/kb#v0.15.2
+bun add --global github:hraness/kb#v0.16.0
 ```
 
 ## about
@@ -172,7 +172,7 @@ Copy this prompt into Codex, Claude Code, or another coding agent:
 ```text
 Install the `kb` Agent Skill from hraness/kb with the standard skills CLI. Use
 the skill's runtime instructions to install the `kb` CLI from the immutable
-v0.15.2 release only when the command is missing. Verify it with `kb doctor`
+v0.16.0 release only when the command is missing. Verify it with `kb doctor`
 and `kb --help`, but do not initialize or modify a vault until I ask.
 ```
 
@@ -187,18 +187,17 @@ Both commands discover the same `kb` skill and install it into the selected
 agent runner. Skill installation is inert: it does not initialize a vault,
 refresh a catalog, or edit Markdown. When invoked, the skill uses an existing
 `kb` command or, when the command is missing, checks for Bun and installs the
-CLI from the immutable `v0.15.2` tag.
+CLI from the immutable `v0.16.0` tag.
 
-The public skills CLI reads `skills/kb/` from the repository. Packages built
-from this source also include the same tree under
-`node_modules/@hraness/kb/skills/kb/`. The current `v0.15.2` runtime tag
-predates this consolidated skill, so use the skills CLI for runner discovery
-until a later tagged package includes it.
+The public skills CLI reads `skills/kb/` from the repository. The immutable
+`v0.16.0` package includes the same tree under
+`node_modules/@hraness/kb/skills/kb/`, and the package check verifies that the
+installed skill is byte-identical to the repository source.
 
-Install the CLI from the immutable `v0.15.2` tag:
+Install the CLI from the immutable `v0.16.0` tag:
 
 ```sh
-bun add --global github:hraness/kb#v0.15.2
+bun add --global github:hraness/kb#v0.16.0
 kb --help
 ```
 
@@ -207,7 +206,7 @@ For programmatic use, declare the same pinned source in a project:
 ```json
 {
   "dependencies": {
-    "@hraness/kb": "github:hraness/kb#v0.15.2"
+    "@hraness/kb": "github:hraness/kb#v0.16.0"
   }
 }
 ```
