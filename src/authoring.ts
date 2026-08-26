@@ -36,6 +36,10 @@ import {
   type NoteLockOptions,
 } from "./note-lock.js";
 import { isCanonicalNoteId } from "./graph.js";
+import {
+  parseDocumentId,
+  parseQualifiedDocumentUri,
+} from "./portfolio-identity.js";
 
 const MAX_NOTE_BYTES = 16 * 1024 * 1024;
 const NOTE_REVISION_PATTERN = /^sha256:[0-9a-f]{64}$/u;
@@ -56,11 +60,15 @@ export interface NoteAuthoringResult {
   readonly path: string;
   readonly revision: NoteRevision;
   readonly relations: readonly NoteRelation[];
+  /** Stable authored identity when the note has one valid document_id. */
+  readonly documentId?: string;
 }
 
 export interface CreateNoteInput {
   /** Exact extensionless vault-root note ID, for example `notes/local-first`. */
   readonly id: string;
+  /** Stable ID independent of note path. Generated for new notes when omitted. */
+  readonly documentId?: string;
   readonly title: string;
   readonly type: string;
   readonly tags?: readonly string[];
@@ -70,6 +78,7 @@ export interface CreateNoteInput {
 
 export interface CreateConceptNoteInput {
   readonly id: string;
+  readonly documentId?: string;
   readonly title: string;
   readonly tags?: readonly string[];
   readonly body?: string;
@@ -88,6 +97,9 @@ export interface AuthoringInstallContext {
 }
 
 export interface AuthoringDependencies {
+  /** Stable authored document identity. Distinct from transaction filenames. */
+  readonly documentId: () => string;
+  /** Private transaction/recovery filename token. */
   readonly token: () => string;
   /**
    * Test and embedding seam immediately before ownership and source revision
@@ -230,6 +242,12 @@ export function canonicalNoteId(value: string): string {
     throw new InvalidCanonicalNoteIdError(value);
   }
   return value;
+}
+
+/** Validate a local exact note ID or a stable canonical cross-vault URI. */
+export function canonicalRelationTarget(value: string): string {
+  if (value.startsWith("kb://")) return parseQualifiedDocumentUri(value).uri;
+  return canonicalNoteId(value);
 }
 
 /** Normalize a caller predicate to the strict lower-kebab authored form. */
@@ -574,7 +592,7 @@ function relationsFromParts(
     const predicate = exactPredicate(predicateValue);
     const scalarTarget = scalarString(pair.value);
     if (scalarTarget !== null) {
-      const target = canonicalNoteId(scalarTarget);
+      const target = canonicalRelationTarget(scalarTarget);
       const key = `${predicate}\0${target}`;
       if (!seen.has(key)) {
         seen.add(key);
@@ -594,7 +612,7 @@ function relationsFromParts(
           `invalid relations in ${relativePath}: ${predicate} targets must be strings`,
         );
       }
-      const target = canonicalNoteId(targetValue);
+      const target = canonicalRelationTarget(targetValue);
       const key = `${predicate}\0${target}`;
       if (seen.has(key)) continue;
       seen.add(key);
@@ -620,7 +638,7 @@ function relationValue(
   if (value === undefined) return null;
   const scalarTarget = scalarString(value);
   if (scalarTarget !== null) {
-    return { kind: "scalar", target: canonicalNoteId(scalarTarget) };
+    return { kind: "scalar", target: canonicalRelationTarget(scalarTarget) };
   }
   if (!isSeq(value)) {
     throw new Error(
@@ -705,6 +723,13 @@ function removeRelationFromParts(
   if (value === undefined) return false;
 
   const repairableTarget = (raw: string): string | null => {
+    if (raw.startsWith("kb://")) {
+      try {
+        return canonicalRelationTarget(raw);
+      } catch {
+        return null;
+      }
+    }
     let candidate = raw;
     if (candidate.toLocaleLowerCase("en-US").endsWith(".md")) {
       candidate = candidate.slice(0, -3);
@@ -741,6 +766,7 @@ function dependenciesFor(
   overrides: Partial<AuthoringDependencies> | undefined,
 ): AuthoringDependencies {
   return {
+    documentId: overrides?.documentId ?? randomUUID,
     token: overrides?.token ?? randomUUID,
     ...(overrides?.beforeInstall === undefined
       ? {}
@@ -1354,12 +1380,14 @@ function noteResult(
   snapshot: Pick<NoteSnapshot, "relativePath" | "revision">,
   relations: readonly NoteRelation[],
   changed: boolean,
+  documentId?: string,
 ): NoteAuthoringResult {
   return {
     changed,
     path: snapshot.relativePath,
     revision: snapshot.revision,
     relations,
+    ...(documentId === undefined ? {} : { documentId }),
   };
 }
 
@@ -1407,11 +1435,11 @@ function normalizedRequestedBody(body: string): string {
   return body.endsWith("\n") ? body : `${body}\n`;
 }
 
-function renderCreatedNote(input: CreateNoteInput): string {
+function renderCreatedNote(input: CreateNoteInput, documentId: string): string {
   const title = validateTitle(input.title);
   const type = validateType(input.type);
   const tags = validateTags(input.tags);
-  const metadata: Record<string, unknown> = { type, title };
+  const metadata: Record<string, unknown> = { document_id: documentId, type, title };
   if (tags.length > 0) metadata["tags"] = tags;
   const document = new Document(metadata, { schema: "core" });
   const body = normalizedRequestedBody(input.body ?? `# ${title}\n`);
@@ -1441,10 +1469,38 @@ function topLevelStrings(
   });
 }
 
+type ExistingDocumentId =
+  | { readonly kind: "invalid" }
+  | { readonly kind: "missing" }
+  | { readonly kind: "valid"; readonly documentId: string };
+
+function existingDocumentId(parts: FrontmatterParts): ExistingDocumentId {
+  if (!isMap(parts.document.contents)) return { kind: "missing" };
+  const values = parts.document.contents.items.flatMap((pair) => {
+    const key = scalarString(pair.key);
+    if (key?.normalize("NFC").toLocaleLowerCase("en-US") !== "document_id") return [];
+    const value = scalarString(pair.value);
+    return value === null ? [null] : [value];
+  });
+  if (values.length === 0) return { kind: "missing" };
+  if (values.length !== 1 || values[0] === null) return { kind: "invalid" };
+  try {
+    return { kind: "valid", documentId: parseDocumentId(values[0]) };
+  } catch {
+    return { kind: "invalid" };
+  }
+}
+
+type CompatibleCreate = {
+  readonly documentId?: string;
+  readonly relations: readonly NoteRelation[];
+};
+
 function assertCompatibleCreate(
   snapshot: NoteSnapshot,
   input: CreateNoteInput,
-): readonly NoteRelation[] {
+  requestedDocumentId: string | undefined,
+): CompatibleCreate {
   const parts = frontmatter(snapshot.content, snapshot.relativePath);
   const requestedType = validateType(input.type);
   const requestedTitle = validateTitle(input.title);
@@ -1468,7 +1524,20 @@ function assertCompatibleCreate(
   ) {
     throw new NoteAlreadyExistsError(snapshot.relativePath, "body differs");
   }
-  return relationsFromParts(parts, snapshot.relativePath);
+  const existingId = existingDocumentId(parts);
+  if (
+    requestedDocumentId !== undefined
+    && (existingId.kind !== "valid" || existingId.documentId !== requestedDocumentId)
+  ) {
+    throw new NoteAlreadyExistsError(
+      snapshot.relativePath,
+      existingId.kind === "missing" ? "document_id is missing" : "document_id differs",
+    );
+  }
+  return {
+    relations: relationsFromParts(parts, snapshot.relativePath),
+    ...(existingId.kind === "valid" ? { documentId: existingId.documentId } : {}),
+  };
 }
 
 /**
@@ -1516,6 +1585,9 @@ export async function createNote(
 ): Promise<NoteAuthoringResult> {
   const vault = await resolveVault(root);
   const id = canonicalNoteId(input.id);
+  const requestedDocumentId = input.documentId === undefined
+    ? undefined
+    : parseDocumentId(input.documentId);
   const expected = checkedExpectedRevision(options);
   const dependencies = dependenciesFor(options.dependencies);
   const lock = await acquireNoteLock(vault.root, id, options.lock);
@@ -1524,13 +1596,14 @@ export async function createNote(
     const existing = await readOptionalSnapshot(vault, id);
     if (existing !== null) {
       assertExpected(existing, expected);
-      const relations = assertCompatibleCreate(existing, input);
-      return noteResult(existing, relations, false);
+      const compatible = assertCompatibleCreate(existing, input, requestedDocumentId);
+      return noteResult(existing, compatible.relations, false, compatible.documentId);
     }
     if (expected !== undefined) {
       throw new NoteRevisionConflictError(`${id}.md`, expected, null);
     }
-    const content = renderCreatedNote(input);
+    const documentId = requestedDocumentId ?? parseDocumentId(dependencies.documentId());
+    const content = renderCreatedNote(input, documentId);
     const revision = await atomicInstall(
       vault,
       id,
@@ -1544,6 +1617,7 @@ export async function createNote(
       path: `${id}.md`,
       revision,
       relations: [],
+      documentId,
     };
   } finally {
     await lock.release();
@@ -1569,7 +1643,7 @@ async function editNoteRelation(
 ): Promise<NoteAuthoringResult> {
   const vault = await resolveVault(root);
   const sourceId = canonicalNoteId(sourceIdInput);
-  const targetId = canonicalNoteId(targetIdInput);
+  const targetId = canonicalRelationTarget(targetIdInput);
   const predicate = normalizeRelationPredicate(predicateInput);
   const expected = checkedExpectedRevision(options);
   const dependencies = dependenciesFor(options.dependencies);
@@ -1578,7 +1652,7 @@ async function editNoteRelation(
     await recoverInterruptedAuthoring(vault, sourceId, lock);
     const source = await readSnapshot(vault, sourceId);
     assertExpected(source, expected);
-    if (operation === "add" && targetId !== sourceId) {
+    if (operation === "add" && !targetId.startsWith("kb://") && targetId !== sourceId) {
       // Adds require a live exact target. Removes intentionally do not so a
       // dangling authored assertion can still be repaired after a rename.
       await readSnapshot(vault, targetId);

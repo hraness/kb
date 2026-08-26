@@ -186,6 +186,14 @@ serialized by default. Import `decisionContextWorkflow`,
 `explainChangeWorkflow`, or `planRadarWorkflow` from `@hraness/kb/workflows`
 when one of those common DAGs matches the task.
 
+`decisionContextWorkflow` returns a bounded untrusted context envelope.
+`explainChangeWorkflow` and `planRadarWorkflow` return raw KB and Git result
+objects for application-side inspection; their source-derived strings remain
+untrusted data. Never execute those fields or insert them into an instruction
+channel. Select and project the needed fields through
+`packUntrustedSearchContext` or `@hraness/kb/untrusted-content` before an agent
+handoff.
+
 Use `history: "required"` when provenance is mandatory, or
 `history: { policy: "required", noteLimit: 5 }` when the same requirement needs
 custom bounds. Custom workflows use a staged builder so every node sees a typed

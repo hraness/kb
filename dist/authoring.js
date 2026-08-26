@@ -6,14 +6,16 @@ import {
   NoteRevisionConflictError,
   addNoteRelation,
   canonicalNoteId,
+  canonicalRelationTarget,
   createConceptNote,
   createNote,
   listNoteRelations,
   normalizeRelationPredicate,
   noteRevision,
   removeNoteRelation
-} from "./index-2fr3hf9q.js";
-import"./index-4962kvds.js";
+} from "./index-01jj6rbv.js";
+import"./index-3rm7cz6h.js";
+import"./index-cxfrakt7.js";
 export {
   removeNoteRelation,
   noteRevision,
@@ -21,6 +23,7 @@ export {
   listNoteRelations,
   createNote,
   createConceptNote,
+  canonicalRelationTarget,
   canonicalNoteId,
   addNoteRelation,
   NoteRevisionConflictError,

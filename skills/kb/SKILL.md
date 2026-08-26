@@ -31,7 +31,7 @@ missing:
 ```sh
 command -v kb >/dev/null 2>&1 || {
   command -v bun >/dev/null 2>&1 || exit 1
-  bun add --global github:hraness/kb#v0.16.0
+  bun add --global github:hraness/kb#v0.17.0
 }
 kb --help
 ```
@@ -49,7 +49,7 @@ Initialize or mutate a vault only when the user's request requires that change.
 
 | User intent | Read |
 | --- | --- |
-| Find notes, search agent memory, load repository-path context, inspect plans or decisions, follow backlinks or relationships, or retrieve Git provenance | [Query the knowledge base](references/query.md) |
+| Find notes, search one vault or an authorized portfolio, load repository-path context, inspect plans or decisions, follow backlinks or relationships, audit vault organization, or retrieve Git provenance | [Query the knowledge base](references/query.md) |
 | Save, clip, scrape, or archive a URL, article, social post or thread, GitHub or Discourse discussion, signed-in page, feed, inbox, private document, WhatsApp conversation, or YouTube page | [Capture web content](references/save-url.md); add [browser authentication](references/url-authentication.md) for signed-in sources and [platform routing](references/url-platforms.md) when route choice or completeness matters |
 | Import, extract, archive, OCR, or convert a local or public PDF into Markdown | [Save a PDF](references/save-pdf.md); add [PDF image review](references/pdf-review.md) for scans, screenshots, conversations, charts, or mixed media |
 | Create or update an implementation plan, proposal, RFC, migration plan, execution audit, or phased checklist in the vault | [Write a durable plan](references/plan.md) and [use its structure](references/plan-structure.md) |

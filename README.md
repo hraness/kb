@@ -8,7 +8,7 @@ a knowledge base for coding agents.
 ## install
 
 ```sh
-bun add --global github:hraness/kb#v0.16.0
+bun add --global github:hraness/kb#v0.17.0
 ```
 
 ## about
@@ -18,7 +18,9 @@ Keep sources and repository context beside your code in Markdown and Git. Your
 application stays independent.
 
 Search identifiers and metadata. Find meaning locally with QMD. Follow
-backlinks and typed relations. Inspect Git provenance.
+backlinks and typed relations. Inspect Git provenance. Search an explicitly
+authorized portfolio of vaults without merging their Markdown or comparing
+their local QMD scores.
 
 Capture signed-in pages and PDFs. Use the TypeScript SDK and bounded workflows.
 
@@ -35,6 +37,8 @@ kb context packages/parser/src/index.ts --root kb --repo .
 kb list --where type=plan --scope packages/parser --root .
 kb links notes/topic --root . --direction both
 kb search "parser-v2" --root . --mode exact
+kb portfolio search "parser-v2" --registry kb-portfolio.json \
+  --workspace .. --shared
 kb history search packages/parser --root . --repo .. --json
 ```
 
@@ -161,6 +165,31 @@ Start with a short inherited `AGENTS.md` path for rules whose omission would mak
 
 Treat the knowledge base as repository-adjacent durable memory. Authored Markdown and Git are the record; catalogs, indexes, embeddings, and graph views are replaceable ways to find and inspect it. Checks can validate structure, captures can preserve a selected surface, and similarity can suggest candidates. None of those mechanisms proves that a source is trustworthy or an explanation is still true. People and agents must revise the knowledge as the repository changes.
 
+## Upgrade to v0.17.0
+
+Version 0.17 adds selected portfolio federation, stable note identities,
+qualified external relations, search rules, capture inspection, and untrusted
+context packing. Consumers with typed fixtures or custom capture writers should
+make these migrations before upgrading:
+
+- Capture writers now emit manifest schema v4 and must provide the stored
+  document `path`, exact UTF-8 `bytes`, and lowercase SHA-256 digest. The reader
+  can inspect schema v1-v3, but verification reports their document integrity as
+  unavailable instead of success.
+- `DecisionContextOutput.search` has been removed. Consume the bounded untrusted
+  `context` projection and its `truncated` flag instead of transporting the raw
+  search result into an agent prompt.
+- `VaultAnalysis` fixtures must include `externalAuthoredRelations`, even when
+  the value is an empty array. This keeps qualified authored edges distinct
+  from locally resolved graph edges.
+- `createNote` and `kb note create` now assign `document_id` to new ordinary
+  notes. Preserve that ID across renames and update snapshots that intentionally
+  assert the generated frontmatter.
+
+Existing Markdown is not rewritten automatically. Add IDs to maintained legacy
+notes only through reviewed edits, and keep every QMD, graph, portfolio, and
+audit projection disposable.
+
 ## Install
 
 [Bun](https://bun.sh/docs/installation) is the required runtime.
@@ -172,7 +201,7 @@ Copy this prompt into Codex, Claude Code, or another coding agent:
 ```text
 Install the `kb` Agent Skill from hraness/kb with the standard skills CLI. Use
 the skill's runtime instructions to install the `kb` CLI from the immutable
-v0.16.0 release only when the command is missing. Verify it with `kb doctor`
+v0.17.0 release only when the command is missing. Verify it with `kb doctor`
 and `kb --help`, but do not initialize or modify a vault until I ask.
 ```
 
@@ -187,17 +216,17 @@ Both commands discover the same `kb` skill and install it into the selected
 agent runner. Skill installation is inert: it does not initialize a vault,
 refresh a catalog, or edit Markdown. When invoked, the skill uses an existing
 `kb` command or, when the command is missing, checks for Bun and installs the
-CLI from the immutable `v0.16.0` tag.
+CLI from the immutable `v0.17.0` tag.
 
 The public skills CLI reads `skills/kb/` from the repository. The immutable
-`v0.16.0` package includes the same tree under
+`v0.17.0` package includes the same tree under
 `node_modules/@hraness/kb/skills/kb/`, and the package check verifies that the
 installed skill is byte-identical to the repository source.
 
-Install the CLI from the immutable `v0.16.0` tag:
+Install the CLI from the immutable `v0.17.0` tag:
 
 ```sh
-bun add --global github:hraness/kb#v0.16.0
+bun add --global github:hraness/kb#v0.17.0
 kb --help
 ```
 
@@ -206,7 +235,7 @@ For programmatic use, declare the same pinned source in a project:
 ```json
 {
   "dependencies": {
-    "@hraness/kb": "github:hraness/kb#v0.16.0"
+    "@hraness/kb": "github:hraness/kb#v0.17.0"
   }
 }
 ```
@@ -278,6 +307,7 @@ or `kb search` to expand the question deliberately.
 | --- | --- |
 | `kb init [directory]` | Create a new vault without merging into or overwriting an existing path; the default directory is `kb`. |
 | `kb clip <url\|current>` | Capture a source and write an article bundle. `current` reads an attached active tab without navigating it; `kb capture <url>` is the explicit URL form. |
+| `kb capture show\|verify\|diff <bundle>` | Inspect a stored capture as hostile content, verify its recorded document and optional asset hashes, or compare its exact Markdown bytes with a bounded Git ref. |
 | `kb inspect <url>` | Run acquisition and extraction without writing a bundle. |
 | `kb pdf <file-or-url> [--slug <slug>]` | Convert a local or public remote PDF into Markdown while retaining the original bytes, extracted images, OCR-derived text, URL provenance, and page provenance. |
 | `kb refresh --root <directory>` | Rebuild a managed catalog atomically and report graph findings. An authored-catalog vault remains unchanged. |
@@ -287,12 +317,14 @@ or `kb search` to expand the question deliberately.
 | `kb backlinks <note> --root <directory>` | Show incoming contextual links and typed relationships for a note resolved by path, title, or alias. |
 | `kb links <note> --root <directory>` | Traverse incoming, outgoing, or bidirectional contextual links and typed relationships with explicit depth and node limits. |
 | `kb note create <id> --title <title> --root <directory>` | Atomically create one confined Markdown note; use `--type concept` for a reusable concept. |
-| `kb relation add\|remove <source> <predicate> <target>` | Idempotently edit one source note's typed outbound relationship using exact canonical note IDs. |
+| `kb relation add\|remove <source> <predicate> <target>` | Idempotently edit one source note's typed outbound relationship using an exact local note ID or canonical stable `kb://` URI. |
 | `kb relation list <note> --root <directory>` | List a note's authored outbound and derived inbound typed relationships. |
 | `kb percolate [note] --root <directory>` | Report evidence-backed recurring-concept and missing-relationship candidates without writing notes. |
 | `kb list --root <directory>` | Filter typed nested frontmatter, tags, and repeated exact `--scope` declarations; sort by metadata, title, path, or graph counts. `kb notes` is an alias. |
 | `kb index --root <directory>` | Build or incrementally refresh the optional local QMD embedding index. |
-| `kb search <query> --root <directory>` | Combine live exact matches with local QMD keyword and vector retrieval. Use `--mode exact\|keyword\|semantic\|hybrid`, metadata, tags, exact `--scope` filters, or bounded graph context. Omitted history performs no Git work; `--history` requests best-effort provenance and `--require-history` rejects unavailable or incomplete selected-note provenance. |
+| `kb search <query> --root <directory>` | Combine live exact matches with local QMD keyword and vector retrieval. Use `--mode exact\|keyword\|semantic\|hybrid`, metadata, tags, exact `--scope` filters, or bounded graph context. `--rules <file>` enables reviewed aliases; add `--priority` for explicit rule-based ordering. Omitted history performs no Git work; `--history` requests best-effort provenance and `--require-history` rejects unavailable or incomplete selected-note provenance. |
+| `kb portfolio search <query> --registry <file> --workspace <directory>` | Search only explicitly authorized vaults. Use `--shared` for public and organization entries or repeat `--vault owner/id` for a deliberate selection. The same `--rules <file>` and opt-in `--priority` apply within each selected vault before deterministic federation. |
+| `kb portfolio audit --registry <file> --workspace <directory>` | Audit selected vault identities, authority groups, graph references, attachments, exact duplicate content, catalogs, and Git availability without repairing or electing an authority. |
 | `kb history <note> --root <vault> --repo <repository>` | Return bounded direct provenance for one resolved note, including explicit oversized-commit limitations. |
 | `kb history search <query-or-path> --root <vault> --repo <repository>` | Search bounded commit subjects, note paths, and co-change paths without authoring links or repository scopes. |
 | `kb context <repository-path> --root <vault> --repo <repository>` | List inherited guides root to nearest, reciprocal hubs nearest to root, and grouped repository-scoped current and historical memory. Use `--kind auto\|file\|directory` to control path interpretation. |
@@ -328,6 +360,11 @@ kb clip https://example.com/private --browser-profile <path> --output articles
 
 Each web capture writes readable Markdown, `capture.json`, localized assets, and optional evidence under `articles/<slug>/`. Unless media is disabled, YouTube captures add the title, description, duration, channel, thumbnail, and a locally extracted transcript when available; other video surfaces retain a poster or thumbnail instead of downloading the video by default. See [Capture web content](docs/capture.md) for scopes, saved files, browser modes, media, evidence, completeness states, and limits.
 
+Schema v4 manifests bind the exact saved Markdown path, byte count, and SHA-256
+digest. `kb capture verify articles/<slug>` checks that digest without executing
+the content. Add `--verify-assets` to check recorded assets. Source HTML remains
+omitted unless `kb capture show` receives `--include-source-html`.
+
 PDF capture uses the same bundle boundary:
 
 ```sh
@@ -345,16 +382,23 @@ frontmatter relationships are the graph's authored facts:
 
 ```yaml
 type: concept
+document_id: durable-agent-memory
 relations:
   supports:
     - notes/durable-agent-memory
 ```
 
-Predicates use lower-kebab-case and targets use exact vault-root IDs without
-`.md`. `kb graph`, `kb backlinks`, `kb relation list`, and `kb links` derive
+Predicates use lower-kebab-case. Local targets use exact vault-root IDs without
+`.md`; cross-vault targets use canonical stable `kb://` URIs. `kb graph`, `kb backlinks`, `kb relation list`, and `kb links` derive
 inverse edges and bounded paths without injecting reciprocal or inferred facts into notes.
 `kb percolate` proposes reusable concepts and missing connections with explicit
 support; an agent reviews the cited prose before authoring anything.
+
+Within a portfolio, a note can target a stable cross-vault identity such as
+`kb://hraness/sleepyland/sound-wellness-expansion`. The target vault must be
+explicitly selected for `kb portfolio audit` to resolve it. Missing or invalid
+`document_id` values remain legacy path identities and never gain a stable URI
+by inference.
 
 These focused views are rebuilt from current Markdown. KB never commits a graph
 database, generated fact file, or engine entity ID. Parallel agents therefore
@@ -400,7 +444,8 @@ descriptors, and promotion expectations in its own repository. The installed
 source checkout.
 Other focused entries include
 `@hraness/kb/graph`, `@hraness/kb/navigation`, `@hraness/kb/percolate`,
-`@hraness/kb/query`, `@hraness/kb/repository-memory`,
+`@hraness/kb/portfolio`, `@hraness/kb/query`, `@hraness/kb/repository-memory`,
+`@hraness/kb/search-rules`, `@hraness/kb/untrusted-content`,
 `@hraness/kb/source-inbox`, and `@hraness/kb/semantic`; web-capture orchestration and
 diagnostics from
 `@hraness/kb/capture`; metadata search, Archive.today discovery, sidecar parsing,
@@ -410,7 +455,10 @@ need the CLI's lower-level ingestion machinery can use the explicit
 capture-primitive subpaths listed in `package.json`, including
 `@hraness/kb/clip/acquire`, `@hraness/kb/clip/args`, the DNS-pinned request and
 connection-pool boundary at `@hraness/kb/clip/network`, and the browser proxy at
-`@hraness/kb/clip/network-proxy`.
+`@hraness/kb/clip/network-proxy`. Stored-bundle inspection, capture refresh
+diffs, and the explicit local job ledger are available from
+`@hraness/kb/clip/bundle-reader`, `@hraness/kb/clip/refresh`, and
+`@hraness/kb/clip/jobs`.
 
 ## Agent skills
 
@@ -433,4 +481,4 @@ missing, and it never initializes or mutates a vault as an installation side
 effect. The repository's phase-orchestration skill remains available to local
 repository agents but is marked internal, so public skill discovery omits it.
 
-See [Design](docs/design.md), [Agent workflow](docs/agent-workflow.md), [PDF capture](docs/pdf.md), and [Contributing](CONTRIBUTING.md) for the durable contracts and development gate. hraness/kb is available under the [MIT License](LICENSE).
+See [Design](docs/design.md), [Portfolio federation](docs/portfolio.md), [Agent workflow](docs/agent-workflow.md), [PDF capture](docs/pdf.md), and [Contributing](CONTRIBUTING.md) for the durable contracts and development gate. hraness/kb is available under the [MIT License](LICENSE).

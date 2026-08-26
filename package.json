@@ -1,6 +1,6 @@
 {
   "name": "@hraness/kb",
-  "version": "0.16.0",
+  "version": "0.17.0",
   "description": "A knowledge base for coding agents, built from Markdown, backlinks, semantic search, and Git context.",
   "license": "MIT",
   "type": "module",
@@ -16,13 +16,16 @@
     "./src/clip/args.ts",
     "./src/clip/bounded-byte-buffer.ts",
     "./src/clip/browser-profiles.ts",
+    "./src/clip/bundle-reader.ts",
     "./src/clip/cli.ts",
     "./src/clip/cookies.ts",
     "./src/clip/defuddle-worker.ts",
     "./src/clip/doctor.ts",
+    "./src/clip/jobs.ts",
     "./src/clip/network-proxy.ts",
     "./src/clip/network.ts",
     "./src/clip/persist.ts",
+    "./src/clip/refresh.ts",
     "./src/clip/terminal.ts",
     "./src/evaluation-builder.ts",
     "./src/evaluation-kb.ts",
@@ -33,12 +36,18 @@
     "./src/navigation.ts",
     "./src/pdf.ts",
     "./src/percolate.ts",
+    "./src/portfolio.ts",
+    "./src/portfolio-audit.ts",
+    "./src/portfolio-identity.ts",
+    "./src/portfolio-registry.ts",
     "./src/query.ts",
     "./src/repository-memory.ts",
     "./src/sdk.ts",
     "./src/search.ts",
+    "./src/search-rules.ts",
     "./src/semantic.ts",
     "./src/source-inbox.ts",
+    "./src/untrusted-content.ts",
     "./src/url-intelligence.ts",
     "./src/workflow.ts",
     "./src/workflows/decision-context.ts",
@@ -117,6 +126,10 @@
       "types": "./src/clip/bounded-byte-buffer.ts",
       "import": "./dist/clip/bounded-byte-buffer.js"
     },
+    "./clip/bundle-reader": {
+      "types": "./src/clip/bundle-reader.ts",
+      "import": "./dist/clip/bundle-reader.js"
+    },
     "./clip/cli": {
       "types": "./src/clip/cli.ts",
       "import": "./dist/clip/cli.js"
@@ -129,6 +142,10 @@
       "types": "./src/clip/doctor.ts",
       "import": "./dist/clip/doctor.js"
     },
+    "./clip/jobs": {
+      "types": "./src/clip/jobs.ts",
+      "import": "./dist/clip/jobs.js"
+    },
     "./clip/network": {
       "types": "./src/clip/network.ts",
       "import": "./dist/clip/network.js"
@@ -140,6 +157,10 @@
     "./clip/persist": {
       "types": "./src/clip/persist.ts",
       "import": "./dist/clip/persist.js"
+    },
+    "./clip/refresh": {
+      "types": "./src/clip/refresh.ts",
+      "import": "./dist/clip/refresh.js"
     },
     "./clip/terminal": {
       "types": "./src/clip/terminal.ts",
@@ -177,6 +198,10 @@
       "types": "./src/percolate.ts",
       "import": "./dist/percolate.js"
     },
+    "./portfolio": {
+      "types": "./src/portfolio.ts",
+      "import": "./dist/portfolio.js"
+    },
     "./query": {
       "types": "./src/query.ts",
       "import": "./dist/query.js"
@@ -193,6 +218,10 @@
       "types": "./src/search.ts",
       "import": "./dist/search.js"
     },
+    "./search-rules": {
+      "types": "./src/search-rules.ts",
+      "import": "./dist/search-rules.js"
+    },
     "./semantic": {
       "types": "./src/semantic.ts",
       "import": "./dist/semantic.js"
@@ -200,6 +229,10 @@
     "./source-inbox": {
       "types": "./src/source-inbox.ts",
       "import": "./dist/source-inbox.js"
+    },
+    "./untrusted-content": {
+      "types": "./src/untrusted-content.ts",
+      "import": "./dist/untrusted-content.js"
     },
     "./url-intelligence": {
       "types": "./src/url-intelligence.ts",
@@ -248,10 +281,12 @@
     "src/clip/assets.ts",
     "src/clip/bounded-byte-buffer.ts",
     "src/clip/browser-profiles.ts",
+    "src/clip/bundle-reader.ts",
     "src/clip/capture.ts",
     "src/clip/cli.ts",
     "src/clip/cookies.ts",
     "src/clip/doctor.ts",
+    "src/clip/jobs.ts",
     "src/clip/extract.ts",
     "src/clip/lib.ts",
     "src/clip/media.ts",
@@ -259,6 +294,7 @@
     "src/clip/network.ts",
     "src/clip/package-root.ts",
     "src/clip/persist.ts",
+    "src/clip/refresh.ts",
     "src/clip/platforms.ts",
     "src/clip/structured.ts",
     "src/clip/terminal.ts",
@@ -294,6 +330,10 @@
     "src/navigation.ts",
     "src/note-lock.ts",
     "src/percolate.ts",
+    "src/portfolio.ts",
+    "src/portfolio-audit.ts",
+    "src/portfolio-identity.ts",
+    "src/portfolio-registry.ts",
     "src/pdf.ts",
     "src/pdf/args.ts",
     "src/pdf/capture.ts",
@@ -309,10 +349,12 @@
     "src/query.ts",
     "src/repository-memory.ts",
     "src/search.ts",
+    "src/search-rules.ts",
     "src/semantic-runtime.ts",
     "src/semantic.ts",
     "src/sdk.ts",
     "src/source-inbox.ts",
+    "src/untrusted-content.ts",
     "src/vault.ts",
     "src/workflow.ts",
     "src/workflows/decision-context.ts",
@@ -328,7 +370,7 @@
     "kb:check:lane": "bunx --bun github:hraness/kb#v0.15.1 check --root kb --no-catalog",
     "kb:check": "bunx --bun github:hraness/kb#v0.15.1 check --root kb && bunx --bun github:hraness/kb#v0.15.1 agents check --root kb --repo .",
     "kb:catalog": "bunx --bun github:hraness/kb#v0.15.1 catalog --root kb",
-    "build": "bun -e 'await (await import(\"node:fs/promises\")).rm(\"./dist\", { recursive: true, force: true })' && bun build ./src/index.ts ./src/agent-context.ts ./src/agent-guide-audit.ts ./src/attachments.ts ./src/authoring.ts ./src/benchmark.ts ./src/clip/browser-profiles.ts ./src/capture.ts ./src/cli.ts ./src/clip/acquire.ts ./src/clip/args.ts ./src/clip/bounded-byte-buffer.ts ./src/clip/cli.ts ./src/clip/cookies.ts ./src/clip/doctor.ts ./src/clip/network.ts ./src/clip/network-proxy.ts ./src/clip/persist.ts ./src/clip/terminal.ts ./src/evaluation.ts ./src/evaluation-builder.ts ./src/evaluation-kb.ts ./src/git.ts ./src/graph.ts ./src/navigation.ts ./src/pdf.ts ./src/percolate.ts ./src/query.ts ./src/repository-memory.ts ./src/sdk.ts ./src/search.ts ./src/semantic.ts ./src/source-inbox.ts ./src/url-intelligence.ts ./src/workflow.ts ./src/workflows/index.ts ./src/workflows/decision-context.ts ./src/workflows/explain-change.ts ./src/workflows/plan-radar.ts ./src/clip/defuddle-worker.ts --outdir ./dist --root ./src --target bun --format esm --splitting --packages external",
+    "build": "bun -e 'await (await import(\"node:fs/promises\")).rm(\"./dist\", { recursive: true, force: true })' && bun build ./src/index.ts ./src/agent-context.ts ./src/agent-guide-audit.ts ./src/attachments.ts ./src/authoring.ts ./src/benchmark.ts ./src/clip/browser-profiles.ts ./src/capture.ts ./src/cli.ts ./src/clip/acquire.ts ./src/clip/args.ts ./src/clip/bounded-byte-buffer.ts ./src/clip/bundle-reader.ts ./src/clip/cli.ts ./src/clip/cookies.ts ./src/clip/doctor.ts ./src/clip/jobs.ts ./src/clip/network.ts ./src/clip/network-proxy.ts ./src/clip/persist.ts ./src/clip/refresh.ts ./src/clip/terminal.ts ./src/evaluation.ts ./src/evaluation-builder.ts ./src/evaluation-kb.ts ./src/git.ts ./src/graph.ts ./src/navigation.ts ./src/pdf.ts ./src/percolate.ts ./src/portfolio.ts ./src/query.ts ./src/repository-memory.ts ./src/sdk.ts ./src/search.ts ./src/search-rules.ts ./src/semantic.ts ./src/source-inbox.ts ./src/untrusted-content.ts ./src/url-intelligence.ts ./src/workflow.ts ./src/workflows/index.ts ./src/workflows/decision-context.ts ./src/workflows/explain-change.ts ./src/workflows/plan-radar.ts ./src/clip/defuddle-worker.ts --outdir ./dist --root ./src --target bun --format esm --splitting --packages external",
     "check:installed-command-docs": "bun ./scripts/check-installed-command-docs.ts",
     "check:portfolio-inventory": "bun ./scripts/check-portfolio-inventory.ts",
     "typecheck": "tsc --noEmit",

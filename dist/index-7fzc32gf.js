@@ -1,13 +1,13 @@
 // @bun
 import {
-  sanitizeArtifactUrl
-} from "./index-ey9rycsn.js";
-import {
   assertSafeNetworkUrl,
   decodeBytes,
   isPrivateHostname,
   safeFetch
 } from "./index-e5fbsywq.js";
+import {
+  sanitizeArtifactUrl
+} from "./index-mxxxytys.js";
 
 // src/clip/url-intelligence.ts
 var MAX_METADATA_SEARCH_RESULTS = 20;

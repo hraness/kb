@@ -3,10 +3,23 @@
 import {
   backfillSavedUrlMetadata,
   createRustMetadataSearchProvider
-} from "./index-tpcs0zbm.js";
+} from "./index-dycjbhw2.js";
 import {
   main as main2
-} from "./index-t800m4cc.js";
+} from "./index-kh0pwvdd.js";
+import {
+  MAX_AUTHORIZED_VAULTS,
+  auditKnowledgePortfolio,
+  loadPortfolioRegistry,
+  openKnowledgePortfolio,
+  snapshotPortfolioRegistry
+} from "./index-jsmvyyvf.js";
+import {
+  diffCaptureBundle
+} from "./index-j4zgmzjr.js";
+import {
+  verifyCaptureBundle
+} from "./index-npg9z1a4.js";
 import {
   initVault
 } from "./index-mqx4nd6v.js";
@@ -21,11 +34,11 @@ import {
   MAX_PERCOLATION_NOTES,
   MAX_SCOPED_PERCOLATION_MENTION_PAIRS,
   percolateVault
-} from "./index-egdc3x6v.js";
+} from "./index-dyqwejk5.js";
 import {
   knowledgeBaseEvaluationRetrieverIds,
   openKnowledgeBaseEvaluation
-} from "./index-y6djytnb.js";
+} from "./index-n5dd7r0v.js";
 import {
   DEFAULT_SEARCH_RESULTS,
   MAX_SEARCH_CANDIDATES,
@@ -33,7 +46,11 @@ import {
   MAX_SEARCH_RELATED_SEEDS,
   MAX_SEARCH_RESULTS,
   openKnowledgeBase
-} from "./index-2hsmrc38.js";
+} from "./index-zzhgcwyt.js";
+import {
+  MAX_SEARCH_RULE_CONFIG_BYTES,
+  parseSearchRules
+} from "./index-adx6khj5.js";
 import {
   indexSemanticVault,
   qmdIndexerVersion,
@@ -42,7 +59,9 @@ import {
   refreshVault,
   scanVault,
   sha256EmbeddingModelFile
-} from "./index-etpd4zz0.js";
+} from "./index-zxdy5pby.js";
+import"./index-4j3tt0c3.js";
+import"./index-1gwbassd.js";
 import {
   MAX_EVALUATION_RESULTS_PER_QUERY,
   MAX_EVALUATION_TIMEOUT_MS,
@@ -50,7 +69,6 @@ import {
   parseRetrievalEvaluationCorpus,
   runRetrievalEvaluation
 } from "./index-b88v3vtm.js";
-import"./index-1gwbassd.js";
 import {
   auditAgentGuideRepository
 } from "./index-hya40gb2.js";
@@ -61,10 +79,11 @@ import {
   addNoteRelation,
   createNote,
   removeNoteRelation
-} from "./index-2fr3hf9q.js";
+} from "./index-01jj6rbv.js";
+import"./index-3rm7cz6h.js";
 import {
   validateSearchQuery
-} from "./index-tthfg4xy.js";
+} from "./index-cv6fh7z5.js";
 import {
   navigateLinks
 } from "./index-d13v9ckt.js";
@@ -90,30 +109,31 @@ import {
 } from "./index-5vwpzb5a.js";
 import {
   lookupNote,
+  parseVaultKey,
   renderCatalog
-} from "./index-4962kvds.js";
+} from "./index-cxfrakt7.js";
 import {
   main
-} from "./index-tw4g2vk4.js";
-import"./index-tp2p17gt.js";
+} from "./index-0kavxzqj.js";
+import"./index-7fzc32gf.js";
 import"./index-f984hw45.js";
-import"./index-xwsdr1v8.js";
+import"./index-1n418kb9.js";
 import {
   findKbPackageRoot
-} from "./index-bt118a7q.js";
+} from "./index-qry4vhxk.js";
 import"./index-hgve9rh2.js";
 import"./index-w2zc0vwa.js";
+import"./index-e5fbsywq.js";
+import"./index-6g2pv9d2.js";
+import"./index-gh719d91.js";
 import {
   redactSensitiveText
-} from "./index-ey9rycsn.js";
+} from "./index-mxxxytys.js";
+import"./index-84x0vjjp.js";
 import {
   sanitizeTerminalLine,
   sanitizeTerminalText
 } from "./index-1xxnjn0d.js";
-import"./index-6g2pv9d2.js";
-import"./index-84x0vjjp.js";
-import"./index-e5fbsywq.js";
-import"./index-gh719d91.js";
 import"./index-5n05se68.js";
 
 // src/cli.ts
@@ -802,11 +822,24 @@ async function readBoundedUtf8(path, maximumBytes, label) {
     await handle.close();
   }
 }
+async function loadSearchRulesFile(path) {
+  const text = await readBoundedUtf8(path, MAX_SEARCH_RULE_CONFIG_BYTES, "search rules file");
+  let input;
+  try {
+    input = JSON.parse(text);
+  } catch (error) {
+    throw new Error("search rules file is not valid JSON", { cause: error });
+  }
+  return parseSearchRules(input);
+}
 var usage = `kb \u2014 auditable capture and derived links for Markdown vaults
 
 Usage:
   kb init [directory] [--json]
   kb clip <url|current> [capture options]
+  kb capture show <bundle> [--verify-assets] [--include-source-html] [--json]
+  kb capture verify <bundle> [--verify-assets] [--json]
+  kb capture diff <bundle> [--repo <repository>] [--ref <ref>] [--json]
   kb url-metadata tool <build|check>
   kb url-metadata backfill [metadata options]
   kb inspect <url> [capture options]
@@ -824,10 +857,12 @@ Usage:
   kb percolate [note] [--root <directory>] [--min-support <count>] [--limit <count>] [--json]
   kb list [--root <directory>] [--where <path=value>] [--has <path>] [--tag <tag>] [--scope <repository-path>] [--sort <field>] [--order <asc|desc>] [--limit <count>] [--json]
   kb index [--root <directory>] [--database <path>] [--force] [--json]
-  kb search <query> [--root <directory>] [--repo <repository>] [--database <path>] [--mode <hybrid|exact|keyword|semantic>] [--where <path=value>] [--has <path>] [--tag <tag>] [--scope <repository-path>] [--related <note>] [--graph-depth <1|2>] [--no-graph] [--history | --no-history | --require-history] [--limit <count>] [--candidate-limit <count>] [--min-score <score>] [--json]
+  kb search <query> [--root <directory>] [--repo <repository>] [--database <path>] [--mode <hybrid|exact|keyword|semantic>] [--rules <file>] [--priority] [--where <path=value>] [--has <path>] [--tag <tag>] [--scope <repository-path>] [--related <note>] [--graph-depth <1|2>] [--no-graph] [--history | --no-history | --require-history] [--limit <count>] [--candidate-limit <count>] [--min-score <score>] [--json]
   kb history <note> [--root <directory>] [--repo <repository>] [--limit <count>] [--cochanged-limit <count>] [--json]
   kb history search <query-or-path> [--root <directory>] [--repo <repository>] [--limit <count>] [--commit-limit <count>] [--cochanged-limit <count>] [--json]
   kb evaluate <manifest.json> [--root <directory>] [--repo <repository>] [--database <path>] [--retriever <id>] [--split <development|test|all>] [--limit <count>] [--cutoff <count>] [--timeout <milliseconds>] [--baseline <id>] [--model-file <path>] [--cache-state <cold|mixed|warm>] [--json]
+  kb portfolio search <query> --registry <file> --workspace <directory> (--shared | --vault <owner/id>...) [--mode <hybrid|exact|keyword|semantic>] [--rules <file>] [--priority] [--limit <count>] [--require-all] [--json]
+  kb portfolio audit --registry <file> --workspace <directory> (--all | --shared | --vault <owner/id>...) [--strict] [--json]
   kb inbox [--root <directory>] [--source-prefix <directory>] [--limit <count>] [--json]
   kb context <repository-path> [--root <vault>] [--repo <repository>] [--kind <auto|file|directory>] [--json]
   kb agents identity <repository-scope> [--json]
@@ -848,6 +883,78 @@ function terminalSafeJson(value) {
 function readValue(arguments_, index) {
   const value = arguments_[index + 1];
   return value === undefined || value.startsWith("--") ? null : value;
+}
+function parseCaptureBundleCommand(arguments_) {
+  const action = arguments_[0];
+  if (action !== "show" && action !== "verify") {
+    return { ok: false, message: "capture bundle action must be show or verify" };
+  }
+  let json = false;
+  let includeSourceHtml = false;
+  let verifyAssets = false;
+  const positional = [];
+  for (const argument of arguments_.slice(1)) {
+    if (argument === "--json")
+      json = true;
+    else if (argument === "--verify-assets")
+      verifyAssets = true;
+    else if (argument === "--include-source-html" && action === "show")
+      includeSourceHtml = true;
+    else if (argument.startsWith("--"))
+      return { ok: false, message: `unknown capture ${action} option: ${argument}` };
+    else
+      positional.push(argument);
+  }
+  if (positional.length !== 1 || positional[0] === undefined) {
+    return { ok: false, message: `capture ${action} requires exactly one bundle path` };
+  }
+  return {
+    ok: true,
+    value: {
+      kind: "capture-bundle",
+      action,
+      path: positional[0],
+      options: { verifyAssets, ...includeSourceHtml ? { includeSourceHtml: true } : {} },
+      json
+    }
+  };
+}
+function parseCaptureDiffCommand(arguments_) {
+  let repository = ".";
+  let ref = "HEAD";
+  let json = false;
+  const positional = [];
+  for (let index = 0;index < arguments_.length; index += 1) {
+    const argument = arguments_[index];
+    if (argument === undefined)
+      continue;
+    if (argument === "--json")
+      json = true;
+    else if (argument === "--repo" || argument === "--ref") {
+      const value = readValue(arguments_, index);
+      if (value === null)
+        return { ok: false, message: `${argument} requires a value` };
+      if (argument === "--repo")
+        repository = value;
+      else
+        ref = value;
+      index += 1;
+    } else if (argument.startsWith("--"))
+      return { ok: false, message: `unknown capture diff option: ${argument}` };
+    else
+      positional.push(argument);
+  }
+  if (positional.length !== 1 || positional[0] === undefined) {
+    return { ok: false, message: "capture diff requires exactly one bundle path" };
+  }
+  return {
+    ok: true,
+    value: {
+      kind: "capture-diff",
+      options: { bundle: positional[0], repository, ref },
+      json
+    }
+  };
 }
 function parseVaultCommand(command, arguments_) {
   let root = ".";
@@ -1206,7 +1313,9 @@ function parseSemanticCommand(command, arguments_) {
   let database;
   let force = false;
   let json = false;
-  let mode = "hybrid";
+  let mode;
+  let priority = false;
+  let rulesPath;
   let limit;
   let candidateLimit;
   let minScore;
@@ -1248,7 +1357,11 @@ function parseSemanticCommand(command, arguments_) {
       requireHistory = true;
       continue;
     }
-    if (argument === "--root" || argument === "--database" || command === "search" && argument === "--repo") {
+    if (argument === "--priority" && command === "search") {
+      priority = true;
+      continue;
+    }
+    if (argument === "--root" || argument === "--database" || command === "search" && (argument === "--repo" || argument === "--rules")) {
       const value = readValue(arguments_, cursor);
       if (value === null)
         return { ok: false, message: `${argument} requires a value` };
@@ -1256,6 +1369,8 @@ function parseSemanticCommand(command, arguments_) {
         root = value;
       else if (argument === "--repo")
         repository = value;
+      else if (argument === "--rules")
+        rulesPath = value;
       else
         database = value;
       cursor += 1;
@@ -1402,6 +1517,9 @@ function parseSemanticCommand(command, arguments_) {
       message: "Search minimum score applies only to hybrid, keyword, or semantic mode."
     };
   }
+  if (priority && rulesPath === undefined) {
+    return { ok: false, message: "--priority requires --rules" };
+  }
   const rawQuery = positional.join(" ");
   if (rawQuery.trim() === "")
     return { ok: false, message: "search requires a query" };
@@ -1422,7 +1540,9 @@ function parseSemanticCommand(command, arguments_) {
       root,
       repository,
       ...database === undefined ? {} : { database },
-      mode,
+      ...mode === undefined ? {} : { mode },
+      ordering: priority ? "priority-then-relevance" : "relevance",
+      ...rulesPath === undefined ? {} : { rulesPath },
       filters,
       tags,
       repositoryScopes,
@@ -1967,10 +2087,142 @@ function parsePercolateCommand(arguments_) {
     }
   };
 }
+function parsePortfolioCommand(arguments_) {
+  const action = arguments_[0];
+  if (action !== "search" && action !== "audit") {
+    return { ok: false, message: "portfolio action must be search or audit" };
+  }
+  let registryPath;
+  let workspaceRoot;
+  let shared = false;
+  let all = false;
+  let requireAll = false;
+  let strict = false;
+  let json = false;
+  let mode;
+  let priority = false;
+  let rulesPath;
+  let limit;
+  const vaults = [];
+  const positional = [];
+  for (let cursor = 1;cursor < arguments_.length; cursor += 1) {
+    const argument = arguments_[cursor];
+    if (argument === undefined)
+      continue;
+    if (argument === "--json")
+      json = true;
+    else if (argument === "--shared")
+      shared = true;
+    else if (argument === "--all" && action === "audit")
+      all = true;
+    else if (argument === "--require-all" && action === "search")
+      requireAll = true;
+    else if (argument === "--priority" && action === "search")
+      priority = true;
+    else if (argument === "--strict" && action === "audit")
+      strict = true;
+    else if (argument === "--registry" || argument === "--workspace" || argument === "--vault" || argument === "--rules" && action === "search" || argument === "--mode" && action === "search" || argument === "--limit" && action === "search") {
+      const value = readValue(arguments_, cursor);
+      if (value === null)
+        return { ok: false, message: `${argument} requires a value` };
+      cursor += 1;
+      if (argument === "--registry")
+        registryPath = value;
+      else if (argument === "--workspace")
+        workspaceRoot = value;
+      else if (argument === "--rules")
+        rulesPath = value;
+      else if (argument === "--vault") {
+        try {
+          vaults.push(parseVaultKey(value).key);
+        } catch {
+          return { ok: false, message: "--vault must be a canonical owner/id key" };
+        }
+      } else if (argument === "--mode") {
+        if (value !== "exact" && value !== "hybrid" && value !== "keyword" && value !== "semantic") {
+          return { ok: false, message: "--mode must be exact, hybrid, keyword, or semantic" };
+        }
+        mode = value;
+      } else {
+        const checked = boundedInteger(value, "--limit", 1, MAX_SEARCH_RESULTS);
+        if (typeof checked !== "number")
+          return checked;
+        limit = checked;
+      }
+    } else if (argument.startsWith("--")) {
+      return { ok: false, message: `unknown portfolio ${action} option` };
+    } else
+      positional.push(argument);
+  }
+  if (registryPath === undefined || workspaceRoot === undefined) {
+    return { ok: false, message: `portfolio ${action} requires --registry and --workspace` };
+  }
+  if (new Set(vaults).size !== vaults.length) {
+    return { ok: false, message: "portfolio vault selections must be unique" };
+  }
+  const selectionCount = Number(shared) + Number(all) + Number(vaults.length > 0);
+  if (selectionCount !== 1) {
+    return {
+      ok: false,
+      message: action === "search" ? "portfolio search requires exactly one of --shared or repeated --vault" : "portfolio audit requires exactly one of --all, --shared, or repeated --vault"
+    };
+  }
+  if (action === "search") {
+    if (priority && rulesPath === undefined) {
+      return { ok: false, message: "--priority requires --rules" };
+    }
+    const rawQuery = positional.join(" ");
+    if (rawQuery.trim() === "")
+      return { ok: false, message: "portfolio search requires a query" };
+    let query;
+    try {
+      query = validateSearchQuery(rawQuery).query;
+    } catch (error) {
+      return { ok: false, message: error instanceof Error ? error.message : String(error) };
+    }
+    return {
+      ok: true,
+      value: {
+        kind: "portfolio-search",
+        registryPath,
+        workspaceRoot,
+        selection: shared ? "shared" : "explicit",
+        vaults,
+        failurePolicy: requireAll ? "required" : "partial",
+        ...mode === undefined ? {} : { mode },
+        ordering: priority ? "priority-then-relevance" : "relevance",
+        ...rulesPath === undefined ? {} : { rulesPath },
+        ...limit === undefined ? {} : { limit },
+        query,
+        json
+      }
+    };
+  }
+  if (positional.length > 0)
+    return { ok: false, message: "portfolio audit does not accept positional arguments" };
+  return {
+    ok: true,
+    value: {
+      kind: "portfolio-audit",
+      registryPath,
+      workspaceRoot,
+      selection: all ? "all" : shared ? "shared" : "explicit",
+      vaults,
+      strict,
+      json
+    }
+  };
+}
 function parseArguments(arguments_) {
   const command = arguments_[0];
   if (command === undefined || command === "help" || command === "--help" || command === "-h") {
     return { ok: true, value: { kind: "help" } };
+  }
+  if (command === "capture" && arguments_[1] === "diff") {
+    return parseCaptureDiffCommand(arguments_.slice(2));
+  }
+  if (command === "capture" && (arguments_[1] === "show" || arguments_[1] === "verify")) {
+    return parseCaptureBundleCommand(arguments_.slice(1));
   }
   if (command === "clip" || command === "capture" || command === "inspect") {
     if (arguments_[1] === "--help" || arguments_[1] === "-h" || arguments_[1] === "help") {
@@ -2021,6 +2273,8 @@ function parseArguments(arguments_) {
   }
   if (command === "history")
     return parseHistoryCommand(arguments_.slice(1));
+  if (command === "portfolio")
+    return parsePortfolioCommand(arguments_.slice(1));
   if (command === "evaluate")
     return parseEvaluationCommand(arguments_.slice(1));
   if (command === "context")
@@ -2083,15 +2337,18 @@ async function runSemantic(command, output, dependencies) {
     output.stdout(command.json ? terminalSafeJson(result) : sanitizeTerminalText(renderSemanticIndex(result)));
     return 0;
   }
+  const searchRules = command.rulesPath === undefined ? undefined : await loadSearchRulesFile(command.rulesPath);
   const kb = await (dependencies.openKnowledgeBase ?? openKnowledgeBase)({
     root: command.root,
     repository: command.repository,
-    ...command.database === undefined ? {} : { database: command.database }
+    ...command.database === undefined ? {} : { database: command.database },
+    ...searchRules === undefined ? {} : { searchRules }
   });
   try {
     const result = await kb.search({
       query: command.query,
-      mode: command.mode,
+      ...command.mode === undefined ? {} : { mode: command.mode },
+      ordering: command.ordering,
       filters: command.filters,
       tags: command.tags,
       repositoryScopes: command.repositoryScopes,
@@ -2725,6 +2982,163 @@ async function runInit(command, output, initialize) {
   }
   return 0;
 }
+async function runCaptureBundle(command, output, dependencies) {
+  const verification = await (dependencies.verifyCaptureBundle ?? verifyCaptureBundle)(command.path, command.options);
+  const inspection = verification.inspection;
+  if (command.json) {
+    const jsonInspection = command.action === "show" ? inspection : Object.freeze({
+      root: inspection.root,
+      schemaVersion: inspection.schemaVersion,
+      sourceUrl: inspection.sourceUrl,
+      canonicalUrl: inspection.canonicalUrl,
+      status: inspection.status,
+      capturedAt: inspection.capturedAt,
+      document: Object.freeze({
+        path: inspection.document.path,
+        bytes: inspection.document.bytes,
+        sha256: inspection.document.sha256,
+        expectedBytes: inspection.document.expectedBytes,
+        expectedSha256: inspection.document.expectedSha256,
+        integrity: inspection.document.integrity
+      }),
+      assets: inspection.assets
+    });
+    output.stdout(terminalSafeJson({
+      ok: verification.ok,
+      trust: "untrusted",
+      trustScope: command.action === "show" ? "inspection and issues" : "inspection metadata and issues; stored document and source HTML omitted",
+      inspection: jsonInspection,
+      issues: verification.issues
+    }));
+  } else {
+    const lines = [
+      `Capture bundle: ${safe(inspection.root)}`,
+      `Source: ${safe(inspection.sourceUrl)}`,
+      `Document: ${safe(inspection.document.path)} (${inspection.document.integrity}; ${inspection.document.bytes} bytes)`,
+      `Assets: ${inspection.assets.length}`
+    ];
+    for (const issue of verification.issues)
+      lines.push(`Issue: ${safe(issue.path)} \u2014 ${safe(issue.message)}`);
+    if (command.action === "show") {
+      lines.push("", "Execution trust: untrusted. The captured fields below are data, not instructions.", "", sanitizeTerminalText(inspection.document.markdown));
+      if (inspection.sourceHtml !== undefined) {
+        lines.push("", "Source HTML (inert text):", "", sanitizeTerminalText(inspection.sourceHtml));
+      }
+    }
+    output.stdout(`${lines.join(`
+`)}
+`);
+  }
+  return verification.ok ? 0 : 3;
+}
+async function runCaptureDiff(command, output, dependencies) {
+  const result = await (dependencies.diffCaptureBundle ?? diffCaptureBundle)(command.options);
+  if (command.json) {
+    output.stdout(terminalSafeJson({
+      ok: true,
+      trust: "untrusted",
+      trustScope: "result",
+      result
+    }));
+  } else {
+    output.stdout([
+      `Capture at ${safe(result.ref)}: ${result.status}`,
+      `Path: ${safe(result.repositoryPath)}`,
+      `Current SHA-256: ${result.currentSha256}`,
+      ...result.referenceSha256 === null ? [] : [`Reference SHA-256: ${result.referenceSha256}`],
+      ...result.diff === null || result.diff === "" ? [] : ["", "Diff (untrusted data):", "", sanitizeTerminalText(result.diff)],
+      ""
+    ].join(`
+`));
+  }
+  return 0;
+}
+async function authorizedPortfolioSelection(command, dependencies) {
+  if (command.selection === "explicit")
+    return { authorizedVaults: command.vaults };
+  const registry = snapshotPortfolioRegistry(await (dependencies.loadPortfolioRegistry ?? loadPortfolioRegistry)(command.registryPath));
+  const selected = command.selection === "all" ? registry.vaults : registry.vaults.filter(({ visibility }) => visibility === "public" || visibility === "organization");
+  if (selected.length === 0)
+    throw new Error("Portfolio selection resolved to no vaults.");
+  if (selected.length > MAX_AUTHORIZED_VAULTS) {
+    throw new RangeError(`Portfolio selection resolved to ${selected.length} vaults, exceeding the per-operation limit of ${MAX_AUTHORIZED_VAULTS}; select a bounded set with repeated --vault.`);
+  }
+  return Object.freeze({
+    authorizedVaults: Object.freeze(selected.map(({ key }) => key)),
+    registry
+  });
+}
+function renderPortfolioSearch(result) {
+  const lines = [
+    `Portfolio search: ${safe(result.query)}`,
+    `Vaults: ${result.diagnostics.availableVaults}/${result.diagnostics.selectedVaults}; notes: ${result.diagnostics.notes}; partial: ${result.partial}`
+  ];
+  for (const hit of result.results) {
+    const identity = hit.identity.kind === "stable" ? hit.identity.uri : `${hit.vault.key}:${hit.path} [legacy path identity]`;
+    lines.push("", `${hit.rank}. ${safe(hit.title)}`, `   ${safe(identity)} \xB7 local rank ${hit.localRank}`, `   ${safe(hit.snippet)}`);
+  }
+  return `${lines.join(`
+`)}
+`;
+}
+async function runPortfolioSearch(command, output, dependencies) {
+  const selection = await authorizedPortfolioSelection(command, dependencies);
+  const searchRules = command.rulesPath === undefined ? undefined : await loadSearchRulesFile(command.rulesPath);
+  const session = await (dependencies.openKnowledgePortfolio ?? openKnowledgePortfolio)({
+    registryPath: command.registryPath,
+    ...selection.registry === undefined ? {} : { registry: selection.registry },
+    workspaceRoot: command.workspaceRoot,
+    authorizedVaults: selection.authorizedVaults,
+    failurePolicy: command.failurePolicy,
+    ...searchRules === undefined ? {} : { knowledgeBase: { searchRules } }
+  });
+  try {
+    const result = await session.search({
+      query: command.query,
+      ...command.mode === undefined ? {} : { mode: command.mode },
+      ordering: command.ordering,
+      ...command.limit === undefined ? {} : { limit: command.limit },
+      graph: false
+    });
+    output.stdout(command.json ? terminalSafeJson({
+      ok: true,
+      trust: "untrusted",
+      trustScope: "result.results[*].title, snippet, metadata, evidence, and local",
+      result
+    }) : renderPortfolioSearch(result));
+    return 0;
+  } finally {
+    await session.close();
+  }
+}
+async function runPortfolioAudit(command, output, dependencies) {
+  const selection = await authorizedPortfolioSelection(command, dependencies);
+  const report = await (dependencies.auditKnowledgePortfolio ?? auditKnowledgePortfolio)({
+    registryPath: command.registryPath,
+    ...selection.registry === undefined ? {} : { registry: selection.registry },
+    workspaceRoot: command.workspaceRoot,
+    authorizedVaults: selection.authorizedVaults
+  });
+  if (command.json) {
+    output.stdout(terminalSafeJson({
+      ok: report.counts.error === 0 && !report.truncated,
+      report
+    }));
+  } else {
+    const lines = [
+      `Portfolio audit: ${report.auditedVaults}/${report.selectedVaults} vaults; ${report.notes} notes`,
+      `Issues: ${report.counts.error} errors, ${report.counts.warning} warnings, ${report.counts.advisory} advisories`
+    ];
+    for (const issue of report.issues) {
+      const location = issue.vault === undefined ? "portfolio" : `${issue.vault.key}${issue.path === undefined ? "" : `:${issue.path}${issue.line === undefined ? "" : `:${issue.line}`}`}`;
+      lines.push(`- ${issue.severity} ${issue.code} ${safe(location)}: ${safe(issue.message)}`);
+    }
+    output.stdout(`${lines.join(`
+`)}
+`);
+  }
+  return command.strict && (report.counts.error > 0 || report.truncated) ? 3 : 0;
+}
 function contextIssuePayload(issue) {
   return { ...issue };
 }
@@ -3058,6 +3472,14 @@ ${sanitizeTerminalText(usage)}`);
     if (command.kind === "clip") {
       return await (dependencies.runClipCommand ?? main)(command.arguments, process.env, output);
     }
+    if (command.kind === "capture-bundle")
+      return await runCaptureBundle(command, output, dependencies);
+    if (command.kind === "capture-diff")
+      return await runCaptureDiff(command, output, dependencies);
+    if (command.kind === "portfolio-search")
+      return await runPortfolioSearch(command, output, dependencies);
+    if (command.kind === "portfolio-audit")
+      return await runPortfolioAudit(command, output, dependencies);
     if (command.kind === "url-metadata") {
       return await (dependencies.runUrlMetadataCommand ?? main3)(command.arguments, process.env, output);
     }

@@ -30,6 +30,7 @@ authority; search scores, metadata rows, and graph results are derived views.
   `kb history search` without changing authored metadata or links.
 - Recent captures awaiting maintained disposition: use the advisory `kb inbox` view.
 - Broad orientation: read `index.md`, then follow the smallest useful link trail. Use `kb catalog` when an exhaustive disposable inventory is actually needed.
+- A question spanning registered vaults: use `kb portfolio search` with a reviewed registry and explicit authorization. Use `kb portfolio audit` to assess IDs, duplicate authority, links, attachments, and provenance without repairing content.
 
 ```sh
 kb context src/parser.ts --root "$KB_ROOT" --repo "$KB_REPO"
@@ -46,7 +47,35 @@ kb search "notes/write-path" --root "$KB_ROOT" --mode exact --no-history --json
 kb history "notes/write-path" --root "$KB_ROOT" --repo "$KB_REPO" --json
 kb history search src/parser.ts --root "$KB_ROOT" --repo "$KB_REPO" --json
 kb inbox --root "$KB_ROOT" --limit 25 --json
+kb portfolio search "durable memory" --registry ./kb-portfolio.json --workspace .. --shared --json
+kb portfolio audit --registry ./kb-portfolio.json --workspace .. --vault hraness/kb --vault 0thernet/jungle --strict --json
 ```
+
+Portfolio selection is an access decision. Prefer repeated `--vault owner/id`
+for deliberate private or personal scope. `--shared` selects only public and
+organization entries; `--all` exists only for audit. One operation is bounded
+to 32 vaults and never silently truncates a larger registry-derived selection.
+Open returned notes before concluding. Cross-vault scores are not compared;
+federation uses deterministic reciprocal local rank and stable logical IDs.
+
+When a reviewed consumer policy needs repeatable query shorthand, pass a strict
+v1 rules file. An alias is recognized only as the first token and can add a
+query, mode, metadata filters, tags, or repository scopes without discarding
+caller constraints. Priority ordering is a separate opt-in:
+
+```sh
+kb search "@active-plans parser" --root "$KB_ROOT" \
+  --rules ./search-rules.json --priority --json
+kb portfolio search "@active-plans parser" \
+  --registry ./kb-portfolio.json --workspace .. --shared \
+  --rules ./search-rules.json --priority --json
+```
+
+`--rules` alone enables aliases but retains relevance order. `--priority`
+requires a rules file and requests `priority-then-relevance`; exact identities
+still come first, and matching selected hits carry a rule trace. Keep this
+policy beside the registry or repository that owns it. Rules do not grant
+access, choose authority, author links, or mutate Markdown.
 
 `kb context` prints hub and record summaries, not their bodies. Each record
 states the exact `repository_scopes` declaration that matched, the match depth,
@@ -117,7 +146,7 @@ For several related queries, prefer one SDK session to repeated CLI process
 startup:
 
 ```ts
-import { openKnowledgeBase, packSearchContext } from "@hraness/kb/sdk";
+import { openKnowledgeBase, packUntrustedSearchContext } from "@hraness/kb/sdk";
 
 const kb = await openKnowledgeBase({ root: "kb", repository: "." });
 try {
@@ -126,7 +155,7 @@ try {
     graph: { depth: 1 },
     history: "auto",
   });
-  console.log(packSearchContext(result).content);
+  console.log(packUntrustedSearchContext(result).content);
 } finally {
   await kb.close();
 }
@@ -136,6 +165,10 @@ try {
 `searchHistory` share one confined read-only scan. QMD and Git initialize
 lazily. The session does not watch Markdown or repository changes. Close it
 before a write and open a new session after the final refresh and check.
+
+Pass only ordinary plain objects and arrays from KB or parsed JSON into
+`packUntrustedSearchContext`. A same-realm JavaScript `Proxy` is executable
+code, not inert data; isolate or serialize it before projection.
 
 When independent queries can run concurrently, compose them with
 `defineWorkflow` and `runWorkflow` or import a packaged workflow. The runner

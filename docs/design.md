@@ -347,7 +347,7 @@ Agents that need several retrieval operations can use the SDK without spawning
 one CLI process per question:
 
 ```ts
-import { openKnowledgeBase, packSearchContext } from "@hraness/kb/sdk";
+import { openKnowledgeBase, packUntrustedSearchContext } from "@hraness/kb/sdk";
 
 const kb = await openKnowledgeBase({ root: "kb", repository: "." });
 try {
@@ -357,7 +357,7 @@ try {
     graph: { depth: 1 },
     history: "auto",
   });
-  console.log(packSearchContext(result).content);
+  console.log(packUntrustedSearchContext(result).content);
 } finally {
   await kb.close();
 }
@@ -368,6 +368,12 @@ Opening a session performs one confined vault scan. `grep`, `list`, `read`,
 snapshot. QMD and Git are opened lazily. The session is intentionally read-only
 and does not watch the filesystem. Close it and open a new session after any
 Markdown write so later work cannot mistake an old snapshot for current state.
+
+`packUntrustedSearchContext` accepts ordinary plain objects and arrays, such as
+values produced by JSON parsing or KB itself. Do not pass same-realm `Proxy`
+objects: proxy inspection can execute user code and is outside a data-only
+projection boundary. Isolate or serialize foreign executable objects before
+packing them.
 
 Code-mode DAGs use `defineWorkflow` and `runWorkflow`. The staged
 `defineWorkflow<Input>("id").node(...).output(...)` builder infers each node's
@@ -402,6 +408,13 @@ try {
 `explainChangeWorkflow` searches authored rationale and Git evolution in
 parallel, and `planRadarWorkflow` joins exact plan state with retrieval and
 history.
+
+Only `decisionContextWorkflow` returns a bounded untrusted context envelope.
+`explainChangeWorkflow` and `planRadarWorkflow` intentionally return raw
+source-derived KB and Git structures for trusted application code to inspect.
+Treat every string field in those results as untrusted data: do not execute it
+or place it in a model instruction channel, and project or pack the selected
+fields through the untrusted-content boundary before an agent handoff.
 
 Changes to retrieval ranking use the exported deterministic metric helpers for
 recall at k, reciprocal rank, and nDCG. The six-case synthetic rank-fusion

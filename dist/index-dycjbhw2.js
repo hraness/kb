@@ -5,15 +5,15 @@ import {
   parseArchiveTodayMementoUrl,
   parseMetadataSearchResponse,
   rankMetadataSearchResults
-} from "./index-tp2p17gt.js";
-import {
-  sanitizeArtifactUrl
-} from "./index-ey9rycsn.js";
+} from "./index-7fzc32gf.js";
 import {
   assertSafeNetworkUrl,
   isPrivateHostname,
   resolveSafeNetworkTarget
 } from "./index-e5fbsywq.js";
+import {
+  sanitizeArtifactUrl
+} from "./index-mxxxytys.js";
 
 // src/clip/metadata-search.ts
 import { spawn } from "child_process";

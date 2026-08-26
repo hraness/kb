@@ -40,6 +40,14 @@ import {
   type FusionContribution,
 } from "./search.js";
 import {
+  expandSearchRequest,
+  parseSearchRules,
+  prioritizeSearchHits,
+  type SearchPriorityTrace,
+  type SearchRuleRequest,
+  type SearchRulesV1,
+} from "./search-rules.js";
+import {
   openSemanticSearchSession,
   recommendedEmbeddingModel,
   type SemanticDependencies,
@@ -54,6 +62,11 @@ import {
   type ScanVaultOptions,
   type VaultSnapshot,
 } from "./vault.js";
+import {
+  createUntrustedToolResult,
+  UntrustedContentBudgetError,
+  type UntrustedStructuredContent,
+} from "./untrusted-content.js";
 
 export const MAX_SEARCH_RESULTS = 100;
 export const MAX_SEARCH_CANDIDATES = 500;
@@ -61,12 +74,14 @@ export const DEFAULT_SEARCH_RESULTS = 10;
 const MAX_READ_BYTES = 64 * 1_024;
 const DEFAULT_CONTEXT_BYTES = 24 * 1_024;
 const MAX_CONTEXT_BYTES = 64 * 1_024;
+export const MIN_UNTRUSTED_CONTEXT_BYTES = 512;
 const DEFAULT_SEARCH_HISTORY_NOTES = 5;
 const MAX_SEARCH_HISTORY_NOTES = 20;
 export const MAX_SEARCH_RELATED_SEEDS = 5;
 export const MAX_SEARCH_NOTE_REFERENCE_BYTES = 16 * 1_024;
 
 export type KnowledgeBaseSearchMode = "exact" | SemanticSearchMode;
+export type KnowledgeBaseSearchOrdering = "relevance" | "priority-then-relevance";
 
 export type KnowledgeBaseGraphOptions = Omit<
   GraphContextOptions,
@@ -86,6 +101,8 @@ export type KnowledgeBaseHistoryOptions = GitHistoryForNotesOptions & {
 export type KnowledgeBaseSearchOptions = {
   readonly query: string;
   readonly mode?: KnowledgeBaseSearchMode;
+  /** Preserve relevance by default; configured priority rules remain explicitly opt-in. */
+  readonly ordering?: KnowledgeBaseSearchOrdering;
   readonly filters?: QueryOptions["filters"];
   readonly tags?: readonly string[];
   /** Match any exact, case-sensitive canonical authored repository scope. */
@@ -147,6 +164,25 @@ export type KnowledgeBaseSearchDiagnostic = {
   readonly message?: string;
 };
 
+export type KnowledgeBaseSearchPriorityApplication = {
+  readonly ordering: "priority-then-relevance";
+  readonly trace: readonly SearchPriorityTrace[];
+};
+
+export type KnowledgeBaseSearchRuleApplication =
+  | {
+      /** Configured leading alias consumed from the caller query. */
+      readonly alias: string;
+      /** Retrieval query after the alias's query and constraints were expanded. */
+      readonly effectiveQuery: string;
+      readonly priority?: KnowledgeBaseSearchPriorityApplication;
+    }
+  | {
+      readonly alias?: never;
+      readonly effectiveQuery?: never;
+      readonly priority: KnowledgeBaseSearchPriorityApplication;
+    };
+
 export type KnowledgeBaseSearchResult = {
   readonly query: string;
   readonly mode: KnowledgeBaseSearchMode;
@@ -154,6 +190,8 @@ export type KnowledgeBaseSearchResult = {
   readonly graph: GraphContext | null;
   readonly history: GitHistoryForNotesResult | null;
   readonly partial: boolean;
+  /** Present only when an alias or at least one priority rule was applied. */
+  readonly rules?: KnowledgeBaseSearchRuleApplication;
   readonly diagnostics: {
     readonly notes: number;
     readonly model: string | null;
@@ -174,6 +212,10 @@ export type KnowledgeBaseReadResult = {
 
 export type OpenKnowledgeBaseOptions = {
   readonly root: string;
+  /** Strict v1 aliases and advisory priority rules for this session. */
+  readonly searchRules?: SearchRulesV1;
+  /** Stable logical vault context used only by search rules with a vaultId predicate. */
+  readonly vaultId?: string;
   /** Repository root enables bounded Git history and provenance. */
   readonly repository?: string;
   readonly database?: string;
@@ -304,6 +346,16 @@ function checkedSearchMode(value: unknown): KnowledgeBaseSearchMode {
   return mode;
 }
 
+function checkedSearchOrdering(value: unknown): KnowledgeBaseSearchOrdering {
+  const ordering = value ?? "relevance";
+  if (ordering !== "relevance" && ordering !== "priority-then-relevance") {
+    throw new TypeError(
+      'Knowledge-base search ordering must be "relevance" or "priority-then-relevance".',
+    );
+  }
+  return ordering;
+}
+
 type CheckedGraphOptions = {
   readonly related: readonly string[];
   readonly depth: number;
@@ -418,11 +470,19 @@ function checkedHistoryRequest(value: unknown): CheckedHistoryRequest {
   };
 }
 
+/** Validate the search-history request before any optional backend work begins. */
+export function validateKnowledgeBaseSearchHistory(value: unknown): void {
+  checkedHistoryRequest(value);
+}
+
 /** Open a read-only session that shares one live Markdown scan across retrieval tools. */
 export async function openKnowledgeBase(
   options: OpenKnowledgeBaseOptions,
   dependencies: KnowledgeBaseDependencies = {},
 ): Promise<KnowledgeBaseSession> {
+  const searchRules = options.searchRules === undefined
+    ? null
+    : parseSearchRules(options.searchRules);
   if (options.embeddingModelFile !== undefined && options.embeddingModelLease !== undefined) {
     throw new TypeError(
       "embeddingModelFile and embeddingModelLease are mutually exclusive.",
@@ -563,9 +623,18 @@ export async function openKnowledgeBase(
   ): Promise<KnowledgeBaseSearchResult> => {
     assertOpen();
     const startedAt = performance.now();
-    const { query } = validateSearchQuery(searchOptions.query);
-    const mode = checkedSearchMode(searchOptions.mode);
-    const minScore = searchOptions.minScore;
+    const { query: requestedQuery } = validateSearchQuery(searchOptions.query);
+    const expansion = searchRules === null
+      ? { request: searchOptions, alias: null }
+      : expandSearchRequest(
+          searchOptions as KnowledgeBaseSearchOptions & SearchRuleRequest,
+          searchRules,
+        );
+    const effectiveOptions = expansion.request as KnowledgeBaseSearchOptions;
+    const { query: effectiveQuery } = validateSearchQuery(effectiveOptions.query);
+    const mode = checkedSearchMode(effectiveOptions.mode);
+    const ordering = checkedSearchOrdering(effectiveOptions.ordering);
+    const minScore = effectiveOptions.minScore;
     if (
       minScore !== undefined
       && (
@@ -580,17 +649,17 @@ export async function openKnowledgeBase(
       throw new Error("Search minimum score applies only to hybrid, keyword, or semantic mode.");
     }
     const limit = checkedLimit(
-      searchOptions.limit,
+      effectiveOptions.limit,
       DEFAULT_SEARCH_RESULTS,
       MAX_SEARCH_RESULTS,
       "Search limit",
     );
-    const filters = searchOptions.filters ?? [];
-    const tags = searchOptions.tags ?? [];
-    const repositoryScopes = searchOptions.repositoryScopes ?? [];
+    const filters = effectiveOptions.filters ?? [];
+    const tags = effectiveOptions.tags ?? [];
+    const repositoryScopes = effectiveOptions.repositoryScopes ?? [];
     const filtered = filters.length > 0 || tags.length > 0 || repositoryScopes.length > 0;
     const candidateLimit = checkedLimit(
-      searchOptions.candidateLimit,
+      effectiveOptions.candidateLimit,
       filtered ? MAX_SEARCH_CANDIDATES : Math.max(40, limit * 4),
       MAX_SEARCH_CANDIDATES,
       "Search candidate limit",
@@ -598,8 +667,8 @@ export async function openKnowledgeBase(
     if (candidateLimit < limit) {
       throw new RangeError("Search candidate limit must be at least the result limit.");
     }
-    const historyRequest = checkedHistoryRequest(searchOptions.history);
-    const graphOptions = checkedGraphOptions(searchOptions.graph);
+    const historyRequest = checkedHistoryRequest(effectiveOptions.history);
+    const graphOptions = checkedGraphOptions(effectiveOptions.graph);
     const explicitSeeds = graphOptions === null
       ? []
       : resolvedGraphSeeds(snapshot.notes, graphOptions.related);
@@ -612,7 +681,7 @@ export async function openKnowledgeBase(
     const includeExact = mode === "hybrid" || mode === "exact";
     const exact = includeExact
       ? searchExactVault(snapshot.notes, snapshot.analysis, {
-          query,
+          query: effectiveQuery,
           filters,
           tags,
           repositoryScopes,
@@ -641,7 +710,7 @@ export async function openKnowledgeBase(
           model = session.model;
           const semanticLimit = candidateLimit;
           const result = await session.search({
-            query,
+            query: effectiveQuery,
             mode: selectedQmdMode,
             limit: semanticLimit,
             candidateLimit,
@@ -717,53 +786,71 @@ export async function openKnowledgeBase(
         - Number(exactById.get(left.id)?.hit.identity ?? false)
       || left.rank - right.rank
       || left.id.localeCompare(right.id));
-    const results = ordered.slice(0, limit).map((candidate, index): KnowledgeBaseSearchHit => {
-      const note = notesById.get(candidate.id);
-      if (note === undefined) {
-        throw new Error(`Fused retrieval returned unknown note ${JSON.stringify(candidate.id)}.`);
+    const shouldApplyPriority = ordering === "priority-then-relevance"
+      && searchRules !== null
+      && searchRules.priorityRules.length > 0;
+    const relevanceResults = (shouldApplyPriority ? ordered : ordered.slice(0, limit))
+      .map((candidate, index): KnowledgeBaseSearchHit => {
+        const note = notesById.get(candidate.id);
+        if (note === undefined) {
+          throw new Error(`Fused retrieval returned unknown note ${JSON.stringify(candidate.id)}.`);
+        }
+        const exactMatch = exactById.get(candidate.id);
+        const semanticMatch = semanticById.get(candidate.id);
+        const evidence: KnowledgeBaseSearchEvidence[] = [];
+        if (exactMatch !== undefined) {
+          evidence.push({
+            kind: "exact",
+            rank: exactMatch.rank,
+            identity: exactMatch.hit.identity,
+            matches: exactMatch.hit.matches,
+          });
+        }
+        if (semanticMatch !== undefined) {
+          evidence.push({
+            kind: "qmd",
+            rank: semanticMatch.rank,
+            path: semanticMatch.hit.path,
+            ...(semanticMatch.hit.line === undefined ? {} : { line: semanticMatch.hit.line }),
+            source: semanticMatch.hit.source,
+            score: semanticMatch.hit.score,
+            ...(semanticMatch.hit.signals === undefined
+              ? {}
+              : { signals: semanticMatch.hit.signals }),
+          });
+        }
+        const snippetSource = exactMatch?.hit.identity === true || semanticMatch === undefined
+          ? exactMatch?.hit
+          : semanticMatch.hit;
+        return {
+          id: note.id,
+          path: note.path,
+          title: note.title,
+          rank: index + 1,
+          score: candidate.score,
+          identity: exactMatch?.hit.identity ?? false,
+          ...(snippetSource?.line === undefined ? {} : { line: snippetSource.line }),
+          snippet: snippetSource?.snippet ?? note.summary,
+          tags: note.tags,
+          metadata: note.metadata,
+          evidence,
+          contributions: candidate.contributions,
+        };
+      });
+    let priorityTrace: readonly SearchPriorityTrace[] | null = null;
+    let results: readonly KnowledgeBaseSearchHit[] = relevanceResults.slice(0, limit);
+    if (shouldApplyPriority && searchRules !== null) {
+      const prioritized = prioritizeSearchHits(relevanceResults, searchRules, {
+        ...(options.vaultId === undefined ? {} : { vaultId: options.vaultId }),
+      });
+      const selectedHits = prioritized.hits.slice(0, limit);
+      const selectedTrace = prioritized.trace.slice(0, limit);
+      if (selectedTrace.some(({ matchedRuleIds }) => matchedRuleIds.length > 0)) {
+        priorityTrace = Object.freeze(selectedTrace);
+        results = Object.freeze(selectedHits.map((hit, index) =>
+          hit.rank === index + 1 ? hit : { ...hit, rank: index + 1 }));
       }
-      const exactMatch = exactById.get(candidate.id);
-      const semanticMatch = semanticById.get(candidate.id);
-      const evidence: KnowledgeBaseSearchEvidence[] = [];
-      if (exactMatch !== undefined) {
-        evidence.push({
-          kind: "exact",
-          rank: exactMatch.rank,
-          identity: exactMatch.hit.identity,
-          matches: exactMatch.hit.matches,
-        });
-      }
-      if (semanticMatch !== undefined) {
-        evidence.push({
-          kind: "qmd",
-          rank: semanticMatch.rank,
-          path: semanticMatch.hit.path,
-          ...(semanticMatch.hit.line === undefined ? {} : { line: semanticMatch.hit.line }),
-          source: semanticMatch.hit.source,
-          score: semanticMatch.hit.score,
-          ...(semanticMatch.hit.signals === undefined
-            ? {}
-            : { signals: semanticMatch.hit.signals }),
-        });
-      }
-      const snippetSource = exactMatch?.hit.identity === true || semanticMatch === undefined
-        ? exactMatch?.hit
-        : semanticMatch.hit;
-      return {
-        id: note.id,
-        path: note.path,
-        title: note.title,
-        rank: index + 1,
-        score: candidate.score,
-        identity: exactMatch?.hit.identity ?? false,
-        ...(snippetSource?.line === undefined ? {} : { line: snippetSource.line }),
-        snippet: snippetSource?.snippet ?? note.summary,
-        tags: note.tags,
-        metadata: note.metadata,
-        evidence,
-        contributions: candidate.contributions,
-      };
-    });
+    }
     let graph: GraphContext | null = null;
     if (graphOptions !== null) {
       try {
@@ -846,13 +933,31 @@ export async function openKnowledgeBase(
             message: history.reason,
           });
     }
+    const priorityApplication: KnowledgeBaseSearchPriorityApplication | undefined =
+      priorityTrace === null
+        ? undefined
+        : Object.freeze({
+            ordering: "priority-then-relevance",
+            trace: priorityTrace,
+          });
+    const ruleApplication: KnowledgeBaseSearchRuleApplication | undefined =
+      expansion.alias === null
+        ? priorityApplication === undefined
+          ? undefined
+          : Object.freeze({ priority: priorityApplication })
+        : Object.freeze({
+            alias: expansion.alias,
+            effectiveQuery,
+            ...(priorityApplication === undefined ? {} : { priority: priorityApplication }),
+          });
     return {
-      query,
+      query: expansion.alias === null ? effectiveQuery : requestedQuery,
       mode,
       results,
       graph,
       history,
       partial: diagnostics.some(({ status }) => status !== "ready"),
+      ...(ruleApplication === undefined ? {} : { rules: ruleApplication }),
       diagnostics: {
         notes: snapshot.notes.length,
         model: selectedQmdMode === null ? null : model ?? recommendedEmbeddingModel,
@@ -1017,4 +1122,331 @@ export function packSearchContext(
   }
   writer.append("\n", true);
   return writer.result();
+}
+
+export type PackedUntrustedSearchContext = Readonly<{
+  /** Trusted notice followed by canonical JSON for the structured content. */
+  content: string;
+  truncated: boolean;
+  structuredContent: UntrustedStructuredContent;
+}>;
+
+type InspectedDataRecord = Readonly<Record<string, unknown>>;
+
+function inspectedDataRecord(value: unknown, label: string): InspectedDataRecord {
+  if (typeof value !== "object" || value === null || Array.isArray(value)) {
+    throw new TypeError(`${label} must be a plain data object.`);
+  }
+  const prototype = Object.getPrototypeOf(value);
+  if (prototype !== Object.prototype && prototype !== null) {
+    throw new TypeError(`${label} must be a plain data object.`);
+  }
+  const descriptors = Object.getOwnPropertyDescriptors(value);
+  const output = Object.create(null) as Record<string, unknown>;
+  for (const key of Reflect.ownKeys(descriptors)) {
+    if (typeof key === "symbol") throw new TypeError(`${label} contains a symbol property.`);
+    const descriptor = descriptors[key];
+    if (descriptor === undefined || !("value" in descriptor)) {
+      throw new TypeError(`${label} contains an accessor property.`);
+    }
+    if (!descriptor.enumerable) {
+      throw new TypeError(`${label} contains a non-enumerable property.`);
+    }
+    Object.defineProperty(output, key, {
+      configurable: false,
+      enumerable: true,
+      value: descriptor.value,
+      writable: false,
+    });
+  }
+  return Object.freeze(output);
+}
+
+function inspectedDataArray(
+  value: unknown,
+  label: string,
+  maximum: number,
+): readonly unknown[] {
+  if (!Array.isArray(value) || Object.getPrototypeOf(value) !== Array.prototype) {
+    throw new TypeError(`${label} must be an ordinary array.`);
+  }
+  if (value.length > maximum) {
+    throw new RangeError(`${label} exceeds its ${maximum.toLocaleString("en-US")}-item limit.`);
+  }
+  const descriptors = Object.getOwnPropertyDescriptors(value);
+  for (const key of Reflect.ownKeys(descriptors)) {
+    if (typeof key === "symbol") throw new TypeError(`${label} contains a symbol property.`);
+    if (key === "length") continue;
+    const index = Number(key);
+    if (!Number.isSafeInteger(index) || index < 0 || index >= value.length || String(index) !== key) {
+      throw new TypeError(`${label} contains a non-index property.`);
+    }
+  }
+  const output: unknown[] = [];
+  for (let index = 0; index < value.length; index += 1) {
+    const descriptor = descriptors[String(index)];
+    if (descriptor === undefined || !("value" in descriptor) || !descriptor.enumerable) {
+      throw new TypeError(`${label} must be a dense array of enumerable data properties.`);
+    }
+    output.push(descriptor.value);
+  }
+  return Object.freeze(output);
+}
+
+function requiredData(record: InspectedDataRecord, key: string, label: string): unknown {
+  if (!Object.hasOwn(record, key)) throw new TypeError(`${label}.${key} is required.`);
+  return record[key];
+}
+
+function dataString(value: unknown, label: string): string {
+  if (typeof value !== "string") throw new TypeError(`${label} must be a string.`);
+  return value;
+}
+
+function dataNumber(value: unknown, label: string): number {
+  if (typeof value !== "number" || !Number.isFinite(value)) {
+    throw new TypeError(`${label} must be a finite number.`);
+  }
+  return value;
+}
+
+function dataBoolean(value: unknown, label: string): boolean {
+  if (typeof value !== "boolean") throw new TypeError(`${label} must be a boolean.`);
+  return value;
+}
+
+function optionalDataNumber(
+  record: InspectedDataRecord,
+  key: string,
+  label: string,
+): number | undefined {
+  if (!Object.hasOwn(record, key)) return undefined;
+  return dataNumber(record[key], `${label}.${key}`);
+}
+
+function searchEvidenceSummary(value: unknown, label: string): Readonly<Record<string, unknown>> {
+  const evidence = inspectedDataRecord(value, label);
+  return Object.freeze({
+    kind: dataString(requiredData(evidence, "kind", label), `${label}.kind`),
+    rank: dataNumber(requiredData(evidence, "rank", label), `${label}.rank`),
+  });
+}
+
+function searchHitContextRecord(value: unknown, index: number): Readonly<Record<string, unknown>> {
+  const label = `Knowledge-base search result ${index + 1}`;
+  const hit = inspectedDataRecord(value, label);
+  const evidence = inspectedDataArray(
+    requiredData(hit, "evidence", label),
+    `${label}.evidence`,
+    32,
+  ).map((entry, evidenceIndex) =>
+    searchEvidenceSummary(entry, `${label}.evidence[${evidenceIndex}]`));
+  const line = optionalDataNumber(hit, "line", label);
+  return Object.freeze({
+    kind: "search-result",
+    id: dataString(requiredData(hit, "id", label), `${label}.id`),
+    path: dataString(requiredData(hit, "path", label), `${label}.path`),
+    title: dataString(requiredData(hit, "title", label), `${label}.title`),
+    rank: dataNumber(requiredData(hit, "rank", label), `${label}.rank`),
+    score: dataNumber(requiredData(hit, "score", label), `${label}.score`),
+    identity: dataBoolean(requiredData(hit, "identity", label), `${label}.identity`),
+    ...(line === undefined ? {} : { line }),
+    evidence: Object.freeze(evidence),
+    snippet: dataString(requiredData(hit, "snippet", label), `${label}.snippet`),
+  });
+}
+
+function graphContextRecords(value: unknown): readonly Readonly<Record<string, unknown>>[] {
+  if (value === null) return [];
+  const graph = inspectedDataRecord(value, "Knowledge-base graph context");
+  const related = inspectedDataArray(
+    requiredData(graph, "related", "Knowledge-base graph context"),
+    "Knowledge-base graph context.related",
+    100,
+  );
+  return Object.freeze(related.map((entry, index) => {
+    const label = `Knowledge-base graph result ${index + 1}`;
+    const hit = inspectedDataRecord(entry, label);
+    const evidence = inspectedDataArray(
+      requiredData(hit, "evidence", label),
+      `${label}.evidence`,
+      100,
+    ).map((item, evidenceIndex) => {
+      const evidenceLabel = `${label}.evidence[${evidenceIndex}]`;
+      const inspected = inspectedDataRecord(item, evidenceLabel);
+      return Object.freeze({
+        kind: dataString(requiredData(inspected, "kind", evidenceLabel), `${evidenceLabel}.kind`),
+      });
+    });
+    return Object.freeze({
+      kind: "graph-related",
+      id: dataString(requiredData(hit, "id", label), `${label}.id`),
+      path: dataString(requiredData(hit, "path", label), `${label}.path`),
+      title: dataString(requiredData(hit, "title", label), `${label}.title`),
+      distance: dataNumber(requiredData(hit, "distance", label), `${label}.distance`),
+      evidence: Object.freeze(evidence),
+    });
+  }));
+}
+
+function gitContextRecords(value: unknown): readonly Readonly<Record<string, unknown>>[] {
+  if (value === null) return [];
+  const history = inspectedDataRecord(value, "Knowledge-base Git provenance");
+  const status = dataString(
+    requiredData(history, "status", "Knowledge-base Git provenance"),
+    "Knowledge-base Git provenance.status",
+  );
+  if (status === "unavailable") {
+    return Object.freeze([Object.freeze({
+      kind: "git-status",
+      status,
+      reason: dataString(
+        requiredData(history, "reason", "Knowledge-base Git provenance"),
+        "Knowledge-base Git provenance.reason",
+      ),
+    })]);
+  }
+  if (status !== "ready") throw new TypeError("Knowledge-base Git provenance.status is invalid.");
+  const output: Readonly<Record<string, unknown>>[] = [Object.freeze({
+    kind: "git-status",
+    status,
+    head: dataString(
+      requiredData(history, "head", "Knowledge-base Git provenance"),
+      "Knowledge-base Git provenance.head",
+    ),
+  })];
+  const notes = inspectedDataArray(
+    requiredData(history, "notes", "Knowledge-base Git provenance"),
+    "Knowledge-base Git provenance.notes",
+    MAX_SEARCH_HISTORY_NOTES,
+  );
+  for (const [noteIndex, entry] of notes.entries()) {
+    const noteLabel = `Knowledge-base Git provenance note ${noteIndex + 1}`;
+    const note = inspectedDataRecord(entry, noteLabel);
+    const noteId = dataString(requiredData(note, "id", noteLabel), `${noteLabel}.id`);
+    const path = dataString(requiredData(note, "path", noteLabel), `${noteLabel}.path`);
+    const commits = inspectedDataArray(
+      requiredData(note, "commits", noteLabel),
+      `${noteLabel}.commits`,
+      100,
+    );
+    for (const [commitIndex, commitValue] of commits.entries()) {
+      const commitLabel = `${noteLabel}.commits[${commitIndex}]`;
+      const commit = inspectedDataRecord(commitValue, commitLabel);
+      output.push(Object.freeze({
+        kind: "git-provenance",
+        noteId,
+        path,
+        hash: dataString(requiredData(commit, "hash", commitLabel), `${commitLabel}.hash`),
+        committedAt: dataString(
+          requiredData(commit, "committedAt", commitLabel),
+          `${commitLabel}.committedAt`,
+        ),
+        subject: dataString(
+          requiredData(commit, "subject", commitLabel),
+          `${commitLabel}.subject`,
+        ),
+      }));
+    }
+  }
+  if (Object.hasOwn(history, "limitedCommits")) {
+    const limited = inspectedDataArray(
+      history.limitedCommits,
+      "Knowledge-base Git provenance.limitedCommits",
+      100,
+    );
+    if (limited.length > 0) {
+      const first = inspectedDataRecord(limited[0], "Knowledge-base Git limited commit");
+      output.push(Object.freeze({
+        kind: "git-coverage",
+        limitedCommits: limited.length,
+        pathLimit: dataNumber(
+          requiredData(first, "pathLimit", "Knowledge-base Git limited commit"),
+          "Knowledge-base Git limited commit.pathLimit",
+        ),
+      }));
+    }
+  }
+  return Object.freeze(output);
+}
+
+function untrustedSearchRecords(
+  result: KnowledgeBaseSearchResult,
+): readonly Readonly<Record<string, unknown>>[] {
+  const root = inspectedDataRecord(result, "Knowledge-base search result");
+  const records: Readonly<Record<string, unknown>>[] = [Object.freeze({
+    kind: "knowledge-base-search",
+    query: dataString(
+      requiredData(root, "query", "Knowledge-base search result"),
+      "Knowledge-base search result.query",
+    ),
+    mode: dataString(
+      requiredData(root, "mode", "Knowledge-base search result"),
+      "Knowledge-base search result.mode",
+    ),
+    partial: dataBoolean(
+      requiredData(root, "partial", "Knowledge-base search result"),
+      "Knowledge-base search result.partial",
+    ),
+  })];
+  const results = inspectedDataArray(
+    requiredData(root, "results", "Knowledge-base search result"),
+    "Knowledge-base search result.results",
+    MAX_SEARCH_RESULTS,
+  );
+  records.push(...results.map(searchHitContextRecord));
+  records.push(...graphContextRecords(requiredData(root, "graph", "Knowledge-base search result")));
+  records.push(...gitContextRecords(requiredData(root, "history", "Knowledge-base search result")));
+  return Object.freeze(records);
+}
+
+/**
+ * Pack source-controlled search, graph, and Git fields as canonical JSON under
+ * an explicit execution-untrusted boundary. Epistemic trust labels, if added by
+ * a consumer, remain data and never change this execution classification.
+ */
+export function packUntrustedSearchContext(
+  result: KnowledgeBaseSearchResult,
+  options: { readonly maxBytes?: number } = {},
+): PackedUntrustedSearchContext {
+  const maximumBytes = checkedLimit(
+    options.maxBytes,
+    DEFAULT_CONTEXT_BYTES,
+    MAX_CONTEXT_BYTES,
+    "Untrusted context byte limit",
+  );
+  if (maximumBytes < MIN_UNTRUSTED_CONTEXT_BYTES) {
+    throw new RangeError(
+      `Untrusted context byte limit must be at least ${MIN_UNTRUSTED_CONTEXT_BYTES}.`,
+    );
+  }
+  const accepted: Readonly<Record<string, unknown>>[] = [];
+  let truncated = false;
+  for (const record of untrustedSearchRecords(result)) {
+    try {
+      createUntrustedToolResult([...accepted, record], {
+        maxBytes: maximumBytes,
+        truncated: false,
+      });
+      accepted.push(record);
+    } catch (error) {
+      if (!(error instanceof UntrustedContentBudgetError)) throw error;
+      truncated = true;
+      break;
+    }
+  }
+  if (accepted.length === 0) {
+    throw new RangeError(
+      `Untrusted context byte limit ${maximumBytes} cannot hold the required search header.`,
+    );
+  }
+  const toolResult = createUntrustedToolResult(accepted, {
+    maxBytes: maximumBytes,
+    truncated,
+  });
+  return Object.freeze({
+    content: toolResult.content[0].text,
+    truncated,
+    structuredContent: toolResult.structuredContent,
+  });
 }

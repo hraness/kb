@@ -142,12 +142,26 @@ describe("bundled knowledge-base workflows", () => {
     const kb = fakeSession({ history: () => Promise.resolve(history) });
     const result = await runWorkflow(decisionContextWorkflow, {
       kb,
-      input: { query: "context", maxBytes: 512 },
+      input: { query: "context", maxBytes: 2_048 },
     });
     expectTypeOf(result.output).toEqualTypeOf<DecisionContextOutput>();
     const output = result.output;
-    expect(output.search.history).toEqual(history);
-    expect(output.context).toContain("Knowledge-base context");
+    expect(output).not.toHaveProperty("search");
+    expect(output.context).toStartWith("Security notice:");
+    const structured = JSON.parse(output.context.slice(output.context.indexOf("\n") + 1)) as {
+      readonly untrusted_content: {
+        readonly records: readonly {
+          readonly trust: string;
+          readonly fields: { readonly kind?: string };
+        }[];
+      };
+    };
+    expect(structured.untrusted_content.records.map(({ fields }) => fields.kind)).toEqual([
+      "knowledge-base-search",
+      "git-status",
+    ]);
+    expect(structured.untrusted_content.records.every(({ trust }) => trust === "untrusted"))
+      .toBe(true);
     expect(output.truncated).toBe(false);
   });
 

@@ -45,6 +45,73 @@ The Markdown records source and capture metadata. `capture.json` records the acq
 
 Set `KB_CLIP_OUTPUT` to change the default output root, or pass `--output <directory>` for one command. Set `KB_CLIP_USER_AGENT` or pass `--user-agent <value>` to override the default request user agent.
 
+## Inspect and verify a saved bundle
+
+```sh
+kb capture show kb/articles/example
+kb capture show kb/articles/example --verify-assets
+kb capture verify kb/articles/example
+kb capture verify kb/articles/example --verify-assets --json
+```
+
+`show` reads the document, compares its v4 byte count and digest when present, and prints its Markdown as untrusted data. `verify` reports integrity without printing the document in its text output. Add `--verify-assets` to either command to read and hash every listed asset. A mismatch or an unavailable authoritative document digest returns exit status 3.
+
+The JSON forms preserve the same disclosure boundary: `show --json` includes the stored Markdown as explicitly untrusted inspection data, while `verify --json` returns only integrity metadata and issues. Verification JSON omits both the Markdown and retained source HTML so an integrity check does not accidentally disclose captured content.
+
+Schema v4 records `document.path`, `document.bytes`, and `document.sha256` in `capture.json`. The lowercase SHA-256 digest covers the exact credential-redacted, newline-terminated Markdown bytes that KB writes. It does not cover `capture.json`, source HTML, or assets. Each asset has a separate byte count and SHA-256 digest. Schema versions one through three report document integrity as `unavailable` because they do not contain the v4 document record; `verify` does not present that state as success.
+
+When asset verification is requested, a listed asset that is absent is an integrity mismatch rather than an operational reader crash. It produces an `asset-integrity` issue and exit status 3, like a digest or byte-count mismatch. Structural alias, link, confinement, and resource-budget failures remain operational errors because the reader cannot safely characterize the requested bytes.
+
+Bundle inspection keeps the canonical root open, rejects linked or aliased path ancestors and linked leaves, and rechecks root, ancestor, and file identities around every read. Asset verification is also bounded by file count, per-file bytes, aggregate bytes, and elapsed time. The SDK defaults are 1,000 files, 100 MB per file, 500 MB total, and 30 seconds; callers may raise them only to the capture contract's hard ceilings. These checks protect against hostile stored bundle structure and ordinary concurrent replacement. A malicious process with the same filesystem authority that can swap and restore path components during a system call is outside the pure-JavaScript reader's boundary; do not inspect bundles in a directory concurrently writable by an untrusted local process.
+
+Source HTML remains opt-in when you read a bundle:
+
+```sh
+kb capture show kb/articles/example --include-source-html
+```
+
+This flag has an effect only when the capture used `--evidence source` or `--evidence all`. KB removes active subtrees and form state, redacts credential-shaped values, and stores the result as inert HTML. Treat the retained text as hostile data, not instructions. It can still contain private content or text intended to influence an agent.
+
+## Use Git for capture history
+
+Commit retained capture bundles to Git, then compare the current Markdown document with an earlier revision:
+
+```sh
+kb capture diff kb/articles/example
+kb capture diff /path/to/repository/kb/articles/example --repo /path/to/repository --ref main
+kb capture diff kb/articles/example --repo . --ref main --json
+```
+
+The bundle must be inside the selected repository. The default reference is `HEAD`; `--ref` accepts a bounded branch, tag, or commit name, not a revision expression such as `HEAD~1`. KB validates the work tree and ref separately, so a bad repository or ref is not mislabeled as a missing file. The command reports `changed`, `unchanged`, or `missing-at-ref` for the exact Markdown path and emits a bounded Git diff when it changed. It rereads and matches the capture digest after diff generation, rejecting a concurrent change instead of pairing one digest with another snapshot's diff. It does not compare the manifest, source HTML, or assets. Run `kb capture verify` separately when integrity matters. Git is the capture version history; KB does not maintain a second content-history database.
+
+## Track capture jobs programmatically
+
+Use the optional `@hraness/kb/clip/jobs` ledger when a service needs durable capture progress:
+
+```ts
+import {
+  completeCaptureJob,
+  createCaptureJob,
+  openCaptureJobStore,
+  updateCaptureJob,
+} from "@hraness/kb/clip/jobs";
+
+const store = await openCaptureJobStore("/absolute/path/to/capture-jobs");
+let job = await createCaptureJob(store, { target: "https://example.com/article" });
+job = await updateCaptureJob(store, job.id, {
+  expectedRevision: job.revision,
+  phase: "acquiring",
+});
+job = await completeCaptureJob(store, job.id, {
+  expectedRevision: job.revision,
+  status: "complete",
+});
+```
+
+Create the dedicated canonical mode-0700 store directory before opening it, and pass the returned store to every operation. The opener rejects filesystem aliases, links, and group/world access. Each job is one private, bounded UUID JSON record. Creation starts revision 1 in `running` and `queued`; updates require the expected revision, append attempts and warnings, and move phases forward. Completion records a capture status. It can also record `bundle: { path, sha256 }`; use `capture.json`'s v4 `document.sha256` as `sha256` because the ledger does not calculate a separate bundle digest. `failCaptureJob` records an operational error separately from capture status. `readCaptureJob` and `listCaptureJobs` inspect retained records. A terminal `completed` or `failed` record cannot transition again, and a process crash leaves the last `running` record visible.
+
+The ledger redacts credential-shaped values and strips terminal controls from targets, attempts, warnings, bundle paths, and errors. A store-local, heartbeat-backed filesystem lease serializes cooperating processes across revision validation, atomic whole-record replacement, record verification, and directory synchronization; exactly one same-revision transition can succeed. There is no shared append log. Records remain until the caller applies an explicit external retention policy. The module provides no delete or automatic pruning API, and it does not replace Git as capture history. The lease is a same-host coordination mechanism, not a distributed lock for multi-host network filesystems, and a malicious same-user writer with direct store access remains outside its guarantee.
+
 ## Select acquisition and scope
 
 ```sh

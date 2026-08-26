@@ -3,7 +3,61 @@ import { tmpdir } from "node:os";
 import { delimiter, join, resolve } from "node:path";
 
 const packageName = "@hraness/kb";
-const importSpecifiers = ["@hraness/kb","@hraness/kb/agent-context","@hraness/kb/agent-guide-audit","@hraness/kb/attachments","@hraness/kb/authoring","@hraness/kb/benchmark","@hraness/kb/browser-profiles","@hraness/kb/capture","@hraness/kb/cli","@hraness/kb/clip/acquire","@hraness/kb/clip/args","@hraness/kb/clip/bounded-byte-buffer","@hraness/kb/clip/cli","@hraness/kb/clip/cookies","@hraness/kb/clip/doctor","@hraness/kb/clip/network","@hraness/kb/clip/network-proxy","@hraness/kb/clip/persist","@hraness/kb/clip/terminal","@hraness/kb/evaluation","@hraness/kb/evaluation-builder","@hraness/kb/evaluation-kb","@hraness/kb/git","@hraness/kb/graph","@hraness/kb/navigation","@hraness/kb/pdf","@hraness/kb/percolate","@hraness/kb/query","@hraness/kb/repository-memory","@hraness/kb/sdk","@hraness/kb/search","@hraness/kb/semantic","@hraness/kb/source-inbox","@hraness/kb/url-intelligence","@hraness/kb/workflow","@hraness/kb/workflows","@hraness/kb/workflows/decision-context","@hraness/kb/workflows/explain-change","@hraness/kb/workflows/plan-radar"];
+const importSpecifiers = [
+  "@hraness/kb",
+  "@hraness/kb/agent-context",
+  "@hraness/kb/agent-guide-audit",
+  "@hraness/kb/attachments",
+  "@hraness/kb/authoring",
+  "@hraness/kb/benchmark",
+  "@hraness/kb/browser-profiles",
+  "@hraness/kb/capture",
+  "@hraness/kb/cli",
+  "@hraness/kb/clip/acquire",
+  "@hraness/kb/clip/args",
+  "@hraness/kb/clip/bounded-byte-buffer",
+  "@hraness/kb/clip/bundle-reader",
+  "@hraness/kb/clip/cli",
+  "@hraness/kb/clip/cookies",
+  "@hraness/kb/clip/doctor",
+  "@hraness/kb/clip/jobs",
+  "@hraness/kb/clip/network",
+  "@hraness/kb/clip/network-proxy",
+  "@hraness/kb/clip/persist",
+  "@hraness/kb/clip/refresh",
+  "@hraness/kb/clip/terminal",
+  "@hraness/kb/evaluation",
+  "@hraness/kb/evaluation-builder",
+  "@hraness/kb/evaluation-kb",
+  "@hraness/kb/git",
+  "@hraness/kb/graph",
+  "@hraness/kb/navigation",
+  "@hraness/kb/pdf",
+  "@hraness/kb/percolate",
+  "@hraness/kb/portfolio",
+  "@hraness/kb/query",
+  "@hraness/kb/repository-memory",
+  "@hraness/kb/sdk",
+  "@hraness/kb/search",
+  "@hraness/kb/search-rules",
+  "@hraness/kb/semantic",
+  "@hraness/kb/source-inbox",
+  "@hraness/kb/untrusted-content",
+  "@hraness/kb/url-intelligence",
+  "@hraness/kb/workflow",
+  "@hraness/kb/workflows",
+  "@hraness/kb/workflows/decision-context",
+  "@hraness/kb/workflows/explain-change",
+  "@hraness/kb/workflows/plan-radar",
+];
+const requiredNamedExports = {
+  "@hraness/kb/clip/bundle-reader": ["readCaptureBundle", "verifyCaptureBundle"],
+  "@hraness/kb/clip/jobs": ["createCaptureJob", "openCaptureJobStore", "updateCaptureJob"],
+  "@hraness/kb/clip/refresh": ["diffCaptureBundle"],
+  "@hraness/kb/portfolio": ["openKnowledgePortfolio", "parsePortfolioRegistry", "parseQualifiedDocumentUri"],
+  "@hraness/kb/search-rules": ["parseSearchRules", "prioritizeSearchHits"],
+  "@hraness/kb/untrusted-content": ["createUntrustedToolResult", "projectUntrustedJson"],
+} as const;
 const binNames = ["kb", "kb-evaluation-builder"];
 const verificationPackages = ["@types/bun@^1.3.14","fast-check@^4.8.0","typescript@^6.0.3"];
 const skillNames = ["kb"] as const;
@@ -205,11 +259,42 @@ try {
     nodeExecutable,
     "--input-type=module",
     "-e",
-    `await Promise.all(${JSON.stringify(importSpecifiers)}.map((specifier) => import(specifier)))`,
+    `const required = ${JSON.stringify(requiredNamedExports)};
+for (const specifier of ${JSON.stringify(importSpecifiers)}) {
+  const surface = await import(specifier);
+  for (const name of required[specifier] ?? []) {
+    if (typeof surface[name] !== "function") throw new Error(specifier + " is missing " + name);
+  }
+}`,
   ], consumer);
   const consumerSource = `${importSpecifiers.map((specifier, index) =>
     `import * as surface${String(index)} from ${JSON.stringify(specifier)};`
-  ).join("\n")}\nvoid [${importSpecifiers.map((_specifier, index) =>
+  ).join("\n")}
+import { readCaptureBundle, verifyCaptureBundle } from "@hraness/kb/clip/bundle-reader";
+import { createCaptureJob, openCaptureJobStore, updateCaptureJob } from "@hraness/kb/clip/jobs";
+import { diffCaptureBundle } from "@hraness/kb/clip/refresh";
+import { openKnowledgePortfolio, parsePortfolioRegistry, parseQualifiedDocumentUri } from "@hraness/kb/portfolio";
+import { parseSearchRules, prioritizeSearchHits } from "@hraness/kb/search-rules";
+import { createUntrustedToolResult, projectUntrustedJson } from "@hraness/kb/untrusted-content";
+
+const rules = parseSearchRules({ schemaVersion: 1, aliases: {}, priorityRules: [] });
+const registry = parsePortfolioRegistry({
+  contract: "hraness.kb-portfolio/v1",
+  schemaVersion: 1,
+  vaults: [{
+    owner: "hraness", id: "kb", repository: "hraness/kb", checkout: "kb", root: "kb",
+    role: "repository", visibility: "public", parserVersion: 1,
+  }],
+});
+const identity = parseQualifiedDocumentUri("kb://hraness/kb/note-id");
+const projected = projectUntrustedJson([{ title: "stored source" }]);
+void [
+  readCaptureBundle, verifyCaptureBundle,
+  createCaptureJob, openCaptureJobStore, updateCaptureJob,
+  diffCaptureBundle, openKnowledgePortfolio, prioritizeSearchHits,
+  createUntrustedToolResult, rules, registry, identity, projected,
+];
+void [${importSpecifiers.map((_specifier, index) =>
     `surface${String(index)}`
   ).join(", ")}];\n`;
   await writeFile(join(consumer, "index.ts"), consumerSource);

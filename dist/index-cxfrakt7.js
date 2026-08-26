@@ -9,6 +9,111 @@ import {
   LineCounter,
   parseDocument
 } from "yaml";
+
+// src/portfolio-identity.ts
+var MAX_PORTFOLIO_NAME_BYTES = 64;
+var MAX_DOCUMENT_ID_BYTES = 128;
+var namePattern = /^[a-z0-9](?:[a-z0-9._-]{0,62}[a-z0-9])?$/u;
+var documentIdPattern = /^[a-z0-9](?:[a-z0-9._-]{0,126}[a-z0-9])?$/u;
+var qualifiedUriPattern = /^kb:\/\/([a-z0-9][a-z0-9._-]{0,63})\/([a-z0-9][a-z0-9._-]{0,63})\/([a-z0-9][a-z0-9._-]{0,127})$/u;
+function boundedAsciiName(value, label) {
+  if (typeof value !== "string" || !namePattern.test(value)) {
+    throw new TypeError(`${label} must be a canonical lowercase ASCII name using letters, digits, dots, underscores, or hyphens.`);
+  }
+  if (Buffer.byteLength(value, "utf8") > MAX_PORTFOLIO_NAME_BYTES) {
+    throw new RangeError(`${label} must be at most ${MAX_PORTFOLIO_NAME_BYTES} UTF-8 bytes.`);
+  }
+  return value;
+}
+function portfolioVaultIdentity(owner, id) {
+  const checkedOwner = boundedAsciiName(owner, "Portfolio vault owner");
+  const checkedId = boundedAsciiName(id, "Portfolio vault ID");
+  return Object.freeze({
+    owner: checkedOwner,
+    id: checkedId,
+    key: `${checkedOwner}/${checkedId}`
+  });
+}
+function parseVaultKey(value) {
+  if (typeof value !== "string")
+    throw new TypeError("Portfolio vault key must be a string.");
+  const separator = value.indexOf("/");
+  if (separator < 1 || separator !== value.lastIndexOf("/")) {
+    throw new TypeError("Portfolio vault key must have the canonical owner/id form.");
+  }
+  const identity = portfolioVaultIdentity(value.slice(0, separator), value.slice(separator + 1));
+  if (identity.key !== value) {
+    throw new TypeError("Portfolio vault key must have the canonical owner/id form.");
+  }
+  return identity;
+}
+function parseDocumentId(value) {
+  if (typeof value !== "string" || !documentIdPattern.test(value)) {
+    throw new TypeError("document_id must be a canonical lowercase ASCII ID using letters, digits, dots, underscores, or hyphens.");
+  }
+  if (Buffer.byteLength(value, "utf8") > MAX_DOCUMENT_ID_BYTES) {
+    throw new RangeError(`document_id must be at most ${MAX_DOCUMENT_ID_BYTES} UTF-8 bytes.`);
+  }
+  return value;
+}
+function metadataValues(metadata, normalizedName) {
+  return Object.entries(metadata).filter(([name]) => name.normalize("NFC").toLocaleLowerCase("en-US") === normalizedName).map(([, value]) => value);
+}
+function documentIdState(metadata) {
+  const values = metadataValues(metadata, "document_id");
+  if (values.length === 0)
+    return Object.freeze({ kind: "missing" });
+  if (values.length !== 1) {
+    return Object.freeze({ kind: "invalid", value: Object.freeze([...values]) });
+  }
+  const value = values[0];
+  try {
+    return Object.freeze({ kind: "valid", documentId: parseDocumentId(value) });
+  } catch {
+    return Object.freeze({ kind: "invalid", value });
+  }
+}
+function formatQualifiedDocumentUri(vault, documentId) {
+  const checkedVault = portfolioVaultIdentity(vault.owner, vault.id);
+  const checkedDocumentId = parseDocumentId(documentId);
+  return `kb://${checkedVault.owner}/${checkedVault.id}/${checkedDocumentId}`;
+}
+function parseQualifiedDocumentUri(value) {
+  if (typeof value !== "string")
+    throw new TypeError("Qualified document URI must be a string.");
+  const match = qualifiedUriPattern.exec(value);
+  if (match === null) {
+    throw new TypeError("Qualified document URI must have canonical kb://owner/vault/document_id form.");
+  }
+  const vault = portfolioVaultIdentity(match[1], match[2]);
+  const documentId = parseDocumentId(match[3]);
+  const uri = formatQualifiedDocumentUri(vault, documentId);
+  if (uri !== value) {
+    throw new TypeError("Qualified document URI must be byte-canonical.");
+  }
+  return Object.freeze({ kind: "stable", stable: true, vault, documentId, uri });
+}
+function portfolioDocumentIdentity(vault, path, metadata) {
+  const checkedVault = portfolioVaultIdentity(vault.owner, vault.id);
+  const state = documentIdState(metadata);
+  if (state.kind === "valid") {
+    return Object.freeze({
+      kind: "stable",
+      stable: true,
+      vault: checkedVault,
+      documentId: state.documentId,
+      uri: formatQualifiedDocumentUri(checkedVault, state.documentId)
+    });
+  }
+  return Object.freeze({
+    kind: "legacy-path",
+    stable: false,
+    vault: checkedVault,
+    path
+  });
+}
+
+// src/graph.ts
 var catalogStart = "<!-- kb:catalog:start -->";
 var catalogEnd = "<!-- kb:catalog:end -->";
 var MAX_ANALYZED_NOTES = 1e4;
@@ -131,8 +236,17 @@ function relationTarget(node, predicate, source, lineCounter, fallbackLine) {
     return malformedRelation(source, line, `Relation "${predicate}" targets must be non-empty strings.`, { predicate });
   }
   const target = node.value;
-  if (!isCanonicalNoteId(target)) {
-    return malformedRelation(source, line, `Relation "${predicate}" target ${JSON.stringify(target)} must be an exact ` + "extensionless vault-root note ID.", { predicate, target: node.value });
+  let qualified = false;
+  if (target.startsWith("kb://")) {
+    try {
+      parseQualifiedDocumentUri(target);
+      qualified = true;
+    } catch {
+      qualified = false;
+    }
+  }
+  if (!isCanonicalNoteId(target) && !qualified) {
+    return malformedRelation(source, line, `Relation "${predicate}" target ${JSON.stringify(target)} must be an exact ` + "extensionless vault-root note ID or canonical kb:// document URI.", { predicate, target: node.value });
   }
   return { predicate, target, line };
 }
@@ -598,6 +712,9 @@ var pairKey = (left, right) => left.localeCompare(right) <= 0 ? `${left}\x00${ri
 function compareAuthoredRelations(left, right) {
   return left.source.localeCompare(right.source) || left.predicate.localeCompare(right.predicate) || left.target.localeCompare(right.target) || left.provenance.line - right.provenance.line || left.provenance.authoredTarget.localeCompare(right.provenance.authoredTarget);
 }
+function compareExternalAuthoredRelations(left, right) {
+  return left.source.localeCompare(right.source) || left.predicate.localeCompare(right.predicate) || left.target.localeCompare(right.target) || left.provenance.line - right.provenance.line || left.provenance.authoredTarget.localeCompare(right.provenance.authoredTarget);
+}
 function compareRelationIssues(left, right) {
   const predicateComparison = (left.predicate ?? "").localeCompare(right.predicate ?? "");
   const targetComparison = (left.target ?? "").localeCompare(right.target ?? "");
@@ -723,6 +840,7 @@ function analyzeVault(notes, options = {}) {
     }
   }
   const authoredRelations = [];
+  const externalAuthoredRelations = [];
   const declarationKeys = new Set;
   const relationEdgeKeys = new Set;
   for (const source of notes) {
@@ -737,6 +855,22 @@ function analyzeVault(notes, options = {}) {
       if (declarationKeys.has(declarationKey))
         continue;
       declarationKeys.add(declarationKey);
+      if (declaration.target.startsWith("kb://")) {
+        if (source.id !== catalogNoteId) {
+          externalAuthoredRelations.push({
+            source: source.id,
+            target: parseQualifiedDocumentUri(declaration.target).uri,
+            predicate: declaration.predicate,
+            provenance: {
+              kind: "frontmatter",
+              source: source.path,
+              line: declaration.line,
+              authoredTarget: declaration.target
+            }
+          });
+        }
+        continue;
+      }
       const exactTarget = byId.get(declaration.target);
       if (exactTarget === undefined) {
         const basenameMatches = declaration.target.includes("/") ? [] : (byBasename.get(declaration.target) ?? []).filter((candidate) => candidate !== declaration.target);
@@ -777,6 +911,7 @@ function analyzeVault(notes, options = {}) {
   }
   const sortedContextualLinks = contextualLinks.toSorted((left, right) => left.source.localeCompare(right.source) || left.target.localeCompare(right.target) || left.line - right.line);
   const sortedAuthoredRelations = authoredRelations.toSorted(compareAuthoredRelations);
+  const sortedExternalAuthoredRelations = externalAuthoredRelations.toSorted(compareExternalAuthoredRelations);
   const backlinks = sortedContextualLinks.toSorted((left, right) => left.target.localeCompare(right.target) || left.source.localeCompare(right.source) || left.line - right.line);
   const contentNotes = notes.filter((note) => note.id !== catalogNoteId);
   const connected = new Set;
@@ -803,6 +938,10 @@ function analyzeVault(notes, options = {}) {
     const inbound = inboundRelationsById.get(relation.target) ?? [];
     inbound.push(relation);
     inboundRelationsById.set(relation.target, inbound);
+    outboundRelationsById.set(relation.source, (outboundRelationsById.get(relation.source) ?? 0) + 1);
+  }
+  for (const relation of sortedExternalAuthoredRelations) {
+    connected.add(relation.source);
     outboundRelationsById.set(relation.source, (outboundRelationsById.get(relation.source) ?? 0) + 1);
   }
   const includeInSuggestions = options.includeInSuggestions ?? (() => true);
@@ -848,6 +987,7 @@ function analyzeVault(notes, options = {}) {
     contextualLinks: sortedContextualLinks,
     backlinks,
     authoredRelations: sortedAuthoredRelations,
+    externalAuthoredRelations: sortedExternalAuthoredRelations,
     noteConnections: contentNotes.map((note) => ({
       id: note.id,
       path: note.path,
@@ -924,4 +1064,4 @@ function replaceCatalog(indexContent, catalog) {
   return indexContent.slice(0, start) + catalog + indexContent.slice(end + catalogEnd.length);
 }
 
-export { catalogStart, catalogEnd, MAX_ANALYZED_NOTES, MAX_CONNECTION_OBSERVATIONS, MAX_MENTION_PAIRS, MAX_MENTIONS, VaultAnalysisBudgetError, metadataValueFromUnknown, isCanonicalNoteId, normalizeVaultPath, searchableMarkdown, wikiLinks, parseNote, lookupNote, analyzeVault, renderCatalog, replaceCatalog };
+export { MAX_PORTFOLIO_NAME_BYTES, MAX_DOCUMENT_ID_BYTES, portfolioVaultIdentity, parseVaultKey, parseDocumentId, documentIdState, formatQualifiedDocumentUri, parseQualifiedDocumentUri, portfolioDocumentIdentity, catalogStart, catalogEnd, MAX_ANALYZED_NOTES, MAX_CONNECTION_OBSERVATIONS, MAX_MENTION_PAIRS, MAX_MENTIONS, VaultAnalysisBudgetError, metadataValueFromUnknown, isCanonicalNoteId, normalizeVaultPath, searchableMarkdown, wikiLinks, parseNote, lookupNote, analyzeVault, renderCatalog, replaceCatalog };
