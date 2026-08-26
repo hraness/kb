@@ -1,30 +1,35 @@
 // @bun
 import {
-  isCanonicalNoteId
-} from "./index-4962kvds.js";
+  acquireNoteLock
+} from "./index-3rm7cz6h.js";
+import {
+  isCanonicalNoteId,
+  parseDocumentId,
+  parseQualifiedDocumentUri
+} from "./index-cxfrakt7.js";
 
 // src/authoring.ts
-import { createHash as createHash2, randomUUID as randomUUID2 } from "crypto";
-import { constants as constants2 } from "fs";
+import { createHash, randomUUID } from "crypto";
+import { constants } from "fs";
 import {
-  link as link2,
-  lstat as lstat2,
-  mkdir as mkdir2,
-  open as open2,
+  link,
+  lstat,
+  mkdir,
+  open,
   readdir,
-  realpath as realpath2,
-  rename as rename2,
+  realpath,
+  rename,
   rmdir,
-  unlink as unlink2
+  unlink
 } from "fs/promises";
 import {
   basename,
   dirname,
-  join as join2,
+  join,
   posix,
-  relative as relative2,
-  resolve as resolve2,
-  sep as sep2
+  relative,
+  resolve,
+  sep
 } from "path";
 import {
   Document,
@@ -33,340 +38,6 @@ import {
   isSeq,
   parseDocument
 } from "yaml";
-
-// src/note-lock.ts
-import { createHash, randomUUID } from "crypto";
-import { constants } from "fs";
-import {
-  link,
-  lstat,
-  mkdir,
-  open,
-  realpath,
-  rename,
-  unlink
-} from "fs/promises";
-import { homedir } from "os";
-import { isAbsolute, join, relative, resolve, sep } from "path";
-var LOCK_SCHEMA_VERSION = 1;
-var MAX_LOCK_BYTES = 4 * 1024;
-var DEFAULT_STALE_AFTER_MS = 5 * 60 * 1000;
-var DEFAULT_HEARTBEAT_MS = 5000;
-var DEFAULT_POLL_INTERVAL_MS = 20;
-var DEFAULT_WAIT_TIMEOUT_MS = 30000;
-var MAX_RECLAIM_ATTEMPTS = 8;
-
-class NoteLockBusyError extends Error {
-  lockPath;
-  constructor(lockPath) {
-    super("this note is already being edited");
-    this.name = "NoteLockBusyError";
-    this.lockPath = lockPath;
-  }
-}
-
-class NoteLockLostError extends Error {
-  lockPath;
-  constructor(lockPath) {
-    super("the note lock is no longer owned by this process");
-    this.name = "NoteLockLostError";
-    this.lockPath = lockPath;
-  }
-}
-function isErrno(error, code) {
-  return typeof error === "object" && error !== null && "code" in error && error.code === code;
-}
-function sha256(value) {
-  return createHash("sha256").update(value, "utf8").digest("hex");
-}
-function within(root, candidate) {
-  const fromRoot = relative(root, candidate);
-  return fromRoot === "" || fromRoot !== ".." && !fromRoot.startsWith(`..${sep}`);
-}
-function defaultCacheHome() {
-  const configured = process.env.XDG_CACHE_HOME;
-  return configured !== undefined && isAbsolute(configured) ? configured : join(homedir(), ".cache");
-}
-function defaultDependencies() {
-  return {
-    pid: process.pid,
-    now: () => new Date,
-    monotonicNow: () => performance.now(),
-    token: () => randomUUID(),
-    isProcessAlive: (pid) => {
-      try {
-        process.kill(pid, 0);
-        return true;
-      } catch (error) {
-        return !isErrno(error, "ESRCH");
-      }
-    },
-    sleep: async (milliseconds) => {
-      await new Promise((resolveSleep) => {
-        setTimeout(resolveSleep, milliseconds);
-      });
-    },
-    staleAfterMs: DEFAULT_STALE_AFTER_MS,
-    heartbeatMs: DEFAULT_HEARTBEAT_MS,
-    pollIntervalMs: DEFAULT_POLL_INTERVAL_MS
-  };
-}
-function resolvedDependencies(overrides) {
-  const dependencies = { ...defaultDependencies(), ...overrides };
-  if (!Number.isSafeInteger(dependencies.pid) || dependencies.pid <= 0) {
-    throw new TypeError("a note lock requires a positive process ID");
-  }
-  for (const [label, value] of [
-    ["staleAfterMs", dependencies.staleAfterMs],
-    ["heartbeatMs", dependencies.heartbeatMs],
-    ["pollIntervalMs", dependencies.pollIntervalMs]
-  ]) {
-    if (!Number.isFinite(value) || value <= 0) {
-      throw new TypeError(`${label} must be a positive finite duration`);
-    }
-  }
-  return dependencies;
-}
-async function lockPathFor(vaultRootInput, canonicalNoteId, cacheHomeInput) {
-  if (canonicalNoteId === "" || canonicalNoteId.includes("\x00") || canonicalNoteId.includes(`
-`) || canonicalNoteId.includes("\r")) {
-    throw new TypeError("a note lock requires a non-empty single-line note ID");
-  }
-  const vaultRoot = await realpath(resolve(vaultRootInput));
-  const cacheHome = resolve(cacheHomeInput ?? defaultCacheHome());
-  const requestedDirectory = join(cacheHome, "hraness-kb", "note-locks", sha256(vaultRoot));
-  await mkdir(requestedDirectory, { recursive: true, mode: 448 });
-  const requestedMetadata = await lstat(requestedDirectory);
-  if (!requestedMetadata.isDirectory() || requestedMetadata.isSymbolicLink()) {
-    throw new Error("the note lock root must be a real directory");
-  }
-  const lockDirectory = await realpath(requestedDirectory);
-  if (within(vaultRoot, lockDirectory)) {
-    throw new Error("the note lock root must remain outside the vault");
-  }
-  return join(lockDirectory, `${sha256(canonicalNoteId)}.lock`);
-}
-function parseOwner(value) {
-  if (typeof value !== "object" || value === null || Array.isArray(value))
-    return null;
-  const record = value;
-  const version = record["version"];
-  const pid = record["pid"];
-  const token = record["token"];
-  const acquiredAt = record["acquiredAt"];
-  if (version !== LOCK_SCHEMA_VERSION || typeof pid !== "number" || !Number.isSafeInteger(pid) || pid <= 0 || typeof token !== "string" || !/^[0-9a-z-]{16,128}$/iu.test(token) || typeof acquiredAt !== "string" || Number.isNaN(Date.parse(acquiredAt))) {
-    return null;
-  }
-  return { version, pid, token, acquiredAt };
-}
-async function observeLock(path) {
-  let metadata;
-  try {
-    metadata = await lstat(path, { bigint: true });
-  } catch (error) {
-    if (isErrno(error, "ENOENT"))
-      return null;
-    throw error;
-  }
-  if (!metadata.isFile() || metadata.isSymbolicLink() || metadata.nlink !== 1n || metadata.size > BigInt(MAX_LOCK_BYTES)) {
-    return { kind: "unsafe" };
-  }
-  let handle;
-  try {
-    handle = await open(path, constants.O_RDONLY | constants.O_NOFOLLOW | constants.O_NONBLOCK);
-  } catch (error) {
-    return isErrno(error, "ENOENT") ? null : { kind: "unsafe" };
-  }
-  try {
-    const opened = await handle.stat({ bigint: true });
-    if (!opened.isFile() || opened.nlink !== 1n || opened.dev !== metadata.dev || opened.ino !== metadata.ino || opened.size !== metadata.size || opened.size > BigInt(MAX_LOCK_BYTES)) {
-      return { kind: "unsafe" };
-    }
-    const bytes = new Uint8Array(Number(opened.size));
-    let offset = 0;
-    while (offset < bytes.byteLength) {
-      const result = await handle.read(bytes, offset, bytes.byteLength - offset, offset);
-      if (result.bytesRead === 0)
-        return { kind: "unsafe" };
-      offset += result.bytesRead;
-    }
-    const overflow = new Uint8Array(1);
-    if ((await handle.read(overflow, 0, 1, Number(opened.size))).bytesRead !== 0) {
-      return { kind: "unsafe" };
-    }
-    const finished = await handle.stat({ bigint: true });
-    let finalPath;
-    try {
-      finalPath = await lstat(path, { bigint: true });
-    } catch (error) {
-      if (isErrno(error, "ENOENT"))
-        return null;
-      throw error;
-    }
-    if (!finalPath.isFile() || finalPath.isSymbolicLink() || finalPath.nlink !== 1n || finalPath.dev !== opened.dev || finalPath.ino !== opened.ino || finalPath.size !== opened.size || finished.size !== opened.size || finished.mtimeNs !== opened.mtimeNs || finished.ctimeNs !== opened.ctimeNs) {
-      return { kind: "unsafe" };
-    }
-    let value;
-    try {
-      value = JSON.parse(new TextDecoder("utf-8", { fatal: true }).decode(bytes));
-    } catch {
-      value = null;
-    }
-    return {
-      kind: "regular",
-      device: opened.dev,
-      inode: opened.ino,
-      modifiedAtMs: Number(opened.mtimeMs),
-      owner: parseOwner(value)
-    };
-  } finally {
-    await handle.close();
-  }
-}
-function sameIdentity(left, right) {
-  return left.device === right.device && left.inode === right.inode;
-}
-async function restoreUnexpectedLock(tombstone, lockPath) {
-  try {
-    await link(tombstone, lockPath);
-  } catch {
-    return;
-  }
-  try {
-    await unlink(tombstone);
-  } catch {}
-}
-async function reclaimObservedLock(lockPath, observed, token, dependencies) {
-  const tombstone = `${lockPath}.stale-${token}`;
-  try {
-    await rename(lockPath, tombstone);
-  } catch (error) {
-    if (isErrno(error, "ENOENT") || isErrno(error, "EEXIST"))
-      return false;
-    throw error;
-  }
-  await dependencies.afterTombstoneMove?.(tombstone, lockPath);
-  const moved = await observeLock(tombstone);
-  if (moved === null || moved.kind !== "regular" || !sameIdentity(observed, moved)) {
-    await restoreUnexpectedLock(tombstone, lockPath);
-    return false;
-  }
-  await unlink(tombstone);
-  return true;
-}
-async function releaseOwnedLock(lockPath, owner, dependencies) {
-  const tombstone = `${lockPath}.release-${owner.token}`;
-  try {
-    await rename(lockPath, tombstone);
-  } catch (error) {
-    if (isErrno(error, "ENOENT"))
-      return;
-    throw error;
-  }
-  await dependencies.afterTombstoneMove?.(tombstone, lockPath);
-  const moved = await observeLock(tombstone);
-  if (moved?.kind !== "regular" || moved.owner?.token !== owner.token) {
-    await restoreUnexpectedLock(tombstone, lockPath);
-    return;
-  }
-  await unlink(tombstone);
-}
-async function tryAcquire(lockPath, dependencies) {
-  for (let attempt = 0;attempt < MAX_RECLAIM_ATTEMPTS; attempt += 1) {
-    const owner = {
-      version: LOCK_SCHEMA_VERSION,
-      pid: dependencies.pid,
-      token: dependencies.token(),
-      acquiredAt: dependencies.now().toISOString()
-    };
-    let handle;
-    try {
-      handle = await open(lockPath, constants.O_CREAT | constants.O_EXCL | constants.O_RDWR | constants.O_NOFOLLOW, 384);
-    } catch (error) {
-      if (!isErrno(error, "EEXIST"))
-        throw error;
-      const observed = await observeLock(lockPath);
-      if (observed === null)
-        continue;
-      if (observed.kind === "unsafe")
-        throw new NoteLockBusyError(lockPath);
-      const ageMs = Math.max(0, dependencies.now().getTime() - observed.modifiedAtMs);
-      const ownerAlive = observed.owner !== null && dependencies.isProcessAlive(observed.owner.pid);
-      if (ownerAlive || observed.owner === null && ageMs <= dependencies.staleAfterMs) {
-        throw new NoteLockBusyError(lockPath);
-      }
-      if (await reclaimObservedLock(lockPath, observed, owner.token, dependencies)) {
-        continue;
-      }
-      continue;
-    }
-    try {
-      await handle.writeFile(`${JSON.stringify(owner)}
-`, { encoding: "utf8" });
-      await handle.sync();
-    } catch (error) {
-      await handle.close().catch(() => {
-        return;
-      });
-      const created = await observeLock(lockPath);
-      if (created?.kind === "regular") {
-        await reclaimObservedLock(lockPath, created, owner.token, dependencies).catch(() => {
-          return;
-        });
-      }
-      throw error;
-    }
-    const timer = setInterval(() => {
-      const now = dependencies.now();
-      handle.utimes(now, now).catch(() => {
-        return;
-      });
-    }, dependencies.heartbeatMs);
-    timer.unref();
-    let released = false;
-    return {
-      path: lockPath,
-      assertOwned: async () => {
-        const observed = await observeLock(lockPath);
-        if (observed?.kind !== "regular" || observed.owner?.token !== owner.token) {
-          throw new NoteLockLostError(lockPath);
-        }
-      },
-      release: async () => {
-        if (released)
-          return;
-        released = true;
-        clearInterval(timer);
-        await handle.close();
-        await releaseOwnedLock(lockPath, owner, dependencies);
-      }
-    };
-  }
-  throw new NoteLockBusyError(lockPath);
-}
-async function acquireNoteLock(vaultRoot, canonicalNoteId, options = {}) {
-  const lockPath = await lockPathFor(vaultRoot, canonicalNoteId, options.cacheHome);
-  const dependencies = resolvedDependencies(options.dependencies);
-  const waitTimeoutMs = options.waitTimeoutMs ?? DEFAULT_WAIT_TIMEOUT_MS;
-  if (!Number.isFinite(waitTimeoutMs) || waitTimeoutMs < 0) {
-    throw new TypeError("waitTimeoutMs must be a non-negative finite duration");
-  }
-  const deadline = dependencies.monotonicNow() + waitTimeoutMs;
-  for (;; ) {
-    try {
-      return await tryAcquire(lockPath, dependencies);
-    } catch (error) {
-      if (!(error instanceof NoteLockBusyError))
-        throw error;
-      const remaining = deadline - dependencies.monotonicNow();
-      if (remaining <= 0)
-        throw error;
-      await dependencies.sleep(Math.min(dependencies.pollIntervalMs, remaining));
-    }
-  }
-}
-
-// src/authoring.ts
 var MAX_NOTE_BYTES = 16 * 1024 * 1024;
 var NOTE_REVISION_PATTERN = /^sha256:[0-9a-f]{64}$/u;
 var PREDICATE_PATTERN = /^[a-z][a-z0-9]*(?:-[a-z0-9]+)*$/u;
@@ -416,24 +87,29 @@ class NoteRecoveryRequiredError extends Error {
     this.recoveryPath = recoveryPath;
   }
 }
-function isErrno2(error, code) {
+function isErrno(error, code) {
   return typeof error === "object" && error !== null && "code" in error && error.code === code;
 }
-function sha2562(value) {
-  return createHash2("sha256").update(value).digest("hex");
+function sha256(value) {
+  return createHash("sha256").update(value).digest("hex");
 }
 function revisionFor(bytes) {
-  return `sha256:${sha2562(bytes)}`;
+  return `sha256:${sha256(bytes)}`;
 }
 function inside(root, candidate) {
-  const fromRoot = relative2(root, candidate);
-  return fromRoot !== "" && fromRoot !== ".." && !fromRoot.startsWith(`..${sep2}`);
+  const fromRoot = relative(root, candidate);
+  return fromRoot !== "" && fromRoot !== ".." && !fromRoot.startsWith(`..${sep}`);
 }
 function canonicalNoteId(value) {
   if (!isCanonicalNoteId(value)) {
     throw new InvalidCanonicalNoteIdError(value);
   }
   return value;
+}
+function canonicalRelationTarget(value) {
+  if (value.startsWith("kb://"))
+    return parseQualifiedDocumentUri(value).uri;
+  return canonicalNoteId(value);
 }
 function normalizeRelationPredicate(value) {
   const normalized = value.trim().normalize("NFC").toLocaleLowerCase("en-US").replaceAll("_", "-").replace(/\s+/gu, "-").replace(/-{2,}/gu, "-");
@@ -456,8 +132,8 @@ function requireRevision(value) {
   return value;
 }
 async function resolveVault(rootInput) {
-  const root = await realpath2(resolve2(rootInput));
-  const metadata = await lstat2(root);
+  const root = await realpath(resolve(rootInput));
+  const metadata = await lstat(root);
   if (!metadata.isDirectory() || metadata.isSymbolicLink()) {
     throw new Error("the vault root must be a real directory");
   }
@@ -469,7 +145,7 @@ async function resolveVault(rootInput) {
 function pathFor(vault, id) {
   const canonicalId = canonicalNoteId(id);
   const relativePath = `${canonicalId}.md`;
-  const path = resolve2(vault.root, ...relativePath.split("/"));
+  const path = resolve(vault.root, ...relativePath.split("/"));
   if (!inside(vault.root, path)) {
     throw new InvalidCanonicalNoteIdError(id);
   }
@@ -488,12 +164,12 @@ async function assertSafeParent(vault, path) {
     throw new Error("the note path must remain inside the vault");
   }
   const parent = dirname(path);
-  const segments = relative2(vault.root, parent).split(sep2).filter(Boolean);
+  const segments = relative(vault.root, parent).split(sep).filter(Boolean);
   let current = vault.root;
   for (const segment of segments) {
     await assertExactDirectoryEntry(current, segment);
-    current = join2(current, segment);
-    const metadata = await lstat2(current);
+    current = join(current, segment);
+    const metadata = await lstat(current);
     if (metadata.isSymbolicLink()) {
       throw new Error("the note path must not traverse a symbolic link");
     }
@@ -501,15 +177,15 @@ async function assertSafeParent(vault, path) {
       throw new Error("every note parent must be a directory");
     }
   }
-  const canonicalParent = await realpath2(parent);
-  if (canonicalParent !== parent || !inside(vault.root, join2(canonicalParent, basename(path)))) {
+  const canonicalParent = await realpath(parent);
+  if (canonicalParent !== parent || !inside(vault.root, join(canonicalParent, basename(path)))) {
     throw new Error("the note parent resolves outside the vault");
   }
 }
 async function readSnapshotAtPath(vault, path, relativePath) {
   await assertSafeParent(vault, path);
   await assertExactDirectoryEntry(dirname(path), basename(path));
-  const beforeOpen = await lstat2(path, { bigint: true });
+  const beforeOpen = await lstat(path, { bigint: true });
   if (!beforeOpen.isFile() || beforeOpen.isSymbolicLink()) {
     throw new Error("the note target must be a regular file");
   }
@@ -519,7 +195,7 @@ async function readSnapshotAtPath(vault, path, relativePath) {
   if (beforeOpen.size > BigInt(MAX_NOTE_BYTES)) {
     throw new Error("the note is too large for bounded authoring");
   }
-  const handle = await open2(path, constants2.O_RDONLY | constants2.O_NOFOLLOW);
+  const handle = await open(path, constants.O_RDONLY | constants.O_NOFOLLOW);
   try {
     const opened = await handle.stat({ bigint: true });
     if (!opened.isFile() || opened.nlink !== 1n || opened.dev !== beforeOpen.dev || opened.ino !== beforeOpen.ino || opened.size !== beforeOpen.size || opened.size > BigInt(MAX_NOTE_BYTES)) {
@@ -539,11 +215,11 @@ async function readSnapshotAtPath(vault, path, relativePath) {
       throw new Error("the note target grew while it was read");
     }
     const finished = await handle.stat({ bigint: true });
-    const finalPath = await lstat2(path, { bigint: true });
+    const finalPath = await lstat(path, { bigint: true });
     if (!finalPath.isFile() || finalPath.isSymbolicLink() || finalPath.nlink !== 1n || finalPath.dev !== opened.dev || finalPath.ino !== opened.ino || finalPath.size !== opened.size || finished.size !== opened.size || finished.mtimeNs !== opened.mtimeNs || finished.ctimeNs !== opened.ctimeNs) {
       throw new Error("the note target changed while it was read");
     }
-    const canonicalPath = await realpath2(path);
+    const canonicalPath = await realpath(path);
     if (canonicalPath !== path || !inside(vault.root, canonicalPath)) {
       throw new Error("the note target resolves outside the vault");
     }
@@ -577,7 +253,7 @@ async function readOptionalSnapshot(vault, id) {
   try {
     return await readSnapshot(vault, id);
   } catch (error) {
-    if (isErrno2(error, "ENOENT"))
+    if (isErrno(error, "ENOENT"))
       return null;
     throw error;
   }
@@ -709,7 +385,7 @@ function relationsFromParts(parts, relativePath) {
     const predicate = exactPredicate(predicateValue);
     const scalarTarget = scalarString(pair.value);
     if (scalarTarget !== null) {
-      const target = canonicalNoteId(scalarTarget);
+      const target = canonicalRelationTarget(scalarTarget);
       const key = `${predicate}\x00${target}`;
       if (!seen.has(key)) {
         seen.add(key);
@@ -725,7 +401,7 @@ function relationsFromParts(parts, relativePath) {
       if (targetValue === null) {
         throw new Error(`invalid relations in ${relativePath}: ${predicate} targets must be strings`);
       }
-      const target = canonicalNoteId(targetValue);
+      const target = canonicalRelationTarget(targetValue);
       const key = `${predicate}\x00${target}`;
       if (seen.has(key))
         continue;
@@ -741,7 +417,7 @@ function relationValue(relations, predicate, relativePath) {
     return null;
   const scalarTarget = scalarString(value);
   if (scalarTarget !== null) {
-    return { kind: "scalar", target: canonicalNoteId(scalarTarget) };
+    return { kind: "scalar", target: canonicalRelationTarget(scalarTarget) };
   }
   if (!isSeq(value)) {
     throw new Error(`invalid relations in ${relativePath}: ${predicate} targets must be a string or array`);
@@ -806,6 +482,13 @@ function removeRelationFromParts(parts, relativePath, predicate, target, sourceI
   if (value === undefined)
     return false;
   const repairableTarget = (raw) => {
+    if (raw.startsWith("kb://")) {
+      try {
+        return canonicalRelationTarget(raw);
+      } catch {
+        return null;
+      }
+    }
     let candidate = raw;
     if (candidate.toLocaleLowerCase("en-US").endsWith(".md")) {
       candidate = candidate.slice(0, -3);
@@ -842,7 +525,8 @@ function removeRelationFromParts(parts, relativePath, predicate, target, sourceI
 }
 function dependenciesFor(overrides) {
   return {
-    token: overrides?.token ?? randomUUID2,
+    documentId: overrides?.documentId ?? randomUUID,
+    token: overrides?.token ?? randomUUID,
     ...overrides?.beforeInstall === undefined ? {} : { beforeInstall: overrides.beforeInstall },
     ...overrides?.beforeCommit === undefined ? {} : { beforeCommit: overrides.beforeCommit },
     ...overrides?.afterSourceQuarantined === undefined ? {} : { afterSourceQuarantined: overrides.afterSourceQuarantined }
@@ -852,17 +536,17 @@ async function cleanupTemporary(temporaryPath, identity) {
   if (identity === null)
     return;
   try {
-    const current = await lstat2(temporaryPath, { bigint: true });
+    const current = await lstat(temporaryPath, { bigint: true });
     if (current.dev === identity.device && current.ino === identity.inode) {
-      await unlink2(temporaryPath);
+      await unlink(temporaryPath);
     }
   } catch (error) {
-    if (!isErrno2(error, "ENOENT"))
+    if (!isErrno(error, "ENOENT"))
       throw error;
   }
 }
 async function fsyncDirectory(path) {
-  const handle = await open2(path, constants2.O_RDONLY);
+  const handle = await open(path, constants.O_RDONLY);
   try {
     await handle.sync();
   } finally {
@@ -870,7 +554,7 @@ async function fsyncDirectory(path) {
   }
 }
 function recoveryRelativePath(vault, path) {
-  return relative2(vault.root, path).split(sep2).join("/");
+  return relative(vault.root, path).split(sep).join("/");
 }
 async function discoveredRecoveryLocations(vault, notePath) {
   const directory = dirname(notePath);
@@ -882,28 +566,28 @@ async function discoveredRecoveryLocations(vault, notePath) {
   const suffix = ".recovery";
   const matching = entries.filter(({ name }) => name.startsWith(prefix) && name.endsWith(suffix)).toSorted((left, right) => left.name.localeCompare(right.name));
   if (matching.length > MAX_RECOVERY_LOCATIONS_PER_NOTE) {
-    const firstPath = join2(directory, matching[0]?.name ?? "");
+    const firstPath = join(directory, matching[0]?.name ?? "");
     throw new NoteRecoveryRequiredError(recoveryRelativePath(vault, notePath), recoveryRelativePath(vault, firstPath), new Error("too many interrupted authoring transactions require manual recovery"));
   }
   const recoverable = [];
   const empty = [];
   for (const entry of matching) {
     const nonce = entry.name.slice(prefix.length, -suffix.length);
-    const recoveryDirectory = join2(directory, entry.name);
+    const recoveryDirectory = join(directory, entry.name);
     const recoveryDirectoryRelative = recoveryRelativePath(vault, recoveryDirectory);
     if (!/^\d+\.[0-9a-f]{32}$/u.test(nonce) || !entry.isDirectory() || entry.isSymbolicLink()) {
       throw new NoteRecoveryRequiredError(recoveryRelativePath(vault, notePath), recoveryDirectoryRelative, new Error("an unrecognized authoring recovery artifact is present"));
     }
-    const metadata = await lstat2(recoveryDirectory, { bigint: true });
-    if (!metadata.isDirectory() || metadata.isSymbolicLink() || await realpath2(recoveryDirectory) !== recoveryDirectory) {
+    const metadata = await lstat(recoveryDirectory, { bigint: true });
+    if (!metadata.isDirectory() || metadata.isSymbolicLink() || await realpath(recoveryDirectory) !== recoveryDirectory) {
       throw new NoteRecoveryRequiredError(recoveryRelativePath(vault, notePath), recoveryDirectoryRelative, new Error("an authoring recovery directory changed identity"));
     }
     const children = await readdir(recoveryDirectory);
     if (children.length === 0) {
       empty.push({
         directory: recoveryDirectory,
-        path: join2(recoveryDirectory, basename(notePath)),
-        relativePath: recoveryRelativePath(vault, join2(recoveryDirectory, basename(notePath))),
+        path: join(recoveryDirectory, basename(notePath)),
+        relativePath: recoveryRelativePath(vault, join(recoveryDirectory, basename(notePath))),
         device: metadata.dev,
         inode: metadata.ino
       });
@@ -912,7 +596,7 @@ async function discoveredRecoveryLocations(vault, notePath) {
     if (children.length !== 1 || children[0] !== basename(notePath)) {
       throw new NoteRecoveryRequiredError(recoveryRelativePath(vault, notePath), recoveryDirectoryRelative, new Error("an authoring recovery directory has unexpected contents"));
     }
-    const recoveryPath = join2(recoveryDirectory, basename(notePath));
+    const recoveryPath = join(recoveryDirectory, basename(notePath));
     try {
       await readSnapshotAtPath(vault, recoveryPath, recoveryRelativePath(vault, recoveryPath));
     } catch (error) {
@@ -930,7 +614,7 @@ async function discoveredRecoveryLocations(vault, notePath) {
 }
 async function directoryIdentity(vault, notePath) {
   await assertSafeParent(vault, notePath);
-  const metadata = await lstat2(dirname(notePath), { bigint: true });
+  const metadata = await lstat(dirname(notePath), { bigint: true });
   if (!metadata.isDirectory() || metadata.isSymbolicLink()) {
     throw new Error("the note parent must remain a real directory");
   }
@@ -944,25 +628,25 @@ async function assertSameDirectory(vault, notePath, expected) {
 }
 async function createRecoveryLocation(vault, path, dependencies) {
   const directory = dirname(path);
-  const recoveryDirectory = join2(directory, `.${basename(path)}.${process.pid}.${sha2562(dependencies.token()).slice(0, 32)}.recovery`);
-  await mkdir2(recoveryDirectory, { mode: 448 });
-  const metadata = await lstat2(recoveryDirectory, { bigint: true });
+  const recoveryDirectory = join(directory, `.${basename(path)}.${process.pid}.${sha256(dependencies.token()).slice(0, 32)}.recovery`);
+  await mkdir(recoveryDirectory, { mode: 448 });
+  const metadata = await lstat(recoveryDirectory, { bigint: true });
   if (!metadata.isDirectory() || metadata.isSymbolicLink()) {
     throw new Error("the recovery location is not a private directory");
   }
   await fsyncDirectory(directory);
-  const recoveryPath = join2(recoveryDirectory, basename(path));
+  const recoveryPath = join(recoveryDirectory, basename(path));
   return {
     directory: recoveryDirectory,
     path: recoveryPath,
-    relativePath: relative2(vault.root, recoveryPath).split(sep2).join("/"),
+    relativePath: relative(vault.root, recoveryPath).split(sep).join("/"),
     device: metadata.dev,
     inode: metadata.ino
   };
 }
 async function assertRecoveryLocation(recovery) {
-  const metadata = await lstat2(recovery.directory, { bigint: true });
-  if (!metadata.isDirectory() || metadata.isSymbolicLink() || metadata.dev !== recovery.device || metadata.ino !== recovery.inode || await realpath2(recovery.directory) !== recovery.directory) {
+  const metadata = await lstat(recovery.directory, { bigint: true });
+  if (!metadata.isDirectory() || metadata.isSymbolicLink() || metadata.dev !== recovery.device || metadata.ino !== recovery.inode || await realpath(recovery.directory) !== recovery.directory) {
     throw new Error("the recovery location changed during authoring");
   }
 }
@@ -977,13 +661,13 @@ async function restoreQuarantinedSource(vault, recovery, path, expectedDirectory
   await assertSameDirectory(vault, path, expectedDirectory);
   await assertRecoveryLocation(recovery);
   try {
-    await link2(recovery.path, path);
+    await link(recovery.path, path);
   } catch (error) {
-    if (isErrno2(error, "EEXIST"))
+    if (isErrno(error, "EEXIST"))
       return false;
     throw error;
   }
-  await unlink2(recovery.path);
+  await unlink(recovery.path);
   await fsyncDirectory(recovery.directory);
   await removeRecoveryDirectory(recovery, dirname(path));
   return true;
@@ -1024,13 +708,13 @@ async function recoverInterruptedAuthoring(vault, id, lock) {
 }
 async function installTemporaryWithoutClobber(temporaryPath, path) {
   try {
-    await link2(temporaryPath, path);
+    await link(temporaryPath, path);
   } catch (error) {
-    if (isErrno2(error, "EEXIST"))
+    if (isErrno(error, "EEXIST"))
       return false;
     throw error;
   }
-  await unlink2(temporaryPath);
+  await unlink(temporaryPath);
   return true;
 }
 async function currentRevisionOrNull(vault, id) {
@@ -1055,9 +739,9 @@ async function atomicInstall(vault, id, content, expected, lock, dependencies) {
   }
   const directory = dirname(path);
   const expectedDirectory = await directoryIdentity(vault, path);
-  const temporaryPath = join2(directory, `.${basename(path)}.${process.pid}.${sha2562(dependencies.token()).slice(0, 32)}.tmp`);
+  const temporaryPath = join(directory, `.${basename(path)}.${process.pid}.${sha256(dependencies.token()).slice(0, 32)}.tmp`);
   const mode = expected?.mode ?? 420;
-  const handle = await open2(temporaryPath, constants2.O_WRONLY | constants2.O_CREAT | constants2.O_EXCL | constants2.O_NOFOLLOW, mode);
+  const handle = await open(temporaryPath, constants.O_WRONLY | constants.O_CREAT | constants.O_EXCL | constants.O_NOFOLLOW, mode);
   let closed = false;
   let identity = null;
   let recovery = null;
@@ -1089,7 +773,7 @@ async function atomicInstall(vault, id, content, expected, lock, dependencies) {
       throw new NoteRevisionConflictError(relativePath, expected?.revision ?? null, current?.revision ?? null);
     }
     await assertSafeParent(vault, path);
-    const temporary = await lstat2(temporaryPath, { bigint: true });
+    const temporary = await lstat(temporaryPath, { bigint: true });
     if (!temporary.isFile() || temporary.isSymbolicLink() || temporary.nlink !== 1n || temporary.dev !== identity.device || temporary.ino !== identity.inode) {
       throw new Error("the temporary note target changed before installation");
     }
@@ -1121,9 +805,9 @@ async function atomicInstall(vault, id, content, expected, lock, dependencies) {
     await assertSameDirectory(vault, path, expectedDirectory);
     await assertRecoveryLocation(recovery);
     try {
-      await rename2(path, recovery.path);
+      await rename(path, recovery.path);
     } catch (error) {
-      if (isErrno2(error, "ENOENT")) {
+      if (isErrno(error, "ENOENT")) {
         throw new NoteRevisionConflictError(relativePath, expected.revision, null);
       }
       throw error;
@@ -1150,7 +834,7 @@ async function atomicInstall(vault, id, content, expected, lock, dependencies) {
     }
     destinationInstalled = true;
     await fsyncDirectory(directory);
-    await unlink2(recovery.path);
+    await unlink(recovery.path);
     sourceQuarantined = false;
     await fsyncDirectory(recovery.directory);
     await removeRecoveryDirectory(recovery, directory);
@@ -1178,7 +862,7 @@ async function atomicInstall(vault, id, content, expected, lock, dependencies) {
         await removeRecoveryDirectory(recovery, directory);
         recovery = null;
       } catch (cleanupError) {
-        if (!isErrno2(cleanupError, "ENOENT")) {
+        if (!isErrno(cleanupError, "ENOENT")) {
           throw new AggregateError([error, cleanupError], "authoring failed and its empty recovery directory could not be removed");
         }
       }
@@ -1200,12 +884,13 @@ function assertExpected(snapshot, expected) {
     throw new NoteRevisionConflictError(snapshot.relativePath, expected, snapshot.revision);
   }
 }
-function noteResult(snapshot, relations, changed) {
+function noteResult(snapshot, relations, changed, documentId) {
   return {
     changed,
     path: snapshot.relativePath,
     revision: snapshot.revision,
-    relations
+    relations,
+    ...documentId === undefined ? {} : { documentId }
   };
 }
 function validateTitle(title) {
@@ -1243,11 +928,11 @@ function normalizedRequestedBody(body) {
 `) ? body : `${body}
 `;
 }
-function renderCreatedNote(input) {
+function renderCreatedNote(input, documentId) {
   const title = validateTitle(input.title);
   const type = validateType(input.type);
   const tags = validateTags(input.tags);
-  const metadata = { type, title };
+  const metadata = { document_id: documentId, type, title };
   if (tags.length > 0)
     metadata["tags"] = tags;
   const document = new Document(metadata, { schema: "core" });
@@ -1278,7 +963,27 @@ function topLevelStrings(parts, key) {
     return candidate === null ? [] : [candidate];
   });
 }
-function assertCompatibleCreate(snapshot, input) {
+function existingDocumentId(parts) {
+  if (!isMap(parts.document.contents))
+    return { kind: "missing" };
+  const values = parts.document.contents.items.flatMap((pair) => {
+    const key = scalarString(pair.key);
+    if (key?.normalize("NFC").toLocaleLowerCase("en-US") !== "document_id")
+      return [];
+    const value = scalarString(pair.value);
+    return value === null ? [null] : [value];
+  });
+  if (values.length === 0)
+    return { kind: "missing" };
+  if (values.length !== 1 || values[0] === null)
+    return { kind: "invalid" };
+  try {
+    return { kind: "valid", documentId: parseDocumentId(values[0]) };
+  } catch {
+    return { kind: "invalid" };
+  }
+}
+function assertCompatibleCreate(snapshot, input, requestedDocumentId) {
   const parts = frontmatter(snapshot.content, snapshot.relativePath);
   const requestedType = validateType(input.type);
   const requestedTitle = validateTitle(input.title);
@@ -1296,7 +1001,14 @@ function assertCompatibleCreate(snapshot, input) {
   if (input.body !== undefined && parts.bodySuffix !== `${parts.newline}${parts.newline}${normalizedRequestedBody(input.body)}`) {
     throw new NoteAlreadyExistsError(snapshot.relativePath, "body differs");
   }
-  return relationsFromParts(parts, snapshot.relativePath);
+  const existingId = existingDocumentId(parts);
+  if (requestedDocumentId !== undefined && (existingId.kind !== "valid" || existingId.documentId !== requestedDocumentId)) {
+    throw new NoteAlreadyExistsError(snapshot.relativePath, existingId.kind === "missing" ? "document_id is missing" : "document_id differs");
+  }
+  return {
+    relations: relationsFromParts(parts, snapshot.relativePath),
+    ...existingId.kind === "valid" ? { documentId: existingId.documentId } : {}
+  };
 }
 async function noteRevision(root, id) {
   const vault = await resolveVault(root);
@@ -1314,6 +1026,7 @@ async function listNoteRelations(root, sourceId) {
 async function createNote(root, input, options = {}) {
   const vault = await resolveVault(root);
   const id = canonicalNoteId(input.id);
+  const requestedDocumentId = input.documentId === undefined ? undefined : parseDocumentId(input.documentId);
   const expected = checkedExpectedRevision(options);
   const dependencies = dependenciesFor(options.dependencies);
   const lock = await acquireNoteLock(vault.root, id, options.lock);
@@ -1322,19 +1035,21 @@ async function createNote(root, input, options = {}) {
     const existing = await readOptionalSnapshot(vault, id);
     if (existing !== null) {
       assertExpected(existing, expected);
-      const relations = assertCompatibleCreate(existing, input);
-      return noteResult(existing, relations, false);
+      const compatible = assertCompatibleCreate(existing, input, requestedDocumentId);
+      return noteResult(existing, compatible.relations, false, compatible.documentId);
     }
     if (expected !== undefined) {
       throw new NoteRevisionConflictError(`${id}.md`, expected, null);
     }
-    const content = renderCreatedNote(input);
+    const documentId = requestedDocumentId ?? parseDocumentId(dependencies.documentId());
+    const content = renderCreatedNote(input, documentId);
     const revision = await atomicInstall(vault, id, content, null, lock, dependencies);
     return {
       changed: true,
       path: `${id}.md`,
       revision,
-      relations: []
+      relations: [],
+      documentId
     };
   } finally {
     await lock.release();
@@ -1346,7 +1061,7 @@ async function createConceptNote(root, input, options = {}) {
 async function editNoteRelation(operation, root, sourceIdInput, predicateInput, targetIdInput, options) {
   const vault = await resolveVault(root);
   const sourceId = canonicalNoteId(sourceIdInput);
-  const targetId = canonicalNoteId(targetIdInput);
+  const targetId = canonicalRelationTarget(targetIdInput);
   const predicate = normalizeRelationPredicate(predicateInput);
   const expected = checkedExpectedRevision(options);
   const dependencies = dependenciesFor(options.dependencies);
@@ -1355,7 +1070,7 @@ async function editNoteRelation(operation, root, sourceIdInput, predicateInput, 
     await recoverInterruptedAuthoring(vault, sourceId, lock);
     const source = await readSnapshot(vault, sourceId);
     assertExpected(source, expected);
-    if (operation === "add" && targetId !== sourceId) {
+    if (operation === "add" && !targetId.startsWith("kb://") && targetId !== sourceId) {
       await readSnapshot(vault, targetId);
     }
     const parts = frontmatter(source.content, source.relativePath);
@@ -1385,4 +1100,4 @@ async function removeNoteRelation(root, sourceId, predicate, targetId, options =
   return editNoteRelation("remove", root, sourceId, predicate, targetId, options);
 }
 
-export { InvalidCanonicalNoteIdError, NoteRevisionConflictError, NoteAlreadyExistsError, NoteRecoveryRequiredError, canonicalNoteId, normalizeRelationPredicate, noteRevision, listNoteRelations, createNote, createConceptNote, addNoteRelation, removeNoteRelation };
+export { InvalidCanonicalNoteIdError, NoteRevisionConflictError, NoteAlreadyExistsError, NoteRecoveryRequiredError, canonicalNoteId, canonicalRelationTarget, normalizeRelationPredicate, noteRevision, listNoteRelations, createNote, createConceptNote, addNoteRelation, removeNoteRelation };

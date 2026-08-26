@@ -1,0 +1,77 @@
+// @bun
+import {
+  DEFAULT_PORTFOLIO_AUDIT_ISSUES,
+  MAX_AUTHORITY_GROUPS,
+  MAX_AUTHORIZED_VAULTS,
+  MAX_PORTFOLIO_AUDIT_ISSUES,
+  MAX_PORTFOLIO_REGISTRY_BYTES,
+  MAX_PORTFOLIO_REVISION_BYTES,
+  MAX_PORTFOLIO_SEARCH_CONCURRENCY,
+  MAX_PORTFOLIO_VAULTS,
+  PORTFOLIO_REGISTRY_CONTRACT,
+  PortfolioOpenError,
+  PortfolioSearchError,
+  auditKnowledgePortfolio,
+  loadPortfolioRegistry,
+  openKnowledgePortfolio,
+  parsePortfolioRegistry,
+  resolveAuthorizedVaults,
+  resolvePortfolioVault,
+  selectAuthorizedVaults,
+  snapshotPortfolioRegistry,
+  validateResolvedPortfolioVaults
+} from "./index-jsmvyyvf.js";
+import"./index-zzhgcwyt.js";
+import"./index-adx6khj5.js";
+import"./index-zxdy5pby.js";
+import"./index-4j3tt0c3.js";
+import"./index-1gwbassd.js";
+import"./index-x3fthpsc.js";
+import"./index-cv6fh7z5.js";
+import"./index-d13v9ckt.js";
+import"./index-48pz4jpc.js";
+import"./index-06c9ctr6.js";
+import"./index-5vwpzb5a.js";
+import {
+  MAX_DOCUMENT_ID_BYTES,
+  MAX_PORTFOLIO_NAME_BYTES,
+  documentIdState,
+  formatQualifiedDocumentUri,
+  parseDocumentId,
+  parseQualifiedDocumentUri,
+  parseVaultKey,
+  portfolioDocumentIdentity,
+  portfolioVaultIdentity
+} from "./index-cxfrakt7.js";
+import"./index-1xxnjn0d.js";
+export {
+  validateResolvedPortfolioVaults,
+  snapshotPortfolioRegistry,
+  selectAuthorizedVaults,
+  resolvePortfolioVault,
+  resolveAuthorizedVaults,
+  portfolioVaultIdentity,
+  portfolioDocumentIdentity,
+  parseVaultKey,
+  parseQualifiedDocumentUri,
+  parsePortfolioRegistry,
+  parseDocumentId,
+  openKnowledgePortfolio,
+  loadPortfolioRegistry,
+  formatQualifiedDocumentUri,
+  documentIdState,
+  auditKnowledgePortfolio,
+  PortfolioSearchError,
+  PortfolioOpenError,
+  PORTFOLIO_REGISTRY_CONTRACT,
+  MAX_PORTFOLIO_VAULTS,
+  MAX_PORTFOLIO_SEARCH_CONCURRENCY,
+  MAX_PORTFOLIO_REVISION_BYTES,
+  MAX_PORTFOLIO_REGISTRY_BYTES,
+  MAX_PORTFOLIO_NAME_BYTES,
+  MAX_PORTFOLIO_AUDIT_ISSUES,
+  MAX_DOCUMENT_ID_BYTES,
+  MAX_AUTHORIZED_VAULTS,
+  MAX_AUTHORITY_GROUPS,
+  DEFAULT_PORTFOLIO_AUDIT_ISSUES
+};

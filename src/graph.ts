@@ -8,6 +8,7 @@ import {
   parseDocument,
   type Node,
 } from "yaml";
+import { parseQualifiedDocumentUri, type QualifiedDocumentUri } from "./portfolio-identity.js";
 
 export const catalogStart = "<!-- kb:catalog:start -->";
 export const catalogEnd = "<!-- kb:catalog:end -->";
@@ -68,6 +69,15 @@ export type AuthoredRelation = {
   readonly source: string;
   /** Canonical extensionless note ID. */
   readonly target: string;
+  readonly predicate: string;
+  readonly provenance: RelationProvenance;
+};
+
+export type ExternalAuthoredRelation = {
+  /** Canonical extensionless note ID in the current vault. */
+  readonly source: string;
+  /** Stable cross-vault document identity; portfolio audit resolves availability. */
+  readonly target: QualifiedDocumentUri;
   readonly predicate: string;
   readonly provenance: RelationProvenance;
 };
@@ -209,6 +219,7 @@ export type VaultAnalysis = {
   contextualLinks: readonly ResolvedLink[];
   backlinks: readonly Backlink[];
   authoredRelations: readonly AuthoredRelation[];
+  readonly externalAuthoredRelations: readonly ExternalAuthoredRelation[];
   noteConnections: readonly NoteConnections[];
   issues: readonly LinkIssue[];
   relationIssues: readonly RelationIssue[];
@@ -395,12 +406,21 @@ function relationTarget(
     );
   }
   const target = node.value;
-  if (!isCanonicalNoteId(target)) {
+  let qualified = false;
+  if (target.startsWith("kb://")) {
+    try {
+      parseQualifiedDocumentUri(target);
+      qualified = true;
+    } catch {
+      qualified = false;
+    }
+  }
+  if (!isCanonicalNoteId(target) && !qualified) {
     return malformedRelation(
       source,
       line,
       `Relation "${predicate}" target ${JSON.stringify(target)} must be an exact `
-        + "extensionless vault-root note ID.",
+        + "extensionless vault-root note ID or canonical kb:// document URI.",
       { predicate, target: node.value },
     );
   }
@@ -967,6 +987,17 @@ function compareAuthoredRelations(
     || left.provenance.authoredTarget.localeCompare(right.provenance.authoredTarget);
 }
 
+function compareExternalAuthoredRelations(
+  left: ExternalAuthoredRelation,
+  right: ExternalAuthoredRelation,
+): number {
+  return left.source.localeCompare(right.source)
+    || left.predicate.localeCompare(right.predicate)
+    || left.target.localeCompare(right.target)
+    || left.provenance.line - right.provenance.line
+    || left.provenance.authoredTarget.localeCompare(right.provenance.authoredTarget);
+}
+
 function compareRelationIssues(left: RelationIssue, right: RelationIssue): number {
   const predicateComparison = (left.predicate ?? "").localeCompare(right.predicate ?? "");
   const targetComparison = (left.target ?? "").localeCompare(right.target ?? "");
@@ -1151,6 +1182,7 @@ export function analyzeVault(
   }
 
   const authoredRelations: AuthoredRelation[] = [];
+  const externalAuthoredRelations: ExternalAuthoredRelation[] = [];
   const declarationKeys = new Set<string>();
   const relationEdgeKeys = new Set<string>();
   for (const source of notes) {
@@ -1167,6 +1199,23 @@ export function analyzeVault(
       const declarationKey = `${source.id}\0${declaration.predicate}\0${declaration.target}`;
       if (declarationKeys.has(declarationKey)) continue;
       declarationKeys.add(declarationKey);
+
+      if (declaration.target.startsWith("kb://")) {
+        if (source.id !== catalogNoteId) {
+          externalAuthoredRelations.push({
+            source: source.id,
+            target: parseQualifiedDocumentUri(declaration.target).uri,
+            predicate: declaration.predicate,
+            provenance: {
+              kind: "frontmatter",
+              source: source.path,
+              line: declaration.line,
+              authoredTarget: declaration.target,
+            },
+          });
+        }
+        continue;
+      }
 
       const exactTarget = byId.get(declaration.target);
       if (exactTarget === undefined) {
@@ -1221,6 +1270,8 @@ export function analyzeVault(
     || left.target.localeCompare(right.target)
     || left.line - right.line);
   const sortedAuthoredRelations = authoredRelations.toSorted(compareAuthoredRelations);
+  const sortedExternalAuthoredRelations = externalAuthoredRelations
+    .toSorted(compareExternalAuthoredRelations);
   const backlinks = sortedContextualLinks.toSorted((left, right) =>
     left.target.localeCompare(right.target)
     || left.source.localeCompare(right.source)
@@ -1250,6 +1301,13 @@ export function analyzeVault(
     const inbound = inboundRelationsById.get(relation.target) ?? [];
     inbound.push(relation);
     inboundRelationsById.set(relation.target, inbound);
+    outboundRelationsById.set(
+      relation.source,
+      (outboundRelationsById.get(relation.source) ?? 0) + 1,
+    );
+  }
+  for (const relation of sortedExternalAuthoredRelations) {
+    connected.add(relation.source);
     outboundRelationsById.set(
       relation.source,
       (outboundRelationsById.get(relation.source) ?? 0) + 1,
@@ -1311,6 +1369,7 @@ export function analyzeVault(
     contextualLinks: sortedContextualLinks,
     backlinks,
     authoredRelations: sortedAuthoredRelations,
+    externalAuthoredRelations: sortedExternalAuthoredRelations,
     noteConnections: contentNotes
       .map((note): NoteConnections => ({
         id: note.id,

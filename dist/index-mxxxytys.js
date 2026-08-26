@@ -17,9 +17,10 @@ import {
   rmSync,
   writeFileSync
 } from "fs";
+import { createHash } from "crypto";
 import { homedir } from "os";
 import { dirname, isAbsolute, join, relative, resolve, sep } from "path";
-var CAPTURE_MANIFEST_SCHEMA_VERSION = 3;
+var CAPTURE_MANIFEST_SCHEMA_VERSION = 4;
 var CAPTURE_MANIFEST_FILENAME = "capture.json";
 var CAPTURE_SOURCE_EVIDENCE_PATH = "evidence/source.html";
 var transactionState = Symbol("captureBundleTransactionState");
@@ -96,7 +97,7 @@ function ownedTargetIdentity(targetDirectory, slug) {
   } catch {
     throw new Error(`--force refused an unowned target with an invalid manifest: ${targetDirectory}`);
   }
-  if (typeof parsed !== "object" || parsed === null || Array.isArray(parsed) || !("schemaVersion" in parsed) || parsed.schemaVersion !== 1 && parsed.schemaVersion !== 2 && parsed.schemaVersion !== CAPTURE_MANIFEST_SCHEMA_VERSION || !("sourceUrl" in parsed) || typeof parsed.sourceUrl !== "string") {
+  if (typeof parsed !== "object" || parsed === null || Array.isArray(parsed) || !("schemaVersion" in parsed) || parsed.schemaVersion !== 1 && parsed.schemaVersion !== 2 && parsed.schemaVersion !== 3 && parsed.schemaVersion !== CAPTURE_MANIFEST_SCHEMA_VERSION || !("sourceUrl" in parsed) || typeof parsed.sourceUrl !== "string") {
     throw new Error(`--force refused an unowned target with an incompatible manifest: ${targetDirectory}`);
   }
   try {
@@ -1001,7 +1002,7 @@ function requireListedValue(value, allowed, label) {
     throw new Error(`${label} is invalid`);
   return match;
 }
-function normalizeManifest(input, hasSourceHtml) {
+function normalizeManifest(input, hasSourceHtml, document) {
   const capturedAtTime = Date.parse(input.capturedAt);
   if (!Number.isFinite(capturedAtTime))
     throw new Error("capturedAt must be an ISO-compatible timestamp");
@@ -1068,6 +1069,7 @@ function normalizeManifest(input, hasSourceHtml) {
   }
   return {
     schemaVersion: CAPTURE_MANIFEST_SCHEMA_VERSION,
+    document,
     sourceUrl: sanitizeArtifactUrl(input.sourceUrl),
     canonicalUrl: sanitizeArtifactUrl(input.canonicalUrl),
     capturedAt: new Date(capturedAtTime).toISOString(),
@@ -1132,8 +1134,15 @@ function removeOwnedStaging(transaction) {
 function writeCaptureBundle(transaction, input) {
   requireState(transaction, "open");
   try {
-    const manifest = normalizeManifest(input.manifest, input.sourceHtml !== undefined);
-    writeFileSync(join(transaction.stagingDirectory, captureMarkdownFilename(transaction.slug)), ensureTrailingNewline(redactSensitiveText(input.markdown)), { encoding: "utf8", flag: "wx", mode: 420 });
+    const markdown = ensureTrailingNewline(redactSensitiveText(input.markdown));
+    const markdownBytes = Buffer.from(markdown, "utf8");
+    const document = {
+      path: captureMarkdownFilename(transaction.slug),
+      bytes: markdownBytes.byteLength,
+      sha256: createHash("sha256").update(markdownBytes).digest("hex")
+    };
+    const manifest = normalizeManifest(input.manifest, input.sourceHtml !== undefined, document);
+    writeFileSync(join(transaction.stagingDirectory, document.path), markdownBytes, { encoding: "utf8", flag: "wx", mode: 420 });
     writeFileSync(join(transaction.stagingDirectory, CAPTURE_MANIFEST_FILENAME), `${JSON.stringify(manifest, null, 2)}
 `, { encoding: "utf8", flag: "wx", mode: 420 });
     if (input.sourceHtml !== undefined) {

@@ -31,6 +31,7 @@ function analysis(
     contextualLinks,
     backlinks: [],
     authoredRelations,
+    externalAuthoredRelations: [],
     noteConnections: [],
     issues: [],
     relationIssues: [],

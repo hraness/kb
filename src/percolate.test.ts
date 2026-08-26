@@ -53,6 +53,7 @@ function denseAnalysis(notes: readonly Note[]): VaultAnalysis {
     contextualLinks: [],
     backlinks: [],
     authoredRelations: [],
+    externalAuthoredRelations: [],
     noteConnections: notes.map((note) => ({
       id: note.id,
       path: note.path,

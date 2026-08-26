@@ -88,9 +88,11 @@ kb relation add notes/write-path supports notes/durable-agent-memory \
   --root "$KB_ROOT"
 ```
 
-Use a specific lower-kebab-case predicate. Targets are exact vault-root note
-IDs without `.md`. Ground the assertion in nearby prose or evidence; the
-frontmatter is an indexable statement, not a substitute for explanation.
+Use a specific lower-kebab-case predicate. A local target is an exact
+vault-root note ID without `.md`. A reviewed cross-vault target is its stable
+qualified identity, such as `kb://hraness/kb/document-id`; never use a checkout
+path as cross-vault identity. Ground the assertion in nearby prose or evidence;
+the frontmatter is an indexable statement, not a substitute for explanation.
 
 List or remove relationships without editing reciprocal notes:
 

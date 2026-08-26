@@ -321,7 +321,12 @@ test("stages and atomically commits a deterministic capture bundle", () => {
     },
     sourceHtml: "<html><body><article>Useful source</article></body></html>",
   });
-  expect(stored.schemaVersion).toBe(3);
+  expect(stored.schemaVersion).toBe(4);
+  expect(stored.document).toEqual({
+    path: "useful-source.md",
+    bytes: Buffer.byteLength("# Useful source\n", "utf8"),
+    sha256: new Bun.CryptoHasher("sha256").update("# Useful source\n").digest("hex"),
+  });
   const target = commitCaptureBundle(transaction);
 
   expect(target).toBe(join(realpathSync(root), "useful-source"));
@@ -369,7 +374,7 @@ test("force safely upgrades an owned schema-1 bundle", () => {
   const transaction = beginCaptureBundle({ outputRoot: root, slug: "legacy-capture", force: true });
   writeCaptureBundle(transaction, { markdown: "upgraded", manifest: manifest() });
   const upgraded = commitCaptureBundle(transaction);
-  expect(JSON.parse(readFileSync(join(upgraded, CAPTURE_MANIFEST_FILENAME), "utf8"))).toMatchObject({ schemaVersion: 3 });
+  expect(JSON.parse(readFileSync(join(upgraded, CAPTURE_MANIFEST_FILENAME), "utf8"))).toMatchObject({ schemaVersion: 4 });
 });
 
 test("force restores the old target when installation fails after backup", () => {

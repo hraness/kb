@@ -3,7 +3,7 @@ import {
   MAX_ANALYZED_NOTES,
   MAX_MENTIONS,
   lookupNote
-} from "./index-4962kvds.js";
+} from "./index-cxfrakt7.js";
 
 // src/percolate.ts
 import { createHash } from "crypto";

@@ -45,6 +45,9 @@
       "@hraness/kb/clip/bounded-byte-buffer": [
         "./src/clip/bounded-byte-buffer.ts"
       ],
+      "@hraness/kb/clip/bundle-reader": [
+        "./src/clip/bundle-reader.ts"
+      ],
       "@hraness/kb/clip/cli": [
         "./src/clip/cli.ts"
       ],
@@ -53,6 +56,9 @@
       ],
       "@hraness/kb/clip/doctor": [
         "./src/clip/doctor.ts"
+      ],
+      "@hraness/kb/clip/jobs": [
+        "./src/clip/jobs.ts"
       ],
       "@hraness/kb/clip/network": [
         "./src/clip/network.ts"
@@ -63,11 +69,17 @@
       "@hraness/kb/clip/persist": [
         "./src/clip/persist.ts"
       ],
+      "@hraness/kb/clip/refresh": [
+        "./src/clip/refresh.ts"
+      ],
       "@hraness/kb/clip/terminal": [
         "./src/clip/terminal.ts"
       ],
       "@hraness/kb/evaluation": [
         "./src/evaluation.ts"
+      ],
+      "@hraness/kb/evaluation-builder": [
+        "./src/evaluation-builder.ts"
       ],
       "@hraness/kb/evaluation-kb": [
         "./src/evaluation-kb.ts"
@@ -87,6 +99,9 @@
       "@hraness/kb/percolate": [
         "./src/percolate.ts"
       ],
+      "@hraness/kb/portfolio": [
+        "./src/portfolio.ts"
+      ],
       "@hraness/kb/query": [
         "./src/query.ts"
       ],
@@ -99,11 +114,17 @@
       "@hraness/kb/search": [
         "./src/search.ts"
       ],
+      "@hraness/kb/search-rules": [
+        "./src/search-rules.ts"
+      ],
       "@hraness/kb/semantic": [
         "./src/semantic.ts"
       ],
       "@hraness/kb/source-inbox": [
         "./src/source-inbox.ts"
+      ],
+      "@hraness/kb/untrusted-content": [
+        "./src/untrusted-content.ts"
       ],
       "@hraness/kb/url-intelligence": [
         "./src/url-intelligence.ts"

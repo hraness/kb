@@ -31,22 +31,26 @@ import {
   MAX_PERCOLATION_NOTES,
   MAX_SCOPED_PERCOLATION_MENTION_PAIRS,
   percolateVault
-} from "./index-egdc3x6v.js";
+} from "./index-dyqwejk5.js";
 import {
   FrozenEvaluationSnapshotError,
   knowledgeBaseEvaluationRetrieverIds,
   openKnowledgeBaseEvaluation,
   verifyFrozenEvaluationSnapshot
-} from "./index-y6djytnb.js";
+} from "./index-n5dd7r0v.js";
 import {
   DEFAULT_SEARCH_RESULTS,
   MAX_SEARCH_CANDIDATES,
   MAX_SEARCH_NOTE_REFERENCE_BYTES,
   MAX_SEARCH_RELATED_SEEDS,
   MAX_SEARCH_RESULTS,
+  MIN_UNTRUSTED_CONTEXT_BYTES,
   openKnowledgeBase,
-  packSearchContext
-} from "./index-2hsmrc38.js";
+  packSearchContext,
+  packUntrustedSearchContext,
+  validateKnowledgeBaseSearchHistory
+} from "./index-zzhgcwyt.js";
+import"./index-adx6khj5.js";
 import {
   MAX_EMBEDDING_MODEL_BYTES,
   MAX_NOTE_UTF8_BYTES,
@@ -71,24 +75,8 @@ import {
   searchSemanticVault,
   semanticDatabasePath,
   sha256EmbeddingModelFile
-} from "./index-etpd4zz0.js";
-import {
-  MAX_BOOTSTRAP_RESAMPLES,
-  MAX_EVALUATION_DIAGNOSTICS,
-  MAX_EVALUATION_EVIDENCE_BYTES,
-  MAX_EVALUATION_QRELS_PER_QUERY,
-  MAX_EVALUATION_QUERIES,
-  MAX_EVALUATION_RESULTS_PER_QUERY,
-  MAX_EVALUATION_RETRIEVERS,
-  MAX_EVALUATION_TEXT_BYTES,
-  MAX_EVALUATION_TIMEOUT_MS,
-  RETRIEVAL_EVALUATION_REPORT_VERSION,
-  RETRIEVAL_EVALUATION_SCHEMA_VERSION,
-  buildRetrievalEvaluationReport,
-  pairedBootstrapConfidenceInterval,
-  parseRetrievalEvaluationCorpus,
-  runRetrievalEvaluation
-} from "./index-b88v3vtm.js";
+} from "./index-zxdy5pby.js";
+import"./index-4j3tt0c3.js";
 import {
   GitHistoryError,
   MAX_GIT_HISTORY_COMMITS,
@@ -108,6 +96,23 @@ import {
   validateGitHistoryForNotesRequest,
   validateSearchGitHistoryOptions
 } from "./index-1gwbassd.js";
+import {
+  MAX_BOOTSTRAP_RESAMPLES,
+  MAX_EVALUATION_DIAGNOSTICS,
+  MAX_EVALUATION_EVIDENCE_BYTES,
+  MAX_EVALUATION_QRELS_PER_QUERY,
+  MAX_EVALUATION_QUERIES,
+  MAX_EVALUATION_RESULTS_PER_QUERY,
+  MAX_EVALUATION_RETRIEVERS,
+  MAX_EVALUATION_TEXT_BYTES,
+  MAX_EVALUATION_TIMEOUT_MS,
+  RETRIEVAL_EVALUATION_REPORT_VERSION,
+  RETRIEVAL_EVALUATION_SCHEMA_VERSION,
+  buildRetrievalEvaluationReport,
+  pairedBootstrapConfidenceInterval,
+  parseRetrievalEvaluationCorpus,
+  runRetrievalEvaluation
+} from "./index-b88v3vtm.js";
 import {
   auditAgentGuideRepository,
   auditAgentGuideSource,
@@ -132,19 +137,21 @@ import {
   NoteRevisionConflictError,
   addNoteRelation,
   canonicalNoteId,
+  canonicalRelationTarget,
   createConceptNote,
   createNote,
   listNoteRelations,
   normalizeRelationPredicate,
   noteRevision,
   removeNoteRelation
-} from "./index-2fr3hf9q.js";
+} from "./index-01jj6rbv.js";
+import"./index-3rm7cz6h.js";
 import {
   createRepresentativeRetrievalFixture,
   createSyntheticRankFusionFixture,
   evaluateRanking,
   evaluateRetrievalBenchmark
-} from "./index-9mmghyga.js";
+} from "./index-s2gw5aw9.js";
 import {
   MAX_SEARCH_QUERY_BYTES,
   MAX_SEARCH_QUERY_TERMS,
@@ -152,7 +159,7 @@ import {
   fuseRankedCandidates,
   searchExactVault,
   validateSearchQuery
-} from "./index-tthfg4xy.js";
+} from "./index-cv6fh7z5.js";
 import {
   MAX_NAVIGATION_INDEXED_CONNECTIONS,
   MAX_NAVIGATION_RETURNED_CONNECTIONS,
@@ -236,7 +243,8 @@ import {
   replaceCatalog,
   searchableMarkdown,
   wikiLinks
-} from "./index-4962kvds.js";
+} from "./index-cxfrakt7.js";
+import"./index-1xxnjn0d.js";
 export {
   workflowFromUnknown,
   wikiLinks,
@@ -246,6 +254,7 @@ export {
   validateRepositoryScopeSelection,
   validateQueryOptions,
   validateMarkdownAttachments,
+  validateKnowledgeBaseSearchHistory,
   validateGitHistoryForNotesRequest,
   validateGitHistoryForNotesOptions,
   validateAttachmentReferences,
@@ -281,6 +290,7 @@ export {
   parseGitHistoryOutput,
   parseAgentContextMarker,
   pairedBootstrapConfidenceInterval,
+  packUntrustedSearchContext,
   packSearchContext,
   openSemanticWarmSearchSession,
   openSemanticSearchSession,
@@ -328,6 +338,7 @@ export {
   catalogStart,
   catalogEnd,
   canonicalRepositoryPath,
+  canonicalRelationTarget,
   canonicalNoteId,
   buildRetrievalEvaluationReport,
   buildRepositoryMemoryContext,
@@ -361,6 +372,7 @@ export {
   NoteRecoveryRequiredError,
   NoteAlreadyExistsError,
   NavigationBudgetError,
+  MIN_UNTRUSTED_CONTEXT_BYTES,
   MAX_WORKFLOW_OUTPUT_BYTES,
   MAX_WORKFLOW_NODES,
   MAX_WORKFLOW_CONCURRENCY,

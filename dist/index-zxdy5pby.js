@@ -2,7 +2,7 @@
 import {
   fuseRankedCandidates,
   validateSearchQuery
-} from "./index-tthfg4xy.js";
+} from "./index-cv6fh7z5.js";
 import {
   MAX_ANALYZED_NOTES,
   analyzeVault,
@@ -12,7 +12,7 @@ import {
   parseNote,
   renderCatalog,
   replaceCatalog
-} from "./index-4962kvds.js";
+} from "./index-cxfrakt7.js";
 
 // src/semantic.ts
 import { createHash as createHash2 } from "crypto";

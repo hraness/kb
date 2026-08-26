@@ -844,7 +844,14 @@ describe("capture orchestration", () => {
       });
       expect(result.markdownPath).toBe(join(realpathSync(root), "fixture", "fixture.md"));
       expect(existsSync(result.markdownPath ?? "")).toBe(true);
-      expect(readFileSync(join(root, "fixture", "capture.json"), "utf8")).toContain('"schemaVersion": 3');
+      expect(JSON.parse(readFileSync(join(root, "fixture", "capture.json"), "utf8"))).toMatchObject({
+        schemaVersion: 4,
+        document: {
+          path: "fixture.md",
+          bytes: expect.any(Number),
+          sha256: expect.stringMatching(/^[0-9a-f]{64}$/u),
+        },
+      });
     } finally {
       rmSync(root, { recursive: true, force: true });
     }

@@ -2,17 +2,17 @@
 import {
   MAX_SEARCH_RESULTS,
   openKnowledgeBase
-} from "./index-2hsmrc38.js";
+} from "./index-zzhgcwyt.js";
 import {
   scanVault
-} from "./index-etpd4zz0.js";
+} from "./index-zxdy5pby.js";
+import {
+  runGitCommand
+} from "./index-1gwbassd.js";
 import {
   MAX_EVALUATION_EVIDENCE_BYTES,
   redactEvaluationMachinePaths
 } from "./index-b88v3vtm.js";
-import {
-  runGitCommand
-} from "./index-1gwbassd.js";
 import {
   MAX_REPOSITORY_MEMORY_DETAIL_LIMIT,
   MAX_REPOSITORY_MEMORY_GROUP_LIMIT,

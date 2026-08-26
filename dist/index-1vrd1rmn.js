@@ -3,8 +3,8 @@ import {
   defineWorkflow
 } from "./index-3v2z4f0q.js";
 import {
-  packSearchContext
-} from "./index-2hsmrc38.js";
+  packUntrustedSearchContext
+} from "./index-zzhgcwyt.js";
 
 // src/workflows/decision-context.ts
 var decisionContextWorkflow = defineWorkflow({
@@ -43,10 +43,10 @@ var decisionContextWorkflow = defineWorkflow({
           ...search,
           history: result("history")
         };
-        const packed = packSearchContext(enriched, {
+        const packed = packUntrustedSearchContext(enriched, {
           ...input.maxBytes === undefined ? {} : { maxBytes: input.maxBytes }
         });
-        return { search: enriched, context: packed.content, truncated: packed.truncated };
+        return { context: packed.content, truncated: packed.truncated };
       }
     }
   ],

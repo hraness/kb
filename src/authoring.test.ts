@@ -23,6 +23,7 @@ import {
   NoteRevisionConflictError,
   addNoteRelation,
   canonicalNoteId,
+  canonicalRelationTarget,
   createConceptNote,
   createNote,
   listNoteRelations,
@@ -103,10 +104,14 @@ describe("single-note authoring", () => {
       path: "notes/durable-memory.md",
       relations: [],
     });
+    expect(created.documentId).toMatch(
+      /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/u,
+    );
     expect(created.revision).toMatch(/^sha256:[0-9a-f]{64}$/);
 
     const content = await readFile(join(root, created.path), "utf8");
     expect(parse(content.split("---\n")[1] ?? "")).toMatchObject({
+      document_id: created.documentId,
       type: "concept",
       title: "Durable memory",
       tags: ["agents", "Local-First"],
@@ -120,6 +125,7 @@ describe("single-note authoring", () => {
     }, options);
     expect(repeated.changed).toBeFalse();
     expect(repeated.revision).toBe(created.revision);
+    expect(repeated.documentId).toBe(created.documentId);
     expect(await readFile(join(root, created.path), "utf8")).toBe(content);
 
     const generic = await createNote(root, {
@@ -155,6 +161,116 @@ describe("single-note authoring", () => {
       id: "notes/decision",
       title: "A decision",
     }, options)).rejects.toBeInstanceOf(NoteAlreadyExistsError);
+  });
+
+  test("generates stable document IDs independently and preserves them across idempotent creates", async () => {
+    const { root, cache } = await fixture();
+    let documentIds = 0;
+    let temporaryTokens = 0;
+    const options: AuthoringOptions = {
+      ...lockOptions(cache),
+      dependencies: {
+        documentId: () => {
+          documentIds += 1;
+          return "stable-document-17";
+        },
+        token: () => {
+          temporaryTokens += 1;
+          return `transaction-${temporaryTokens}`;
+        },
+      },
+    };
+    const created = await createNote(root, {
+      id: "notes/stable",
+      title: "Stable",
+      type: "decision",
+    }, options);
+    expect(created.documentId).toBe("stable-document-17");
+    expect(documentIds).toBe(1);
+    expect(temporaryTokens).toBeGreaterThan(0);
+    const createdContent = await readFile(join(root, created.path), "utf8");
+    expect(parse(createdContent.split("---\n")[1] ?? "")).toMatchObject({
+      document_id: "stable-document-17",
+    });
+
+    const repeated = await createNote(root, {
+      id: "notes/stable",
+      title: "Stable",
+      type: "decision",
+    }, options);
+    expect(repeated).toMatchObject({
+      changed: false,
+      documentId: "stable-document-17",
+      revision: created.revision,
+    });
+    expect(documentIds).toBe(1);
+    expect(await readFile(join(root, created.path), "utf8")).toBe(createdContent);
+
+    const accepted = await createNote(root, {
+      id: "notes/stable",
+      documentId: "stable-document-17",
+      title: "Stable",
+      type: "decision",
+    }, options);
+    expect(accepted).toMatchObject({ changed: false, documentId: "stable-document-17" });
+
+    await expect(createNote(root, {
+      id: "notes/stable",
+      documentId: "different-document-18",
+      title: "Stable",
+      type: "decision",
+    }, options)).rejects.toThrow("document_id differs");
+    expect(await readFile(join(root, created.path), "utf8")).toBe(createdContent);
+  });
+
+  test("validates explicit and generated IDs before installing a new note", async () => {
+    const { root, cache } = await fixture();
+    await expect(createConceptNote(root, {
+      id: "notes/invalid-explicit",
+      documentId: "Not Canonical",
+      title: "Invalid explicit",
+    }, lockOptions(cache))).rejects.toThrow("document_id must be a canonical lowercase ASCII ID");
+    await expect(createConceptNote(root, {
+      id: "notes/invalid-generated",
+      title: "Invalid generated",
+    }, {
+      ...lockOptions(cache),
+      dependencies: { documentId: () => "generated/with/slash" },
+    })).rejects.toThrow("document_id must be a canonical lowercase ASCII ID");
+    expect(await readdir(join(root, "notes"))).not.toContain("invalid-explicit.md");
+    expect(await readdir(join(root, "notes"))).not.toContain("invalid-generated.md");
+  });
+
+  test("does not retrofit a legacy compatible note or accept a requested ID for it", async () => {
+    const { root, cache } = await fixture();
+    const path = await writeNote(root, "notes/legacy");
+    const original = await readFile(path, "utf8");
+    let generated = 0;
+    const options: AuthoringOptions = {
+      ...lockOptions(cache),
+      dependencies: {
+        documentId: () => {
+          generated += 1;
+          return "must-not-be-used";
+        },
+      },
+    };
+    const compatible = await createConceptNote(root, {
+      id: "notes/legacy",
+      title: "notes/legacy",
+    }, options);
+    expect(compatible.changed).toBeFalse();
+    expect(compatible.documentId).toBeUndefined();
+    expect(generated).toBe(0);
+    expect(await readFile(path, "utf8")).toBe(original);
+
+    await expect(createConceptNote(root, {
+      id: "notes/legacy",
+      documentId: "requested-stable-id",
+      title: "notes/legacy",
+    }, options)).rejects.toThrow("document_id is missing");
+    expect(generated).toBe(0);
+    expect(await readFile(path, "utf8")).toBe(original);
   });
 
   test("adds, lists, and removes compact relations while preserving prose and comments", async () => {
@@ -281,6 +397,31 @@ describe("single-note authoring", () => {
       { predicate: "supports", target: "notes/other" },
       { predicate: "supports", target: "notes/target" },
     ]);
+  });
+
+  test("authors and removes stable cross-vault relations without probing a local target", async () => {
+    const { root, cache } = await fixture();
+    const sourcePath = await writeNote(root, "notes/source");
+    const target = "kb://hraness/sleepyland/sound-wellness-expansion";
+    const options = lockOptions(cache);
+
+    const added = await addNoteRelation(root, "notes/source", "supports", target, options);
+    expect(added).toMatchObject({
+      changed: true,
+      relations: [{ predicate: "supports", target }],
+    });
+    const parsed = parseNote("notes/source.md", await readFile(sourcePath, "utf8"));
+    const analysis = analyzeVault([parsed]);
+    expect(analysis.relationIssues).toEqual([]);
+    expect(analysis.externalAuthoredRelations).toEqual([
+      expect.objectContaining({ source: "notes/source", predicate: "supports", target }),
+    ]);
+    expect(canonicalRelationTarget(target)).toBe(target);
+    expect(() => canonicalRelationTarget("kb://Hraness/sleepyland/not-canonical"))
+      .toThrow("canonical kb://owner/vault/document_id");
+
+    const removed = await removeNoteRelation(root, "notes/source", "supports", target, options);
+    expect(removed).toMatchObject({ changed: true, relations: [] });
   });
 
   test("preserves existing relation collection style and returns a stable set view", async () => {

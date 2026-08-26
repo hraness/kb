@@ -1,7 +1,7 @@
 import type { GitHistoryForNotesResult } from "../git.js";
 import type { MetadataFilter } from "../query.js";
 import {
-  packSearchContext,
+  packUntrustedSearchContext,
   type KnowledgeBaseSearchResult,
   type KnowledgeBaseSession,
 } from "../sdk.js";
@@ -17,7 +17,7 @@ export type DecisionContextInput = {
 };
 
 export type DecisionContextOutput = {
-  readonly search: KnowledgeBaseSearchResult;
+  /** Execution-safe envelope; retrieved note and Git fields remain inert JSON data inside. */
   readonly context: string;
   readonly truncated: boolean;
 };
@@ -70,10 +70,10 @@ export const decisionContextWorkflow = defineWorkflow<
           ...search,
           history: result("history"),
         };
-        const packed = packSearchContext(enriched, {
+        const packed = packUntrustedSearchContext(enriched, {
           ...(input.maxBytes === undefined ? {} : { maxBytes: input.maxBytes }),
         });
-        return { search: enriched, context: packed.content, truncated: packed.truncated };
+        return { context: packed.content, truncated: packed.truncated };
       },
     },
   ],

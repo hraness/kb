@@ -765,6 +765,49 @@ describe("graph lint", () => {
       });
   });
 
+  test("keeps canonical cross-vault relations external with exact provenance", () => {
+    const source = parseNote("notes/source.md", [
+      "---",
+      "relations:",
+      "  supports: kb://hraness/sleepyland/sound-wellness-expansion",
+      "  challenges: kb://Hraness/sleepyland/not-canonical",
+      "---",
+      "# Source",
+    ].join("\n"));
+    const analysis = analyzeVault([source]);
+
+    expect(analysis.authoredRelations).toEqual([]);
+    expect(analysis.externalAuthoredRelations).toEqual([{
+      source: "notes/source",
+      target: "kb://hraness/sleepyland/sound-wellness-expansion",
+      predicate: "supports",
+      provenance: {
+        kind: "frontmatter",
+        source: "notes/source.md",
+        line: 3,
+        authoredTarget: "kb://hraness/sleepyland/sound-wellness-expansion",
+      },
+    }]);
+    expect(analysis.relationIssues).toEqual([
+      expect.objectContaining({
+        kind: "malformed",
+        source: "notes/source.md",
+        line: 4,
+        predicate: "challenges",
+        target: "kb://Hraness/sleepyland/not-canonical",
+      }),
+    ]);
+    expect(analysis.noteConnections).toEqual([
+      expect.objectContaining({
+        id: "notes/source",
+        inboundRelationCount: 0,
+        outboundRelationCount: 1,
+        relationBacklinks: [],
+      }),
+    ]);
+    expect(analysis.issues).toEqual([]);
+  });
+
   test("deduplicates canonical assertions, keeps predicates distinct, and never adds reciprocals", () => {
     const source = parseNote("notes/source.md", [
       "---",

@@ -11,12 +11,13 @@ import {
   rmSync,
   writeFileSync,
 } from "node:fs";
+import { createHash } from "node:crypto";
 import { homedir } from "node:os";
 import { dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
 
 import { sanitizeTerminalText } from "./terminal.js";
 
-export const CAPTURE_MANIFEST_SCHEMA_VERSION = 3 as const;
+export const CAPTURE_MANIFEST_SCHEMA_VERSION = 4 as const;
 export const CAPTURE_MANIFEST_FILENAME = "capture.json";
 export const CAPTURE_SOURCE_EVIDENCE_PATH = "evidence/source.html";
 
@@ -103,6 +104,12 @@ export type CaptureManifestInput = {
 
 export type CaptureManifest = CaptureManifestInput & {
   readonly schemaVersion: typeof CAPTURE_MANIFEST_SCHEMA_VERSION;
+  /** Digest of the exact redacted, newline-terminated Markdown bytes on disk. */
+  readonly document: {
+    readonly path: string;
+    readonly bytes: number;
+    readonly sha256: string;
+  };
   readonly evidence: CaptureManifestInput["evidence"] & {
     readonly sourceHtmlPath: typeof CAPTURE_SOURCE_EVIDENCE_PATH | null;
   };
@@ -227,6 +234,7 @@ function ownedTargetIdentity(targetDirectory: string, slug: string): { readonly 
     || (
       parsed.schemaVersion !== 1
       && parsed.schemaVersion !== 2
+      && parsed.schemaVersion !== 3
       && parsed.schemaVersion !== CAPTURE_MANIFEST_SCHEMA_VERSION
     )
     || !("sourceUrl" in parsed)
@@ -1147,7 +1155,11 @@ function requireListedValue<const T extends string>(
   return match;
 }
 
-function normalizeManifest(input: CaptureManifestInput, hasSourceHtml: boolean): CaptureManifest {
+function normalizeManifest(
+  input: CaptureManifestInput,
+  hasSourceHtml: boolean,
+  document: CaptureManifest["document"],
+): CaptureManifest {
   const capturedAtTime = Date.parse(input.capturedAt);
   if (!Number.isFinite(capturedAtTime)) throw new Error("capturedAt must be an ISO-compatible timestamp");
   const assets = input.assets.map((asset, index): CaptureManifestAsset => {
@@ -1235,6 +1247,7 @@ function normalizeManifest(input: CaptureManifestInput, hasSourceHtml: boolean):
   }
   return {
     schemaVersion: CAPTURE_MANIFEST_SCHEMA_VERSION,
+    document,
     sourceUrl: sanitizeArtifactUrl(input.sourceUrl),
     canonicalUrl: sanitizeArtifactUrl(input.canonicalUrl),
     capturedAt: new Date(capturedAtTime).toISOString(),
@@ -1323,10 +1336,17 @@ function removeOwnedStaging(transaction: CaptureBundleTransaction): void {
 export function writeCaptureBundle(transaction: CaptureBundleTransaction, input: CaptureBundleInput): CaptureManifest {
   requireState(transaction, "open");
   try {
-    const manifest = normalizeManifest(input.manifest, input.sourceHtml !== undefined);
+    const markdown = ensureTrailingNewline(redactSensitiveText(input.markdown));
+    const markdownBytes = Buffer.from(markdown, "utf8");
+    const document: CaptureManifest["document"] = {
+      path: captureMarkdownFilename(transaction.slug),
+      bytes: markdownBytes.byteLength,
+      sha256: createHash("sha256").update(markdownBytes).digest("hex"),
+    };
+    const manifest = normalizeManifest(input.manifest, input.sourceHtml !== undefined, document);
     writeFileSync(
-      join(transaction.stagingDirectory, captureMarkdownFilename(transaction.slug)),
-      ensureTrailingNewline(redactSensitiveText(input.markdown)),
+      join(transaction.stagingDirectory, document.path),
+      markdownBytes,
       { encoding: "utf8", flag: "wx", mode: 0o644 },
     );
     writeFileSync(

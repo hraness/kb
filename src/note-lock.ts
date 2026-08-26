@@ -10,7 +10,7 @@ import {
   unlink,
 } from "node:fs/promises";
 import { homedir } from "node:os";
-import { isAbsolute, join, relative, resolve, sep } from "node:path";
+import { dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
 
 const LOCK_SCHEMA_VERSION = 1 as const;
 const MAX_LOCK_BYTES = 4 * 1024;
@@ -71,6 +71,8 @@ export interface NoteLockOptions {
   readonly waitTimeoutMs?: number;
   readonly dependencies?: Partial<NoteLockDependencies>;
 }
+
+export type FileLeaseOptions = Omit<NoteLockOptions, "cacheHome">;
 
 export class NoteLockBusyError extends Error {
   readonly lockPath: string;
@@ -425,26 +427,45 @@ async function tryAcquire(
       throw error;
     }
 
+    let leaseOperationTail = Promise.resolve();
+    const runLeaseOperation = <T>(operation: () => Promise<T>): Promise<T> => {
+      const result = leaseOperationTail.then(operation);
+      leaseOperationTail = result.then(() => undefined, () => undefined);
+      return result;
+    };
+    let heartbeatQueued = false;
+    let released = false;
+    let releasePromise: Promise<void> | undefined;
     const timer = setInterval(() => {
-      const now = dependencies.now();
-      void handle.utimes(now, now).catch(() => undefined);
+      if (heartbeatQueued || releasePromise !== undefined) return;
+      heartbeatQueued = true;
+      void runLeaseOperation(async () => {
+        if (released) return;
+        const now = dependencies.now();
+        await handle.utimes(now, now);
+      }).catch(() => undefined).finally(() => {
+        heartbeatQueued = false;
+      });
     }, dependencies.heartbeatMs);
     timer.unref();
-    let released = false;
     return {
       path: lockPath,
-      assertOwned: async () => {
+      assertOwned: () => runLeaseOperation(async () => {
+        if (released) throw new NoteLockLostError(lockPath);
         const observed = await observeLock(lockPath);
         if (observed?.kind !== "regular" || observed.owner?.token !== owner.token) {
           throw new NoteLockLostError(lockPath);
         }
-      },
+      }),
       release: async () => {
-        if (released) return;
-        released = true;
+        if (releasePromise !== undefined) return releasePromise;
         clearInterval(timer);
-        await handle.close();
-        await releaseOwnedLock(lockPath, owner, dependencies);
+        releasePromise = runLeaseOperation(async () => {
+          released = true;
+          await handle.close();
+          await releaseOwnedLock(lockPath, owner, dependencies);
+        });
+        return releasePromise;
       },
     };
   }
@@ -465,6 +486,29 @@ export async function acquireNoteLock(
   options: NoteLockOptions = {},
 ): Promise<NoteLock> {
   const lockPath = await lockPathFor(vaultRoot, canonicalNoteId, options.cacheHome);
+  return acquireFileLease(lockPath, options);
+}
+
+/** Acquire the same identity-checked local lease at one caller-owned canonical path. */
+export async function acquireFileLease(
+  lockPathInput: string,
+  options: FileLeaseOptions = {},
+): Promise<NoteLock> {
+  if (typeof lockPathInput !== "string" || lockPathInput.trim() === "") {
+    throw new TypeError("a file lease requires a non-empty path");
+  }
+  const lockPath = resolve(lockPathInput);
+  const requestedDirectory = dirname(lockPath);
+  const directory = await realpath(requestedDirectory);
+  const metadata = await lstat(directory);
+  if (
+    directory !== requestedDirectory
+    || !metadata.isDirectory()
+    || metadata.isSymbolicLink()
+    || dirname(lockPath) !== directory
+  ) {
+    throw new Error("the file lease parent must be one canonical real directory");
+  }
   const dependencies = resolvedDependencies(options.dependencies);
   const waitTimeoutMs = options.waitTimeoutMs ?? DEFAULT_WAIT_TIMEOUT_MS;
   if (!Number.isFinite(waitTimeoutMs) || waitTimeoutMs < 0) {

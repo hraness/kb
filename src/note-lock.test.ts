@@ -123,6 +123,23 @@ describe("per-note XDG locks", () => {
     await second.release();
   });
 
+  test("does not mistake its own rapid heartbeat for lost ownership", async () => {
+    const { vault, cache } = await fixture();
+    const lock = await acquireNoteLock(vault, "notes/heartbeat", {
+      cacheHome: cache,
+      waitTimeoutMs: 0,
+      dependencies: dependencies({
+        heartbeatMs: 1,
+        now: () => new Date(),
+      }),
+    });
+
+    for (let assertion = 0; assertion < 3_000; assertion += 1) {
+      await lock.assertOwned();
+    }
+    await lock.release();
+  });
+
   test("reclaims a dead owner but never reclaims unsafe foreign entries", async () => {
     const { base, vault, cache } = await fixture();
     const seed = await acquireNoteLock(vault, "notes/source", {

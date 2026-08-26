@@ -1,9 +1,18 @@
 // @bun
 import {
+  expandSearchRequest,
+  parseSearchRules,
+  prioritizeSearchHits
+} from "./index-adx6khj5.js";
+import {
   openSemanticSearchSession,
   recommendedEmbeddingModel,
   scanVault
-} from "./index-etpd4zz0.js";
+} from "./index-zxdy5pby.js";
+import {
+  UntrustedContentBudgetError,
+  createUntrustedToolResult
+} from "./index-4j3tt0c3.js";
 import {
   GitHistoryError,
   gitHistoryForNotes,
@@ -18,7 +27,7 @@ import {
   fuseRankedCandidates,
   searchExactVault,
   validateSearchQuery
-} from "./index-tthfg4xy.js";
+} from "./index-cv6fh7z5.js";
 import {
   NavigationBudgetError,
   navigateLinks
@@ -28,7 +37,7 @@ import {
 } from "./index-48pz4jpc.js";
 import {
   lookupNote
-} from "./index-4962kvds.js";
+} from "./index-cxfrakt7.js";
 
 // src/sdk.ts
 import { resolve } from "path";
@@ -38,6 +47,7 @@ var DEFAULT_SEARCH_RESULTS = 10;
 var MAX_READ_BYTES = 64 * 1024;
 var DEFAULT_CONTEXT_BYTES = 24 * 1024;
 var MAX_CONTEXT_BYTES = 64 * 1024;
+var MIN_UNTRUSTED_CONTEXT_BYTES = 512;
 var DEFAULT_SEARCH_HISTORY_NOTES = 5;
 var MAX_SEARCH_HISTORY_NOTES = 20;
 var MAX_SEARCH_RELATED_SEEDS = 5;
@@ -97,6 +107,13 @@ function checkedSearchMode(value) {
     throw new Error('Knowledge-base search mode must be "exact", "hybrid", "keyword", or "semantic".');
   }
   return mode;
+}
+function checkedSearchOrdering(value) {
+  const ordering = value ?? "relevance";
+  if (ordering !== "relevance" && ordering !== "priority-then-relevance") {
+    throw new TypeError('Knowledge-base search ordering must be "relevance" or "priority-then-relevance".');
+  }
+  return ordering;
 }
 function checkedGraphOptions(value) {
   if (value === false)
@@ -171,7 +188,11 @@ function checkedHistoryRequest(value) {
     options: validateGitHistoryForNotesOptions(options)
   };
 }
+function validateKnowledgeBaseSearchHistory(value) {
+  checkedHistoryRequest(value);
+}
 async function openKnowledgeBase(options, dependencies = {}) {
+  const searchRules = options.searchRules === undefined ? null : parseSearchRules(options.searchRules);
   if (options.embeddingModelFile !== undefined && options.embeddingModelLease !== undefined) {
     throw new TypeError("embeddingModelFile and embeddingModelLease are mutually exclusive.");
   }
@@ -249,26 +270,30 @@ async function openKnowledgeBase(options, dependencies = {}) {
   const search = async (searchOptions) => {
     assertOpen();
     const startedAt = performance.now();
-    const { query } = validateSearchQuery(searchOptions.query);
-    const mode = checkedSearchMode(searchOptions.mode);
-    const minScore = searchOptions.minScore;
+    const { query: requestedQuery } = validateSearchQuery(searchOptions.query);
+    const expansion = searchRules === null ? { request: searchOptions, alias: null } : expandSearchRequest(searchOptions, searchRules);
+    const effectiveOptions = expansion.request;
+    const { query: effectiveQuery } = validateSearchQuery(effectiveOptions.query);
+    const mode = checkedSearchMode(effectiveOptions.mode);
+    const ordering = checkedSearchOrdering(effectiveOptions.ordering);
+    const minScore = effectiveOptions.minScore;
     if (minScore !== undefined && (!Number.isFinite(minScore) || minScore < 0 || minScore > 1)) {
       throw new RangeError("Search minimum score must be a number from 0 through 1.");
     }
     if (mode === "exact" && minScore !== undefined) {
       throw new Error("Search minimum score applies only to hybrid, keyword, or semantic mode.");
     }
-    const limit = checkedLimit(searchOptions.limit, DEFAULT_SEARCH_RESULTS, MAX_SEARCH_RESULTS, "Search limit");
-    const filters = searchOptions.filters ?? [];
-    const tags = searchOptions.tags ?? [];
-    const repositoryScopes = searchOptions.repositoryScopes ?? [];
+    const limit = checkedLimit(effectiveOptions.limit, DEFAULT_SEARCH_RESULTS, MAX_SEARCH_RESULTS, "Search limit");
+    const filters = effectiveOptions.filters ?? [];
+    const tags = effectiveOptions.tags ?? [];
+    const repositoryScopes = effectiveOptions.repositoryScopes ?? [];
     const filtered = filters.length > 0 || tags.length > 0 || repositoryScopes.length > 0;
-    const candidateLimit = checkedLimit(searchOptions.candidateLimit, filtered ? MAX_SEARCH_CANDIDATES : Math.max(40, limit * 4), MAX_SEARCH_CANDIDATES, "Search candidate limit");
+    const candidateLimit = checkedLimit(effectiveOptions.candidateLimit, filtered ? MAX_SEARCH_CANDIDATES : Math.max(40, limit * 4), MAX_SEARCH_CANDIDATES, "Search candidate limit");
     if (candidateLimit < limit) {
       throw new RangeError("Search candidate limit must be at least the result limit.");
     }
-    const historyRequest = checkedHistoryRequest(searchOptions.history);
-    const graphOptions = checkedGraphOptions(searchOptions.graph);
+    const historyRequest = checkedHistoryRequest(effectiveOptions.history);
+    const graphOptions = checkedGraphOptions(effectiveOptions.graph);
     const explicitSeeds = graphOptions === null ? [] : resolvedGraphSeeds(snapshot.notes, graphOptions.related);
     const historyNoteLimit = historyRequest.enabled ? historyRequest.noteLimit : null;
     const allowedIds = new Set(queryVault(snapshot.notes, snapshot.analysis, {
@@ -278,7 +303,7 @@ async function openKnowledgeBase(options, dependencies = {}) {
     }).map(({ id }) => id));
     const includeExact = mode === "hybrid" || mode === "exact";
     const exact = includeExact ? searchExactVault(snapshot.notes, snapshot.analysis, {
-      query,
+      query: effectiveQuery,
       filters,
       tags,
       repositoryScopes,
@@ -305,7 +330,7 @@ async function openKnowledgeBase(options, dependencies = {}) {
           model = session.model;
           const semanticLimit = candidateLimit;
           const result = await session.search({
-            query,
+            query: effectiveQuery,
             mode: selectedQmdMode,
             limit: semanticLimit,
             candidateLimit,
@@ -361,7 +386,8 @@ async function openKnowledgeBase(options, dependencies = {}) {
     ];
     const fused = fuseRankedCandidates(lanes);
     const ordered = fused.toSorted((left, right) => Number(exactById.get(right.id)?.hit.identity ?? false) - Number(exactById.get(left.id)?.hit.identity ?? false) || left.rank - right.rank || left.id.localeCompare(right.id));
-    const results = ordered.slice(0, limit).map((candidate, index) => {
+    const shouldApplyPriority = ordering === "priority-then-relevance" && searchRules !== null && searchRules.priorityRules.length > 0;
+    const relevanceResults = (shouldApplyPriority ? ordered : ordered.slice(0, limit)).map((candidate, index) => {
       const note = notesById.get(candidate.id);
       if (note === undefined) {
         throw new Error(`Fused retrieval returned unknown note ${JSON.stringify(candidate.id)}.`);
@@ -404,6 +430,19 @@ async function openKnowledgeBase(options, dependencies = {}) {
         contributions: candidate.contributions
       };
     });
+    let priorityTrace = null;
+    let results = relevanceResults.slice(0, limit);
+    if (shouldApplyPriority && searchRules !== null) {
+      const prioritized = prioritizeSearchHits(relevanceResults, searchRules, {
+        ...options.vaultId === undefined ? {} : { vaultId: options.vaultId }
+      });
+      const selectedHits = prioritized.hits.slice(0, limit);
+      const selectedTrace = prioritized.trace.slice(0, limit);
+      if (selectedTrace.some(({ matchedRuleIds }) => matchedRuleIds.length > 0)) {
+        priorityTrace = Object.freeze(selectedTrace);
+        results = Object.freeze(selectedHits.map((hit, index) => hit.rank === index + 1 ? hit : { ...hit, rank: index + 1 }));
+      }
+    }
     let graph = null;
     if (graphOptions !== null) {
       try {
@@ -465,13 +504,23 @@ async function openKnowledgeBase(options, dependencies = {}) {
         message: history.reason
       });
     }
+    const priorityApplication = priorityTrace === null ? undefined : Object.freeze({
+      ordering: "priority-then-relevance",
+      trace: priorityTrace
+    });
+    const ruleApplication = expansion.alias === null ? priorityApplication === undefined ? undefined : Object.freeze({ priority: priorityApplication }) : Object.freeze({
+      alias: expansion.alias,
+      effectiveQuery,
+      ...priorityApplication === undefined ? {} : { priority: priorityApplication }
+    });
     return {
-      query,
+      query: expansion.alias === null ? effectiveQuery : requestedQuery,
       mode,
       results,
       graph,
       history,
       partial: diagnostics.some(({ status }) => status !== "ready"),
+      ...ruleApplication === undefined ? {} : { rules: ruleApplication },
       diagnostics: {
         notes: snapshot.notes.length,
         model: selectedQmdMode === null ? null : model ?? recommendedEmbeddingModel,
@@ -680,5 +729,238 @@ Evidence: `))
 `, true);
   return writer.result();
 }
+function inspectedDataRecord(value, label) {
+  if (typeof value !== "object" || value === null || Array.isArray(value)) {
+    throw new TypeError(`${label} must be a plain data object.`);
+  }
+  const prototype = Object.getPrototypeOf(value);
+  if (prototype !== Object.prototype && prototype !== null) {
+    throw new TypeError(`${label} must be a plain data object.`);
+  }
+  const descriptors = Object.getOwnPropertyDescriptors(value);
+  const output = Object.create(null);
+  for (const key of Reflect.ownKeys(descriptors)) {
+    if (typeof key === "symbol")
+      throw new TypeError(`${label} contains a symbol property.`);
+    const descriptor = descriptors[key];
+    if (descriptor === undefined || !("value" in descriptor)) {
+      throw new TypeError(`${label} contains an accessor property.`);
+    }
+    if (!descriptor.enumerable) {
+      throw new TypeError(`${label} contains a non-enumerable property.`);
+    }
+    Object.defineProperty(output, key, {
+      configurable: false,
+      enumerable: true,
+      value: descriptor.value,
+      writable: false
+    });
+  }
+  return Object.freeze(output);
+}
+function inspectedDataArray(value, label, maximum) {
+  if (!Array.isArray(value) || Object.getPrototypeOf(value) !== Array.prototype) {
+    throw new TypeError(`${label} must be an ordinary array.`);
+  }
+  if (value.length > maximum) {
+    throw new RangeError(`${label} exceeds its ${maximum.toLocaleString("en-US")}-item limit.`);
+  }
+  const descriptors = Object.getOwnPropertyDescriptors(value);
+  for (const key of Reflect.ownKeys(descriptors)) {
+    if (typeof key === "symbol")
+      throw new TypeError(`${label} contains a symbol property.`);
+    if (key === "length")
+      continue;
+    const index = Number(key);
+    if (!Number.isSafeInteger(index) || index < 0 || index >= value.length || String(index) !== key) {
+      throw new TypeError(`${label} contains a non-index property.`);
+    }
+  }
+  const output = [];
+  for (let index = 0;index < value.length; index += 1) {
+    const descriptor = descriptors[String(index)];
+    if (descriptor === undefined || !("value" in descriptor) || !descriptor.enumerable) {
+      throw new TypeError(`${label} must be a dense array of enumerable data properties.`);
+    }
+    output.push(descriptor.value);
+  }
+  return Object.freeze(output);
+}
+function requiredData(record, key, label) {
+  if (!Object.hasOwn(record, key))
+    throw new TypeError(`${label}.${key} is required.`);
+  return record[key];
+}
+function dataString(value, label) {
+  if (typeof value !== "string")
+    throw new TypeError(`${label} must be a string.`);
+  return value;
+}
+function dataNumber(value, label) {
+  if (typeof value !== "number" || !Number.isFinite(value)) {
+    throw new TypeError(`${label} must be a finite number.`);
+  }
+  return value;
+}
+function dataBoolean(value, label) {
+  if (typeof value !== "boolean")
+    throw new TypeError(`${label} must be a boolean.`);
+  return value;
+}
+function optionalDataNumber(record, key, label) {
+  if (!Object.hasOwn(record, key))
+    return;
+  return dataNumber(record[key], `${label}.${key}`);
+}
+function searchEvidenceSummary(value, label) {
+  const evidence = inspectedDataRecord(value, label);
+  return Object.freeze({
+    kind: dataString(requiredData(evidence, "kind", label), `${label}.kind`),
+    rank: dataNumber(requiredData(evidence, "rank", label), `${label}.rank`)
+  });
+}
+function searchHitContextRecord(value, index) {
+  const label = `Knowledge-base search result ${index + 1}`;
+  const hit = inspectedDataRecord(value, label);
+  const evidence = inspectedDataArray(requiredData(hit, "evidence", label), `${label}.evidence`, 32).map((entry, evidenceIndex) => searchEvidenceSummary(entry, `${label}.evidence[${evidenceIndex}]`));
+  const line = optionalDataNumber(hit, "line", label);
+  return Object.freeze({
+    kind: "search-result",
+    id: dataString(requiredData(hit, "id", label), `${label}.id`),
+    path: dataString(requiredData(hit, "path", label), `${label}.path`),
+    title: dataString(requiredData(hit, "title", label), `${label}.title`),
+    rank: dataNumber(requiredData(hit, "rank", label), `${label}.rank`),
+    score: dataNumber(requiredData(hit, "score", label), `${label}.score`),
+    identity: dataBoolean(requiredData(hit, "identity", label), `${label}.identity`),
+    ...line === undefined ? {} : { line },
+    evidence: Object.freeze(evidence),
+    snippet: dataString(requiredData(hit, "snippet", label), `${label}.snippet`)
+  });
+}
+function graphContextRecords(value) {
+  if (value === null)
+    return [];
+  const graph = inspectedDataRecord(value, "Knowledge-base graph context");
+  const related = inspectedDataArray(requiredData(graph, "related", "Knowledge-base graph context"), "Knowledge-base graph context.related", 100);
+  return Object.freeze(related.map((entry, index) => {
+    const label = `Knowledge-base graph result ${index + 1}`;
+    const hit = inspectedDataRecord(entry, label);
+    const evidence = inspectedDataArray(requiredData(hit, "evidence", label), `${label}.evidence`, 100).map((item, evidenceIndex) => {
+      const evidenceLabel = `${label}.evidence[${evidenceIndex}]`;
+      const inspected = inspectedDataRecord(item, evidenceLabel);
+      return Object.freeze({
+        kind: dataString(requiredData(inspected, "kind", evidenceLabel), `${evidenceLabel}.kind`)
+      });
+    });
+    return Object.freeze({
+      kind: "graph-related",
+      id: dataString(requiredData(hit, "id", label), `${label}.id`),
+      path: dataString(requiredData(hit, "path", label), `${label}.path`),
+      title: dataString(requiredData(hit, "title", label), `${label}.title`),
+      distance: dataNumber(requiredData(hit, "distance", label), `${label}.distance`),
+      evidence: Object.freeze(evidence)
+    });
+  }));
+}
+function gitContextRecords(value) {
+  if (value === null)
+    return [];
+  const history = inspectedDataRecord(value, "Knowledge-base Git provenance");
+  const status = dataString(requiredData(history, "status", "Knowledge-base Git provenance"), "Knowledge-base Git provenance.status");
+  if (status === "unavailable") {
+    return Object.freeze([Object.freeze({
+      kind: "git-status",
+      status,
+      reason: dataString(requiredData(history, "reason", "Knowledge-base Git provenance"), "Knowledge-base Git provenance.reason")
+    })]);
+  }
+  if (status !== "ready")
+    throw new TypeError("Knowledge-base Git provenance.status is invalid.");
+  const output = [Object.freeze({
+    kind: "git-status",
+    status,
+    head: dataString(requiredData(history, "head", "Knowledge-base Git provenance"), "Knowledge-base Git provenance.head")
+  })];
+  const notes = inspectedDataArray(requiredData(history, "notes", "Knowledge-base Git provenance"), "Knowledge-base Git provenance.notes", MAX_SEARCH_HISTORY_NOTES);
+  for (const [noteIndex, entry] of notes.entries()) {
+    const noteLabel = `Knowledge-base Git provenance note ${noteIndex + 1}`;
+    const note = inspectedDataRecord(entry, noteLabel);
+    const noteId = dataString(requiredData(note, "id", noteLabel), `${noteLabel}.id`);
+    const path = dataString(requiredData(note, "path", noteLabel), `${noteLabel}.path`);
+    const commits = inspectedDataArray(requiredData(note, "commits", noteLabel), `${noteLabel}.commits`, 100);
+    for (const [commitIndex, commitValue] of commits.entries()) {
+      const commitLabel = `${noteLabel}.commits[${commitIndex}]`;
+      const commit = inspectedDataRecord(commitValue, commitLabel);
+      output.push(Object.freeze({
+        kind: "git-provenance",
+        noteId,
+        path,
+        hash: dataString(requiredData(commit, "hash", commitLabel), `${commitLabel}.hash`),
+        committedAt: dataString(requiredData(commit, "committedAt", commitLabel), `${commitLabel}.committedAt`),
+        subject: dataString(requiredData(commit, "subject", commitLabel), `${commitLabel}.subject`)
+      }));
+    }
+  }
+  if (Object.hasOwn(history, "limitedCommits")) {
+    const limited = inspectedDataArray(history.limitedCommits, "Knowledge-base Git provenance.limitedCommits", 100);
+    if (limited.length > 0) {
+      const first = inspectedDataRecord(limited[0], "Knowledge-base Git limited commit");
+      output.push(Object.freeze({
+        kind: "git-coverage",
+        limitedCommits: limited.length,
+        pathLimit: dataNumber(requiredData(first, "pathLimit", "Knowledge-base Git limited commit"), "Knowledge-base Git limited commit.pathLimit")
+      }));
+    }
+  }
+  return Object.freeze(output);
+}
+function untrustedSearchRecords(result) {
+  const root = inspectedDataRecord(result, "Knowledge-base search result");
+  const records = [Object.freeze({
+    kind: "knowledge-base-search",
+    query: dataString(requiredData(root, "query", "Knowledge-base search result"), "Knowledge-base search result.query"),
+    mode: dataString(requiredData(root, "mode", "Knowledge-base search result"), "Knowledge-base search result.mode"),
+    partial: dataBoolean(requiredData(root, "partial", "Knowledge-base search result"), "Knowledge-base search result.partial")
+  })];
+  const results = inspectedDataArray(requiredData(root, "results", "Knowledge-base search result"), "Knowledge-base search result.results", MAX_SEARCH_RESULTS);
+  records.push(...results.map(searchHitContextRecord));
+  records.push(...graphContextRecords(requiredData(root, "graph", "Knowledge-base search result")));
+  records.push(...gitContextRecords(requiredData(root, "history", "Knowledge-base search result")));
+  return Object.freeze(records);
+}
+function packUntrustedSearchContext(result, options = {}) {
+  const maximumBytes = checkedLimit(options.maxBytes, DEFAULT_CONTEXT_BYTES, MAX_CONTEXT_BYTES, "Untrusted context byte limit");
+  if (maximumBytes < MIN_UNTRUSTED_CONTEXT_BYTES) {
+    throw new RangeError(`Untrusted context byte limit must be at least ${MIN_UNTRUSTED_CONTEXT_BYTES}.`);
+  }
+  const accepted = [];
+  let truncated = false;
+  for (const record of untrustedSearchRecords(result)) {
+    try {
+      createUntrustedToolResult([...accepted, record], {
+        maxBytes: maximumBytes,
+        truncated: false
+      });
+      accepted.push(record);
+    } catch (error) {
+      if (!(error instanceof UntrustedContentBudgetError))
+        throw error;
+      truncated = true;
+      break;
+    }
+  }
+  if (accepted.length === 0) {
+    throw new RangeError(`Untrusted context byte limit ${maximumBytes} cannot hold the required search header.`);
+  }
+  const toolResult = createUntrustedToolResult(accepted, {
+    maxBytes: maximumBytes,
+    truncated
+  });
+  return Object.freeze({
+    content: toolResult.content[0].text,
+    truncated,
+    structuredContent: toolResult.structuredContent
+  });
+}
 
-export { MAX_SEARCH_RESULTS, MAX_SEARCH_CANDIDATES, DEFAULT_SEARCH_RESULTS, MAX_SEARCH_RELATED_SEEDS, MAX_SEARCH_NOTE_REFERENCE_BYTES, openKnowledgeBase, packSearchContext };
+export { MAX_SEARCH_RESULTS, MAX_SEARCH_CANDIDATES, DEFAULT_SEARCH_RESULTS, MIN_UNTRUSTED_CONTEXT_BYTES, MAX_SEARCH_RELATED_SEEDS, MAX_SEARCH_NOTE_REFERENCE_BYTES, validateKnowledgeBaseSearchHistory, openKnowledgeBase, packSearchContext, packUntrustedSearchContext };
