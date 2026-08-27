@@ -1,0 +1,43 @@
+# Dual-use functionality disclosure
+
+`@hraness/kb` is a local-first Markdown knowledge-base and source-capture tool.
+Its intended use is to preserve research, plans, decisions, and sources that the
+operator is authorized to read.
+
+The package includes security-relevant capabilities that can be used for both
+legitimate and harmful purposes:
+
+- It can read cookies from a local browser profile or a user-supplied cookie
+  file when the operator explicitly selects that source.
+- It can read an attached Chrome or Chromium tab, or use an owned browser
+  session, to capture public or signed-in content.
+- It can make bounded network requests, follow validated redirects, download
+  selected assets, and query fixed metadata and archive providers.
+- It can invoke bounded local browser, media, PDF, OCR, Git, Rust, and search
+  subprocesses when the operator requests a feature that needs them.
+- It writes captured Markdown, metadata, evidence, and localized assets to a
+  caller-selected local vault.
+
+Use these capabilities only for public content or content that you are entitled
+and permitted to automate. Do not use this package to bypass authentication,
+paywalls, CAPTCHAs, rate limits, DRM, audience controls, platform rules, or any
+other access restriction. Do not use it to access another person's private
+data.
+
+Cookie-backed capture reads a selected store and keeps matching cookies in
+memory, except for a short-lived mode-0600 cookie jar used by the optional
+yt-dlp path. Path-backed browser profiles are copied to a temporary directory;
+the source profile is not modified. Attached browser sessions retain their own
+network behavior. Current-tab capture does not navigate, click, type, upload,
+or submit. URL-based rendered capture can navigate and scroll within fixed
+limits.
+
+Captured pages, screenshots, cookies, source evidence, and terminal output can
+contain credentials, private text, account names, or personal data. Review
+every authenticated capture before committing, sharing, or processing it with
+another service. The package applies path, network, resource, redaction, and
+atomic-write controls, but those controls do not grant authorization or make
+hostile content trustworthy.
+
+Report suspected vulnerabilities through GitHub private vulnerability
+reporting at https://github.com/hraness/kb/security/advisories/new.

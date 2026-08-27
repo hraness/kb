@@ -29,9 +29,12 @@ jobs:
       - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
           node-version: "24"
+          package-manager-cache: false
+          registry-url: "https://registry.npmjs.org"
       - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
         with:
           bun-version: "1.3.14"
+      - run: npm install --global --ignore-scripts npm@11.19.0
       - name: Verify release identity
         id: identity
         env:
@@ -69,6 +72,34 @@ jobs:
       - run: bun pm pack --dry-run --ignore-scripts
       - run: >-
           node --input-type=module -e 'const manifest = (await import("./package.json", { with: { type: "json" } })).default; await Promise.all(Object.values(manifest.exports).map(({ import: path }) => import(path)))'
+      - name: Verify published npm artifact
+        run: |
+          set -euo pipefail
+          package_name="$(node -p 'require("./package.json").name')"
+          package_version="$(node -p 'require("./package.json").version')"
+          source_dir="$RUNNER_TEMP/npm-source"
+          registry_dir="$RUNNER_TEMP/npm-registry"
+          source_metadata="$RUNNER_TEMP/npm-source.json"
+          registry_metadata="$RUNNER_TEMP/npm-registry.json"
+          mkdir -p "$source_dir" "$registry_dir"
+          npm pack --json --ignore-scripts --pack-destination "$source_dir" > "$source_metadata"
+          npm pack --json --ignore-scripts --pack-destination "$registry_dir" \
+            --registry=https://registry.npmjs.org \
+            "$package_name@$package_version" > "$registry_metadata"
+          registry_archive="$(node -e '
+            const fs = require("node:fs");
+            const [sourcePath, registryPath] = process.argv.slice(1);
+            const source = JSON.parse(fs.readFileSync(sourcePath, "utf8"));
+            const registry = JSON.parse(fs.readFileSync(registryPath, "utf8"));
+            if (!Array.isArray(source) || source.length !== 1 || !Array.isArray(registry) || registry.length !== 1) process.exit(1);
+            if (typeof source[0]?.integrity !== "string" || source[0].integrity !== registry[0]?.integrity) {
+              console.error("::error::Published npm tarball differs from the checked source artifact");
+              process.exit(1);
+            }
+            if (typeof registry[0]?.filename !== "string") process.exit(1);
+            process.stdout.write(registry[0].filename);
+          ' "$source_metadata" "$registry_metadata")"
+          bun run ./scripts/package-smoke.ts --archive "$registry_dir/$registry_archive"
 
   publish:
     name: Publish
