@@ -43,14 +43,15 @@ describe("portfolio registry", () => {
   test("parses explicit logical IDs without deriving them from checkout paths", () => {
     const parsed = parsePortfolioRegistry(registry([
       {
-        ...entry("stripedex", "stripe-history"),
-        repository: "hraness/stripedex",
+        ...entry("product-history", "history-vault"),
+        owner: "example",
+        repository: "example/product-history",
       },
     ]));
     expect(parsed.vaults[0]).toEqual(expect.objectContaining({
-      key: "hraness/stripedex",
-      repository: "hraness/stripedex",
-      checkout: "stripe-history",
+      key: "example/product-history",
+      repository: "example/product-history",
+      checkout: "history-vault",
     }));
   });
 
