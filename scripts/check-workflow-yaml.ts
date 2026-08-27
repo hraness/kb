@@ -37,15 +37,28 @@ export function validateWorkflowYaml(source: string, label: string): void {
 export function validateNpmStageWorkflow(source: string, label: string): void {
   const workflow = workflowRecord(source, label);
   const jobs = record(workflow.jobs, `${label} jobs`);
+  const verify = record(jobs.verify, `${label} verify job`);
   const stage = record(jobs.stage, `${label} stage job`);
+  const verifyPermissions = record(verify.permissions, `${label} verify permissions`);
+  if (verifyPermissions.contents !== "read" || "id-token" in verifyPermissions) {
+    throw new Error(`${label} verification must remain read-only without OIDC authority`);
+  }
+  const stagePermissions = record(stage.permissions, `${label} stage permissions`);
+  if (
+    stagePermissions["id-token"] !== "write"
+    || Object.keys(stagePermissions).length !== 1
+  ) {
+    throw new Error(`${label} staging must hold only id-token: write`);
+  }
   if (!Array.isArray(stage.steps)) {
     throw new Error(`${label} stage steps must be a sequence`);
   }
   const steps = stage.steps.map((step, index) =>
     record(step, `${label} stage step ${String(index + 1)}`));
-  if (!steps.some((step) =>
-    typeof step.uses === "string" && step.uses.startsWith("actions/checkout@"))) {
-    throw new Error(`${label} stage job must check out the dispatch commit`);
+  if (steps.some((step) =>
+    typeof step.uses === "string"
+    && (step.uses.startsWith("actions/checkout@") || step.uses.startsWith("oven-sh/setup-bun@")))) {
+    throw new Error(`${label} staging must not check out source or install Bun`);
   }
   const publicationSteps = steps.filter((step) =>
     typeof step.run === "string" && step.run.includes("npm stage publish"));
@@ -57,14 +70,28 @@ export function validateNpmStageWorkflow(source: string, label: string): void {
     throw new Error(`${label} staged-publication command is missing`);
   }
   const environment = record(publicationStep.env, `${label} staged-publication environment`);
-  if (environment.DEFAULT_BRANCH !== "${{ github.event.repository.default_branch }}") {
-    throw new Error(`${label} staged publication must bind the repository default branch`);
+  for (const name of [
+    "DEFAULT_BRANCH",
+    "DIGEST",
+    "EXPECTED_ARCHIVE_SHA256",
+    "EXPECTED_DIGEST_SHA256",
+    "EXPECTED_METADATA_SHA256",
+    "EXPECTED_SOURCE_SHA",
+    "METADATA",
+    "TARBALL",
+  ]) {
+    if (typeof environment[name] !== "string") {
+      throw new Error(`${label} staged publication must bind ${name}`);
+    }
   }
   const guardCommands = [
-    'git fetch origin "$DEFAULT_BRANCH"',
-    'remote_head="$(git rev-parse "origin/$DEFAULT_BRANCH")"',
-    'if [[ "$GITHUB_SHA" != "$remote_head" ]]; then',
-    'npm stage publish "$archive"',
+    'git init --quiet --bare "$current_main"',
+    'git --git-dir="$current_main" fetch',
+    'current_default_sha="$(git --git-dir="$current_main" rev-parse FETCH_HEAD)"',
+    'current_archive_sha256="$(sha256sum "$TARBALL"',
+    'current_metadata_sha256="$(sha256sum "$METADATA"',
+    'current_digest_sha256="$(sha256sum "$DIGEST"',
+    'npm stage publish "$TARBALL"',
     "--registry=https://registry.npmjs.org",
   ];
   let previousIndex = -1;
@@ -74,6 +101,13 @@ export function validateNpmStageWorkflow(source: string, label: string): void {
       throw new Error(`${label} must recheck current default-branch HEAD immediately before staged publication`);
     }
     previousIndex = index;
+  }
+  const stageSource = JSON.stringify(stage);
+  if (/\bbun\b/u.test(stageSource) || stageSource.includes("./scripts/")) {
+    throw new Error(`${label} staging must not execute repository code`);
+  }
+  if ((source.match(/id-token: write/gu) ?? []).length !== 1) {
+    throw new Error(`${label} must grant OIDC authority to exactly one job`);
   }
 }
 
