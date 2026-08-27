@@ -151,6 +151,13 @@ describe("npm release workflows", () => {
       'createHash("sha256")',
       'git init --quiet --bare "$current_main"',
       '"https://github.com/$GITHUB_REPOSITORY.git"',
+      'EXPECTED_VERSION: ${{ needs.verify.outputs.package_version }}',
+      'release_tag="v$EXPECTED_VERSION"',
+      "git ls-remote --exit-code --refs",
+      '"refs/tags/$release_tag" > "$tag_lookup_output"',
+      'tag_lookup_status=$?',
+      '[[ "$tag_lookup_status" -ne 2 || -s "$tag_lookup_output" ]]',
+      "Could not prove that tag $release_tag is still absent from origin",
       'current_archive_sha256="$(sha256sum "$TARBALL"',
       'current_metadata_sha256="$(sha256sum "$METADATA"',
       'current_digest_sha256="$(sha256sum "$DIGEST"',
@@ -167,10 +174,12 @@ describe("npm release workflows", () => {
     expect(stageJob).not.toContain("./scripts/");
     expect(stageJob.match(/npm stage publish/gu) ?? []).toHaveLength(1);
     const fetchIndex = stageJob.lastIndexOf('git --git-dir="$current_main" fetch');
+    const tagLookupIndex = stageJob.lastIndexOf("git ls-remote --exit-code --refs");
     const rehashIndex = stageJob.lastIndexOf('current_archive_sha256="$(sha256sum "$TARBALL"');
     const stageIndex = stageJob.indexOf('npm stage publish "$TARBALL"');
     expect(fetchIndex).toBeGreaterThan(-1);
-    expect(fetchIndex).toBeLessThan(rehashIndex);
+    expect(fetchIndex).toBeLessThan(tagLookupIndex);
+    expect(tagLookupIndex).toBeLessThan(rehashIndex);
     expect(rehashIndex).toBeLessThan(stageIndex);
     expect(workflow).not.toContain("secrets.NPM_TOKEN");
     expect(workflow).not.toContain("NODE_AUTH_TOKEN");

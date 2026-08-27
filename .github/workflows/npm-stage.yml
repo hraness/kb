@@ -418,11 +418,18 @@ jobs:
           EXPECTED_DIGEST_SHA256: ${{ steps.artifact.outputs.digest_sha256 }}
           EXPECTED_METADATA_SHA256: ${{ steps.artifact.outputs.metadata_sha256 }}
           EXPECTED_SOURCE_SHA: ${{ needs.verify.outputs.source_sha }}
+          EXPECTED_VERSION: ${{ needs.verify.outputs.package_version }}
           METADATA: ${{ steps.artifact.outputs.metadata }}
           TARBALL: ${{ steps.artifact.outputs.tarball }}
         run: |
           set -euo pipefail
           git check-ref-format "refs/heads/$DEFAULT_BRANCH"
+          if [[ ! "$EXPECTED_VERSION" =~ ^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$ ]]; then
+            echo "::error::Verified package version is not stable semantic version"
+            exit 1
+          fi
+          release_tag="v$EXPECTED_VERSION"
+          git check-ref-format "refs/tags/$release_tag"
           current_main="$RUNNER_TEMP/kb-current-main.git"
           git init --quiet --bare "$current_main"
           git --git-dir="$current_main" fetch --quiet --no-tags --depth=1 \
@@ -434,6 +441,19 @@ jobs:
                 "$GITHUB_SHA" != "$current_default_sha" ]]; then
             echo "::error::$DEFAULT_BRANCH advanced to $current_default_sha after artifact verification"
             exit 1
+          fi
+          tag_lookup_output="$RUNNER_TEMP/kb-stage-tag-lookup.txt"
+          if git ls-remote --exit-code --refs \
+            "https://github.com/$GITHUB_REPOSITORY.git" \
+            "refs/tags/$release_tag" > "$tag_lookup_output"; then
+            echo "::error::Tag $release_tag was created after package verification"
+            exit 1
+          else
+            tag_lookup_status=$?
+            if [[ "$tag_lookup_status" -ne 2 || -s "$tag_lookup_output" ]]; then
+              echo "::error::Could not prove that tag $release_tag is still absent from origin"
+              exit 1
+            fi
           fi
           current_archive_sha256="$(sha256sum "$TARBALL" | cut -d ' ' -f 1)"
           current_metadata_sha256="$(sha256sum "$METADATA" | cut -d ' ' -f 1)"
