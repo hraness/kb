@@ -12,14 +12,16 @@ concurrency:
 
 jobs:
   verify:
-    name: Verify package
+    name: Verify exact package
     permissions:
       contents: read
     runs-on: ubuntu-latest
-    timeout-minutes: 35
+    timeout-minutes: 45
     outputs:
-      archive_name: ${{ steps.artifact.outputs.archive_name }}
-      archive_sha512: ${{ steps.artifact.outputs.archive_sha512 }}
+      artifact_name: ${{ steps.artifact.outputs.artifact_name }}
+      package_version: ${{ steps.artifact.outputs.package_version }}
+      source_sha: ${{ steps.identity.outputs.source_sha }}
+      tarball_name: ${{ steps.artifact.outputs.tarball_name }}
     steps:
       - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
         with:
@@ -33,23 +35,37 @@ jobs:
       - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
         with:
           bun-version: "1.3.14"
-      - name: Install staging-capable npm
-        run: npm install --global --ignore-scripts npm@11.19.0
-      - name: Verify default-branch package identity
+      - name: Pin npm
+        run: |
+          set -euo pipefail
+          npm install --global npm@11.19.0 \
+            --ignore-scripts \
+            --registry=https://registry.npmjs.org
+          test "$(npm --version)" = "11.19.0"
+          [[ "$(node --version)" == v24.* ]]
+      - name: Require current default-branch head
+        id: identity
         env:
           DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
         run: |
           set -euo pipefail
-          if [[ "$GITHUB_REF" != "refs/heads/$DEFAULT_BRANCH" ]]; then
-            echo "::error::Dispatch this workflow from $DEFAULT_BRANCH"
+          expected_ref="refs/heads/$DEFAULT_BRANCH"
+          if [[ "$GITHUB_REF" != "$expected_ref" ]]; then
+            echo "::error::Dispatch this workflow from $expected_ref, received $GITHUB_REF"
             exit 1
           fi
-          git fetch origin "$DEFAULT_BRANCH"
-          remote_head="$(git rev-parse "origin/$DEFAULT_BRANCH")"
-          if [[ "$GITHUB_SHA" != "$remote_head" ]]; then
-            echo "::error::Dispatch commit $GITHUB_SHA is not current $DEFAULT_BRANCH head $remote_head"
+          git fetch --no-tags origin \
+            "refs/heads/$DEFAULT_BRANCH:refs/remotes/origin/$DEFAULT_BRANCH"
+          default_head="$(git rev-parse "origin/$DEFAULT_BRANCH")"
+          checked_out_head="$(git rev-parse HEAD)"
+          if [[ "$GITHUB_SHA" != "$default_head" || "$checked_out_head" != "$default_head" ]]; then
+            echo "::error::Dispatch commit $GITHUB_SHA is not current $DEFAULT_BRANCH head $default_head"
             exit 1
           fi
+          printf 'source_sha=%s\n' "$default_head" >> "$GITHUB_OUTPUT"
+      - name: Verify package can be staged
+        run: |
+          set -euo pipefail
           package_name="$(node -p 'require("./package.json").name')"
           package_version="$(node -p 'require("./package.json").version')"
           if [[ "$package_name" != "@hraness/kb" ]]; then
@@ -57,16 +73,22 @@ jobs:
             exit 1
           fi
           if [[ ! "$package_version" =~ ^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$ ]]; then
-            echo "::error::Package version $package_version is not a stable semantic version"
+            echo "::error::Package version $package_version is not stable semantic version"
             exit 1
           fi
-          npm view "$package_name" name --json \
-            --registry=https://registry.npmjs.org >/dev/null
+          if git rev-parse --verify --quiet "refs/tags/v$package_version" >/dev/null; then
+            echo "::error::Create v$package_version only after exact npm delivery is verified"
+            exit 1
+          fi
+          if ! npm view "$package_name" name --json \
+            --registry=https://registry.npmjs.org >/dev/null; then
+            echo "::error::$package_name must be bootstrapped interactively before staged publishing can run"
+            exit 1
+          fi
           version_error="$RUNNER_TEMP/npm-version-error.txt"
           if npm view "$package_name@$package_version" version --json \
-            --registry=https://registry.npmjs.org \
-            >/dev/null 2>"$version_error"; then
-            echo "::error::$package_name@$package_version already exists"
+            --registry=https://registry.npmjs.org >/dev/null 2>"$version_error"; then
+            echo "::error::$package_name@$package_version is already public"
             exit 1
           fi
           if ! grep -q 'E404' "$version_error"; then
@@ -76,88 +98,374 @@ jobs:
           fi
       - run: bun install --frozen-lockfile --ignore-scripts
       - run: bun run check
-      - name: Require committed generated outputs
+      - name: Verify generated tree
         run: |
+          set -euo pipefail
           generated_status="$(git status --porcelain --untracked-files=all -- dist bun.lock)"
           if [[ -n "$generated_status" ]]; then
             printf '%s\n' "$generated_status"
             exit 1
           fi
-      - name: Build and verify the exact npm artifact
+      - name: Prepare and smoke exact npm artifact
         id: artifact
         run: |
           set -euo pipefail
-          artifact_dir="$RUNNER_TEMP/npm-package"
-          metadata="$RUNNER_TEMP/npm-pack.json"
-          mkdir -p "$artifact_dir"
-          npm pack --json --ignore-scripts --pack-destination "$artifact_dir" > "$metadata"
-          cat "$metadata"
-          archive_name="$(node -e '
-            const fs = require("node:fs");
-            const value = JSON.parse(fs.readFileSync(process.argv[1], "utf8"));
-            if (!Array.isArray(value) || value.length !== 1 || typeof value[0]?.filename !== "string") process.exit(1);
-            process.stdout.write(value[0].filename);
-          ' "$metadata")"
-          archive="$artifact_dir/$archive_name"
-          bun run ./scripts/package-smoke.ts --archive "$archive"
-          archive_sha512="$(sha512sum "$archive" | cut -d ' ' -f 1)"
-          printf 'archive_name=%s\n' "$archive_name" >> "$GITHUB_OUTPUT"
-          printf 'archive_sha512=%s\n' "$archive_sha512" >> "$GITHUB_OUTPUT"
-      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+          artifact_directory="$RUNNER_TEMP/kb-npm-$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT"
+          package_version="$(node -p 'require("./package.json").version')"
+          tarball_name="hraness-kb-$package_version.tgz"
+          archive="$artifact_directory/$tarball_name"
+          metadata="$artifact_directory/npm-pack.json"
+          digest="$artifact_directory/npm-package.sha256"
+          bun run ./scripts/prepare-npm-package.ts "$artifact_directory"
+          bun run ./scripts/package-smoke.ts \
+            --archive "$archive" \
+            --pack-json "$metadata"
+          archive_sha256="$(sha256sum "$archive" | cut -d ' ' -f 1)"
+          metadata_sha256="$(sha256sum "$metadata" | cut -d ' ' -f 1)"
+          printf '%s  %s\n%s  npm-pack.json\n' \
+            "$archive_sha256" "$tarball_name" "$metadata_sha256" > "$digest"
+          (
+            cd "$artifact_directory"
+            sha256sum --check npm-package.sha256
+          )
+          artifact_entry_count="$(ARTIFACT_DIRECTORY="$artifact_directory" node -e '
+            const { readdirSync } = require("node:fs");
+            process.stdout.write(String(readdirSync(process.env.ARTIFACT_DIRECTORY).length));
+          ')"
+          if [[ "$artifact_entry_count" != 3 ]]; then
+            echo "::error::Reviewed npm artifact must contain exactly three files"
+            exit 1
+          fi
+          for required_file in "$archive" "$metadata" "$digest"; do
+            if [[ ! -f "$required_file" || -L "$required_file" ]]; then
+              echo "::error::Reviewed npm artifact contains an unsafe or unexpected entry"
+              exit 1
+            fi
+          done
+          artifact_name="npm-package-$package_version-$GITHUB_SHA-$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT"
+          printf 'artifact_name=%s\npackage_version=%s\ntarball_name=%s\n' \
+            "$artifact_name" "$package_version" "$tarball_name" >> "$GITHUB_OUTPUT"
+      - name: Upload reviewed npm artifact
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
-          name: npm-package-${{ github.sha }}
-          path: ${{ runner.temp }}/npm-package/${{ steps.artifact.outputs.archive_name }}
-          compression-level: 0
           if-no-files-found: error
-          retention-days: 7
+          name: ${{ steps.artifact.outputs.artifact_name }}
+          path: ${{ runner.temp }}/kb-npm-${{ github.run_id }}-${{ github.run_attempt }}
+          compression-level: 0
+          retention-days: 30
 
   stage:
-    name: Stage verified package
+    name: Stage exact package
     needs: verify
     permissions:
-      contents: read
       id-token: write
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
-      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
-        with:
-          fetch-depth: 0
-          persist-credentials: false
       - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
           node-version: "24"
           package-manager-cache: false
           registry-url: "https://registry.npmjs.org"
-      - name: Install staging-capable npm
-        run: npm install --global --ignore-scripts npm@11.19.0
-      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
-        with:
-          name: npm-package-${{ github.sha }}
-          path: ${{ runner.temp }}/npm-package
-      - name: Stage verified package
-        env:
-          ARCHIVE_NAME: ${{ needs.verify.outputs.archive_name }}
-          ARCHIVE_SHA512: ${{ needs.verify.outputs.archive_sha512 }}
-          DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
+      - name: Pin npm
         run: |
           set -euo pipefail
-          archive="$RUNNER_TEMP/npm-package/$ARCHIVE_NAME"
-          if [[ ! -f "$archive" || -L "$archive" ]]; then
-            echo "::error::Verified package archive is missing or linked"
+          npm install --global npm@11.19.0 \
+            --ignore-scripts \
+            --registry=https://registry.npmjs.org
+          test "$(npm --version)" = "11.19.0"
+          [[ "$(node --version)" == v24.* ]]
+      - name: Bind artifact reference
+        env:
+          ARTIFACT_NAME: ${{ needs.verify.outputs.artifact_name }}
+          EXPECTED_SOURCE_SHA: ${{ needs.verify.outputs.source_sha }}
+          EXPECTED_VERSION: ${{ needs.verify.outputs.package_version }}
+        run: |
+          set -euo pipefail
+          if [[ ! "$EXPECTED_SOURCE_SHA" =~ ^[a-f0-9]{40}$ || \
+                ! "$EXPECTED_VERSION" =~ ^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$ ]]; then
+            echo "::error::Verified package identity is invalid"
             exit 1
           fi
-          actual_sha512="$(sha512sum "$archive" | cut -d ' ' -f 1)"
-          if [[ "$actual_sha512" != "$ARCHIVE_SHA512" ]]; then
-            echo "::error::Downloaded package digest does not match the verified artifact"
+          expected_artifact_name="npm-package-$EXPECTED_VERSION-$EXPECTED_SOURCE_SHA-$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT"
+          if [[ "$ARTIFACT_NAME" != "$expected_artifact_name" ]]; then
+            echo "::error::Verified artifact name is not bound to this run and attempt"
             exit 1
           fi
-          git fetch origin "$DEFAULT_BRANCH"
-          remote_head="$(git rev-parse "origin/$DEFAULT_BRANCH")"
-          if [[ "$GITHUB_SHA" != "$remote_head" ]]; then
-            echo "::error::Dispatch commit $GITHUB_SHA is no longer current $DEFAULT_BRANCH head $remote_head"
+      - name: Download reviewed package
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: ${{ needs.verify.outputs.artifact_name }}
+          path: ${{ runner.temp }}/kb-npm-stage
+      - name: Rebind downloaded package
+        id: artifact
+        env:
+          EXPECTED_SOURCE_SHA: ${{ needs.verify.outputs.source_sha }}
+          EXPECTED_TARBALL_NAME: ${{ needs.verify.outputs.tarball_name }}
+          EXPECTED_VERSION: ${{ needs.verify.outputs.package_version }}
+        run: |
+          set -euo pipefail
+          artifact_directory="$RUNNER_TEMP/kb-npm-stage"
+          metadata="$artifact_directory/npm-pack.json"
+          digest="$artifact_directory/npm-package.sha256"
+          if [[ ! "$EXPECTED_SOURCE_SHA" =~ ^[a-f0-9]{40}$ ]]; then
+            echo "::error::Verified source commit is invalid"
             exit 1
           fi
-          npm stage publish "$archive" \
+          if [[ ! "$EXPECTED_VERSION" =~ ^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$ ]]; then
+            echo "::error::Verified package version is not stable semantic version"
+            exit 1
+          fi
+          expected_tarball_name="hraness-kb-$EXPECTED_VERSION.tgz"
+          if [[ "$EXPECTED_TARBALL_NAME" != "$expected_tarball_name" ]]; then
+            echo "::error::Verified tarball name is unsafe or inconsistent"
+            exit 1
+          fi
+          tarball="$artifact_directory/$expected_tarball_name"
+          if [[ ! -d "$artifact_directory" || -L "$artifact_directory" ]]; then
+            echo "::error::Downloaded npm artifact directory is unsafe"
+            exit 1
+          fi
+          artifact_entry_count="$(ARTIFACT_DIRECTORY="$artifact_directory" node -e '
+            const { readdirSync } = require("node:fs");
+            process.stdout.write(String(readdirSync(process.env.ARTIFACT_DIRECTORY).length));
+          ')"
+          if [[ "$artifact_entry_count" != 3 ]]; then
+            echo "::error::Downloaded npm artifact must contain exactly the tarball, npm-pack.json, and npm-package.sha256"
+            exit 1
+          fi
+          for required_file in "$tarball" "$metadata" "$digest"; do
+            if [[ ! -f "$required_file" || -L "$required_file" ]]; then
+              echo "::error::Downloaded npm artifact contains an unsafe or unexpected entry"
+              exit 1
+            fi
+          done
+          rebound_output="$(mktemp "$RUNNER_TEMP/kb-rebound-digests.XXXXXX")"
+          DIGEST="$digest" \
+            EXPECTED_TARBALL_NAME="$expected_tarball_name" \
+            EXPECTED_VERSION="$EXPECTED_VERSION" \
+            METADATA="$metadata" \
+            TARBALL="$tarball" node > "$rebound_output" <<'NODE'
+          const { createHash } = require("node:crypto");
+          const { readFileSync, statSync } = require("node:fs");
+          const minimumFiles = 190;
+          const maximumFiles = 210;
+          const minimumPackedBytes = 950_000;
+          const maximumPackedBytes = 1_200_000;
+          const minimumUnpackedBytes = 4_500_000;
+          const maximumUnpackedBytes = 5_250_000;
+          const maximumMetadataBytes = 250_000;
+          const expectedName = "@hraness/kb";
+          const expectedVersion = process.env.EXPECTED_VERSION;
+          const expectedFilename = process.env.EXPECTED_TARBALL_NAME;
+          const tarball = process.env.TARBALL;
+          const metadata = process.env.METADATA;
+          const digest = process.env.DIGEST;
+          if (!expectedVersion || !expectedFilename || !tarball || !metadata || !digest) {
+            throw new Error("Downloaded artifact environment is incomplete");
+          }
+          const archiveInfo = statSync(tarball);
+          const metadataInfo = statSync(metadata);
+          const digestInfo = statSync(digest);
+          if (archiveInfo.size < minimumPackedBytes || archiveInfo.size > maximumPackedBytes) {
+            throw new Error("Downloaded tarball is outside the reviewed packed-size bound");
+          }
+          if (metadataInfo.size <= 0 || metadataInfo.size > maximumMetadataBytes) {
+            throw new Error("Downloaded npm-pack.json exceeds its reviewed size bound");
+          }
+          if (digestInfo.size <= 0 || digestInfo.size > 1_024) {
+            throw new Error("Downloaded SHA-256 manifest exceeds its reviewed size bound");
+          }
+          const archiveBytes = readFileSync(tarball);
+          const metadataBytes = readFileSync(metadata);
+          const digestBytes = readFileSync(digest);
+          const archiveSha256 = createHash("sha256").update(archiveBytes).digest("hex");
+          const metadataSha256 = createHash("sha256").update(metadataBytes).digest("hex");
+          const digestSha256 = createHash("sha256").update(digestBytes).digest("hex");
+          const digestText = new TextDecoder("utf-8", { fatal: true }).decode(digestBytes);
+          const digestLines = digestText.split("\n");
+          if (digestLines.length !== 3 || digestLines[2] !== "") {
+            throw new Error("SHA-256 manifest must contain exactly two newline-terminated records");
+          }
+          const digests = new Map();
+          for (const line of digestLines.slice(0, 2)) {
+            const match = /^([a-f0-9]{64})  ([A-Za-z0-9._-]+)$/u.exec(line);
+            if (!match || digests.has(match[2])) {
+              throw new Error("SHA-256 manifest contains an invalid record");
+            }
+            digests.set(match[2], match[1]);
+          }
+          if (
+            digests.size !== 2
+            || digests.get(expectedFilename) !== archiveSha256
+            || digests.get("npm-pack.json") !== metadataSha256
+          ) {
+            throw new Error("Downloaded files differ from the independent SHA-256 manifest");
+          }
+          const input = JSON.parse(new TextDecoder("utf-8", { fatal: true }).decode(metadataBytes));
+          if (!Array.isArray(input) || input.length !== 1) {
+            throw new Error("npm-pack.json must contain exactly one package");
+          }
+          const packageRecord = input[0];
+          if (!packageRecord || typeof packageRecord !== "object" || Array.isArray(packageRecord)) {
+            throw new Error("npm-pack.json package record is invalid");
+          }
+          if (
+            packageRecord.name !== expectedName
+            || packageRecord.id !== `${expectedName}@${expectedVersion}`
+            || packageRecord.version !== expectedVersion
+            || packageRecord.filename !== expectedFilename
+            || !/^hraness-kb-(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.tgz$/u.test(packageRecord.filename)
+          ) {
+            throw new Error("npm-pack.json has the wrong package identity or filename");
+          }
+          if (!Array.isArray(packageRecord.bundled) || packageRecord.bundled.length !== 0) {
+            throw new Error("npm-pack.json unexpectedly reports bundled dependencies");
+          }
+          for (const [field, minimum, maximum] of [
+            ["entryCount", minimumFiles, maximumFiles],
+            ["size", minimumPackedBytes, maximumPackedBytes],
+            ["unpackedSize", minimumUnpackedBytes, maximumUnpackedBytes],
+          ]) {
+            if (!Number.isSafeInteger(packageRecord[field]) || packageRecord[field] < minimum || packageRecord[field] > maximum) {
+              throw new Error(`npm-pack.json has an invalid or excessive ${field}`);
+            }
+          }
+          if (packageRecord.size !== archiveBytes.byteLength) {
+            throw new Error("Downloaded tarball byte size differs from npm-pack.json");
+          }
+          if (!Array.isArray(packageRecord.files) || packageRecord.files.length !== packageRecord.entryCount) {
+            throw new Error("npm-pack.json has an invalid file inventory count");
+          }
+          const paths = new Set();
+          let unpackedSize = 0;
+          for (const file of packageRecord.files) {
+            if (!file || typeof file !== "object" || Array.isArray(file)) {
+              throw new Error("npm-pack.json file inventory contains a non-object");
+            }
+            if (
+              typeof file.path !== "string"
+              || file.path.length === 0
+              || Buffer.byteLength(file.path, "utf8") > 1_024
+              || file.path.includes("\\")
+              || file.path.includes("\0")
+              || file.path.startsWith("/")
+              || file.path.split("/").some((part) => part === "" || part === "." || part === "..")
+              || paths.has(file.path)
+            ) {
+              throw new Error("npm-pack.json file inventory contains an unsafe or duplicate path");
+            }
+            if (!Number.isSafeInteger(file.size) || file.size < 0) {
+              throw new Error("npm-pack.json file inventory contains an invalid size");
+            }
+            if (file.mode !== 0o644 && file.mode !== 0o755) {
+              throw new Error("npm-pack.json file inventory contains an invalid mode");
+            }
+            paths.add(file.path);
+            unpackedSize += file.size;
+            if (!Number.isSafeInteger(unpackedSize) || unpackedSize > maximumUnpackedBytes) {
+              throw new Error("npm-pack.json file inventory exceeds the reviewed unpacked-size bound");
+            }
+          }
+          if (unpackedSize !== packageRecord.unpackedSize) {
+            throw new Error("npm-pack.json unpacked size differs from its file inventory");
+          }
+          for (const requiredPath of [
+            "DISCLOSURE",
+            "LICENSE",
+            "README.md",
+            "dist/cli.js",
+            "dist/evaluation-builder.js",
+            "dist/index.js",
+            "package.json",
+            "skills/kb/AGENTS.md",
+            "skills/kb/SKILL.md",
+            "skills/kb/agents/openai.yaml",
+            "src/cli.ts",
+            "src/index.ts",
+          ]) {
+            if (!paths.has(requiredPath)) {
+              throw new Error(`npm-pack.json is missing required package path ${requiredPath}`);
+            }
+          }
+          const integrity = `sha512-${createHash("sha512").update(archiveBytes).digest("base64")}`;
+          const shasum = createHash("sha1").update(archiveBytes).digest("hex");
+          if (packageRecord.integrity !== integrity || packageRecord.shasum !== shasum) {
+            throw new Error("Downloaded tarball differs from npm-pack.json SHA-1 or SHA-512");
+          }
+          process.stdout.write(`${archiveSha256} ${metadataSha256} ${digestSha256}\n`);
+          NODE
+          read -r rebound_archive_sha256 rebound_metadata_sha256 rebound_digest_sha256 < "$rebound_output"
+          for rebound_digest in \
+            "$rebound_archive_sha256" \
+            "$rebound_metadata_sha256" \
+            "$rebound_digest_sha256"; do
+            if [[ ! "$rebound_digest" =~ ^[a-f0-9]{64}$ ]]; then
+              echo "::error::Could not preserve rebound package digests"
+              exit 1
+            fi
+          done
+          printf 'archive_sha256=%s\nmetadata_sha256=%s\ndigest_sha256=%s\n' \
+            "$rebound_archive_sha256" "$rebound_metadata_sha256" "$rebound_digest_sha256" \
+            >> "$GITHUB_OUTPUT"
+          printf 'tarball=%s\nmetadata=%s\ndigest=%s\n' \
+            "$tarball" "$metadata" "$digest" >> "$GITHUB_OUTPUT"
+      - name: Revalidate current main and stage exact package
+        env:
+          DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
+          DIGEST: ${{ steps.artifact.outputs.digest }}
+          EXPECTED_ARCHIVE_SHA256: ${{ steps.artifact.outputs.archive_sha256 }}
+          EXPECTED_DIGEST_SHA256: ${{ steps.artifact.outputs.digest_sha256 }}
+          EXPECTED_METADATA_SHA256: ${{ steps.artifact.outputs.metadata_sha256 }}
+          EXPECTED_SOURCE_SHA: ${{ needs.verify.outputs.source_sha }}
+          EXPECTED_VERSION: ${{ needs.verify.outputs.package_version }}
+          METADATA: ${{ steps.artifact.outputs.metadata }}
+          TARBALL: ${{ steps.artifact.outputs.tarball }}
+        run: |
+          set -euo pipefail
+          git check-ref-format "refs/heads/$DEFAULT_BRANCH"
+          if [[ ! "$EXPECTED_VERSION" =~ ^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$ ]]; then
+            echo "::error::Verified package version is not stable semantic version"
+            exit 1
+          fi
+          release_tag="v$EXPECTED_VERSION"
+          git check-ref-format "refs/tags/$release_tag"
+          current_main="$RUNNER_TEMP/kb-current-main.git"
+          git init --quiet --bare "$current_main"
+          git --git-dir="$current_main" fetch --quiet --no-tags --depth=1 \
+            "https://github.com/$GITHUB_REPOSITORY.git" \
+            "refs/heads/$DEFAULT_BRANCH"
+          current_default_sha="$(git --git-dir="$current_main" rev-parse FETCH_HEAD)"
+          if [[ "$GITHUB_REF" != "refs/heads/$DEFAULT_BRANCH" || \
+                "$GITHUB_SHA" != "$EXPECTED_SOURCE_SHA" || \
+                "$GITHUB_SHA" != "$current_default_sha" ]]; then
+            echo "::error::$DEFAULT_BRANCH advanced to $current_default_sha after artifact verification"
+            exit 1
+          fi
+          tag_lookup_output="$RUNNER_TEMP/kb-stage-tag-lookup.txt"
+          if git ls-remote --exit-code --refs \
+            "https://github.com/$GITHUB_REPOSITORY.git" \
+            "refs/tags/$release_tag" > "$tag_lookup_output"; then
+            echo "::error::Tag $release_tag was created after package verification"
+            exit 1
+          else
+            tag_lookup_status=$?
+            if [[ "$tag_lookup_status" -ne 2 || -s "$tag_lookup_output" ]]; then
+              echo "::error::Could not prove that tag $release_tag is still absent from origin"
+              exit 1
+            fi
+          fi
+          current_archive_sha256="$(sha256sum "$TARBALL" | cut -d ' ' -f 1)"
+          current_metadata_sha256="$(sha256sum "$METADATA" | cut -d ' ' -f 1)"
+          current_digest_sha256="$(sha256sum "$DIGEST" | cut -d ' ' -f 1)"
+          if [[ "$current_archive_sha256" != "$EXPECTED_ARCHIVE_SHA256" || \
+                "$current_metadata_sha256" != "$EXPECTED_METADATA_SHA256" || \
+                "$current_digest_sha256" != "$EXPECTED_DIGEST_SHA256" ]]; then
+            echo "::error::Downloaded package changed after current-main verification"
+            exit 1
+          fi
+          npm stage publish "$TARBALL" \
             --access public \
+            --ignore-scripts \
+            --provenance \
             --registry=https://registry.npmjs.org

@@ -1,6 +1,12 @@
+import { createHash } from "node:crypto";
 import { lstat, mkdir, mkdtemp, readFile, readdir, rm, stat, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { basename, delimiter, join, resolve } from "node:path";
+import { basename, delimiter, isAbsolute, join, resolve } from "node:path";
+
+import {
+  inspectPackageArtifact,
+  type PackageArtifactInventory,
+} from "./package-artifact.js";
 
 const packageName = "@hraness/kb";
 const maximumPackageFiles = 210;
@@ -81,6 +87,145 @@ const requiredPackageFiles = [
   "skills/kb/SKILL.md",
   "skills/kb/agents/openai.yaml",
 ] as const;
+
+type PackageInput = Readonly<{
+  archive?: string;
+  packJson?: string;
+}>;
+
+function record(value: unknown, label: string): Record<string, unknown> {
+  if (typeof value !== "object" || value === null || Array.isArray(value)) {
+    throw new Error(`${label} must be an object`);
+  }
+  return value as Record<string, unknown>;
+}
+
+function stringField(value: Record<string, unknown>, key: string, label: string): string {
+  const field = value[key];
+  if (typeof field !== "string" || field.length === 0) {
+    throw new Error(`${label}.${key} must be a non-empty string`);
+  }
+  return field;
+}
+
+function integerField(value: Record<string, unknown>, key: string, label: string): number {
+  const field = value[key];
+  if (!Number.isSafeInteger(field) || (field as number) < 0) {
+    throw new Error(`${label}.${key} must be a non-negative safe integer`);
+  }
+  return field as number;
+}
+
+function resolveInputPath(repository: string, path: string): string {
+  return isAbsolute(path) ? path : resolve(repository, path);
+}
+
+function parsePackageInput(args: readonly string[], repository: string): PackageInput {
+  if (args.length === 0) return {};
+  if (args.length !== 4) {
+    throw new Error(
+      "usage: bun run scripts/package-smoke.ts [--archive <package.tgz> --pack-json <npm-pack.json>]",
+    );
+  }
+  const values = new Map<string, string>();
+  for (let index = 0; index < args.length; index += 2) {
+    const flag = args[index];
+    const value = args[index + 1];
+    if ((flag !== "--archive" && flag !== "--pack-json") || value === undefined || values.has(flag)) {
+      throw new Error(
+        "usage: bun run scripts/package-smoke.ts [--archive <package.tgz> --pack-json <npm-pack.json>]",
+      );
+    }
+    values.set(flag, resolveInputPath(repository, value));
+  }
+  const archive = values.get("--archive");
+  const packJson = values.get("--pack-json");
+  if (archive === undefined || packJson === undefined) {
+    throw new Error(
+      "usage: bun run scripts/package-smoke.ts [--archive <package.tgz> --pack-json <npm-pack.json>]",
+    );
+  }
+  return { archive, packJson };
+}
+
+async function verifyExactNpmPackMetadata(
+  archive: string,
+  packJson: string,
+  packageVersion: string,
+  inventory: PackageArtifactInventory,
+): Promise<void> {
+  const value = JSON.parse(await readFile(packJson, "utf8")) as unknown;
+  if (!Array.isArray(value) || value.length !== 1) {
+    throw new Error("npm-pack.json must contain exactly one package");
+  }
+  const result = record(value[0], "npm pack result");
+  const expectedFilename = `hraness-kb-${packageVersion}.tgz`;
+  if (
+    stringField(result, "id", "npm pack result") !== `${packageName}@${packageVersion}`
+    || stringField(result, "name", "npm pack result") !== packageName
+    || stringField(result, "version", "npm pack result") !== packageVersion
+    || stringField(result, "filename", "npm pack result") !== expectedFilename
+    || basename(archive) !== expectedFilename
+  ) {
+    throw new Error("npm pack identity does not match the exact KB archive");
+  }
+  const entryCount = integerField(result, "entryCount", "npm pack result");
+  const packedBytes = integerField(result, "size", "npm pack result");
+  const unpackedBytes = integerField(result, "unpackedSize", "npm pack result");
+  if (
+    entryCount !== inventory.fileCount
+    || packedBytes !== inventory.packedBytes
+    || unpackedBytes !== inventory.unpackedBytes
+  ) {
+    throw new Error("npm pack metrics do not match the exact KB archive");
+  }
+  if (!Array.isArray(result.bundled) || result.bundled.length !== 0) {
+    throw new Error("npm pack unexpectedly bundles dependencies");
+  }
+  if (!Array.isArray(result.files) || result.files.length !== entryCount) {
+    throw new Error("npm pack file inventory does not match entryCount");
+  }
+  const reportedFiles = new Map<string, Readonly<{ mode: number; size: number }>>();
+  for (const [index, value] of result.files.entries()) {
+    const file = record(value, `npm pack result file ${String(index + 1)}`);
+    const path = stringField(file, "path", `npm pack result file ${String(index + 1)}`);
+    const size = integerField(file, "size", `npm pack result file ${String(index + 1)}`);
+    const mode = integerField(file, "mode", `npm pack result file ${String(index + 1)}`);
+    if (
+      Buffer.byteLength(path, "utf8") > 1_024
+      || path.includes("\\")
+      || path.startsWith("/")
+      || path.split("/").some((part) => part === "" || part === "." || part === "..")
+      || reportedFiles.has(path)
+    ) {
+      throw new Error(`npm pack file inventory contains an unsafe or duplicate path: ${path}`);
+    }
+    if (mode !== 0o644 && mode !== 0o755) {
+      throw new Error(`npm pack file inventory contains an unsafe mode for ${path}`);
+    }
+    reportedFiles.set(path, Object.freeze({ mode, size }));
+  }
+  for (const file of inventory.files) {
+    const reported = reportedFiles.get(file.path);
+    if (reported?.size !== file.size || reported.mode !== file.mode) {
+      throw new Error(
+        `npm pack file inventory differs from the exact archive mode or size for ${file.path}`,
+      );
+    }
+  }
+  if (reportedFiles.size !== inventory.files.length) {
+    throw new Error("npm pack file inventory contains a path absent from the exact archive");
+  }
+  const archiveBytes = await readFile(archive);
+  const actualIntegrity = `sha512-${createHash("sha512").update(archiveBytes).digest("base64")}`;
+  const actualShasum = createHash("sha1").update(archiveBytes).digest("hex");
+  if (
+    stringField(result, "integrity", "npm pack result") !== actualIntegrity
+    || stringField(result, "shasum", "npm pack result") !== actualShasum
+  ) {
+    throw new Error("npm pack SHA-1 or SHA-512 does not match the exact KB archive");
+  }
+}
 
 async function run(command: string[], cwd: string): Promise<void> {
   const process = Bun.spawn(command, {
@@ -341,16 +486,8 @@ async function verifyInstalledPackagePolicy(consumer: string): Promise<Readonly<
   return { fileCount: files.length, unpackedBytes };
 }
 
-function archiveArgument(): string | null {
-  const args = process.argv.slice(2);
-  if (args.length === 0) return null;
-  if (args.length !== 2 || args[0] !== "--archive" || args[1] === undefined) {
-    throw new Error("usage: bun run scripts/package-smoke.ts [--archive <package.tgz>]");
-  }
-  return resolve(args[1]);
-}
-
 const repository = process.cwd();
+const packageInput = parsePackageInput(process.argv.slice(2), repository);
 const work = await mkdtemp(join(tmpdir(), "hraness-package-smoke-"));
 const temporary = join(work, "tmp");
 const environment = {
@@ -365,7 +502,7 @@ const environment = {
   npm_config_update_notifier: "false",
 };
 try {
-  const suppliedArchive = archiveArgument();
+  const suppliedArchive = packageInput.archive ?? null;
   const archive = suppliedArchive ?? join(work, "package.tgz");
   const consumer = join(work, "consumer");
   const npmConsumer = join(work, "npm-consumer");
@@ -390,7 +527,23 @@ try {
       throw new Error("supplied package archive must be a regular file");
     }
   }
-  const packedBytes = (await stat(archive)).size;
+  const sourceManifest = JSON.parse(await readFile(join(repository, "package.json"), "utf8")) as {
+    readonly name?: unknown;
+    readonly version?: unknown;
+  };
+  if (sourceManifest.name !== packageName || typeof sourceManifest.version !== "string") {
+    throw new Error("source package identity is invalid");
+  }
+  const inventory = await inspectPackageArtifact(archive);
+  if (packageInput.packJson !== undefined) {
+    await verifyExactNpmPackMetadata(
+      archive,
+      packageInput.packJson,
+      sourceManifest.version,
+      inventory,
+    );
+  }
+  const packedBytes = inventory.packedBytes;
   if (packedBytes > maximumPackedBytes) {
     throw new Error(
       `package archive has ${String(packedBytes)} bytes; maximum is ${String(maximumPackedBytes)}`,

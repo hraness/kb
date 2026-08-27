@@ -39,7 +39,7 @@ jobs:
   test("requires a fresh default-branch HEAD guard at the final publication boundary", async () => {
     const path = resolve(import.meta.dir, "../.github/workflows/npm-stage.yml");
     const source = await readFile(path, "utf8");
-    const finalGuard = 'git fetch origin "$DEFAULT_BRANCH"';
+    const finalGuard = 'git --git-dir="$current_main" fetch';
     const finalGuardIndex = source.lastIndexOf(finalGuard);
     expect(finalGuardIndex).toBeGreaterThan(-1);
     const missingFinalGuard =
@@ -69,10 +69,12 @@ jobs:
       "bun install --frozen-lockfile --ignore-scripts",
       "bun run check",
       "git status --porcelain --untracked-files=all -- dist bun.lock",
-      "npm pack --json --ignore-scripts",
-      "scripts/package-smoke.ts --archive",
-      "archive_sha512",
-      "npm stage publish \"$archive\"",
+      "scripts/prepare-npm-package.ts",
+      "scripts/package-smoke.ts",
+      "npm-package.sha256",
+      "actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c",
+      "git init --quiet --bare \"$current_main\"",
+      "npm stage publish \"$TARBALL\"",
       "--registry=https://registry.npmjs.org",
     ] as const) {
       expect(source).toContain(required);
@@ -82,17 +84,24 @@ jobs:
     expect(source).not.toContain("NODE_AUTH_TOKEN");
     expect(source).not.toMatch(/\n\s+push:/u);
     expect(source).not.toMatch(/\bnpm publish\b/u);
+    expect(source.match(/id-token: write/gu) ?? []).toHaveLength(1);
+    const stage = source.slice(source.indexOf("\n  stage:\n"));
+    expect(stage).not.toContain("actions/checkout@");
+    expect(stage).not.toContain("setup-bun@");
+    expect(stage).not.toContain("./scripts/");
   });
 
   test("gates the immutable GitHub release on the exact public npm artifact", async () => {
     const path = resolve(import.meta.dir, "../.github/workflows/release.yml");
     const source = await readFile(path, "utf8");
 
-    expect(source).toContain("Verify published npm artifact");
-    expect(source).toContain("$package_name@$package_version");
-    expect(source).toContain("source[0].integrity !== registry[0]?.integrity");
+    expect(source).toContain("Verify canonical npm delivery");
+    expect(source).toContain('package_spec="$EXPECTED_NAME@$package_version"');
+    expect(source).toContain("scripts/npm-package-identity.ts");
+    expect(source).toContain("--registry-view-json");
+    expect(source).not.toContain('cmp "$source_archive" "$registry_archive"');
     expect(source).toContain("--registry=https://registry.npmjs.org");
-    expect(source).toContain("scripts/package-smoke.ts --archive");
+    expect(source).toContain("scripts/package-smoke.ts");
   });
 
   test("pins publication to the canonical npm registry", async () => {

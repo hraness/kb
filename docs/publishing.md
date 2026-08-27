@@ -24,16 +24,15 @@ Start from the current `main` commit after its required checks pass. Use Node
 
    Continue only when the command produces no output.
 
-3. Build one npm tarball and exercise that exact file through the package
-   smoke.
+3. Build one npm tarball with its exact npm pack descriptor and exercise that
+   pair through the package smoke.
 
    ```sh
    kb_npm_artifact="$(mktemp -d)"
-   npm pack --json --ignore-scripts \
-     --pack-destination "$kb_npm_artifact" \
-     --registry=https://registry.npmjs.org
+   bun run ./scripts/prepare-npm-package.ts "$kb_npm_artifact"
    bun run ./scripts/package-smoke.ts \
-     --archive "$kb_npm_artifact/hraness-kb-0.17.1.tgz"
+     --archive "$kb_npm_artifact/hraness-kb-0.17.1.tgz" \
+     --pack-json "$kb_npm_artifact/npm-pack.json"
    ```
 
    Review the complete inventory, file count, packed size, unpacked size, and
@@ -54,12 +53,15 @@ Start from the current `main` commit after its required checks pass. Use Node
    a workflow, a task file, or chat.
 
 5. Confirm that `@hraness/kb@0.17.1` is public, `latest` names `0.17.1`, and the
-   registry metadata and downloaded tarball match the reviewed artifact. Run
-   the same package smoke against the downloaded registry tarball.
+   registry metadata and downloaded package content match the reviewed
+   artifact. Run the same package smoke against the downloaded registry
+   tarball and its exact npm pack descriptor.
 
 The tag workflow refuses to create the immutable GitHub Release until the
-matching npm artifact exists and has the same integrity as a fresh source
-tarball.
+matching npm artifact exists. It verifies each tarball's own npm and registry
+integrity, then compares the canonical extracted path, type, mode, size, and
+regular-file hashes. Gzip bytes may legitimately differ across operating
+systems.
 
 ## Configure trusted publishing
 
@@ -81,13 +83,51 @@ tokens. Do not add an npm publishing token to GitHub. Preserve
 1. Merge a new stable version to `main` and wait for required CI.
 2. Dispatch **Stage npm package** from current `main`. The workflow rejects a
    tag, another branch, or a commit behind the current default-branch head.
-3. Inspect the uploaded and staged artifact, including its source commit,
-   version, inventory, size, integrity, dual-use declaration, and disclosure.
+3. Inspect the uploaded artifact. It contains exactly the tarball,
+   `npm-pack.json`, and `npm-package.sha256`, bound to the source commit,
+   version, complete inventory, size, integrity, dual-use declaration, and
+   disclosure.
 4. Approve the stage through npm with two-factor authentication.
 5. Verify the public registry package in a clean consumer.
 6. Create and push the matching `v<version>` tag on the same `main` commit. The
    tag workflow verifies npm delivery before it creates the immutable GitHub
    Release.
+
+The verification job checks out source, installs dependencies without
+lifecycle scripts, runs the complete gate, creates the three-file artifact,
+and smokes the exact tarball. Its dependent staging job is the only job with
+OIDC authority. It checks out no source and runs no repository code. It
+rebinds identity, filename, inventory, count, modes, sizes, SHA-1, SHA-512, and
+the independent SHA-256 manifest before mutation. Immediately before staging,
+it fetches current `main` into a new bare Git directory, then rehashes all
+three files and invokes only `npm stage publish` against
+`https://registry.npmjs.org`.
+
+## Recover an already-published release
+
+If npm delivery succeeded but the tag-triggered GitHub Release job failed,
+keep the tag and npm version immutable. After the recovery workflow is on
+current `main`, dispatch it with the existing tag:
+
+```sh
+gh workflow run release.yml --ref main -f tag=v0.17.1
+```
+
+The recovery path accepts only the newest stable repository tag. It freshly
+resolves that tag from GitHub, requires its commit to remain reachable from
+current `main`, reads the name and version from the tagged `package.json`, and
+checks and builds the tagged source in a detached worktree. That explicit
+tagged `bun run check` is the only historical build boundary. Afterward, the
+workflow rebinds the release helpers to their reviewed Git blobs in the current
+workflow checkout and invokes those files by absolute path while retaining the
+tagged tree as the package working directory. Bun loads no tag-owned config or
+environment file. The package step uses `npm pack --ignore-scripts`, so it does
+not run the tag's `prepack` or another historical lifecycle script. The current
+helpers import their current core-only archive inspector. They do not import a
+script from the tagged tree. They compare the rebuilt package with the public
+npm package by canonical content and registry metadata before the write-scoped
+job creates the missing immutable Release. Recovery never moves the tag or
+republishes npm.
 
 See npm's documentation for [trusted
 publishing](https://docs.npmjs.com/trusted-publishers/), [staged
