@@ -8,7 +8,7 @@ a knowledge base for coding agents.
 ## install
 
 ```sh
-bun add --global github:hraness/kb#v0.17.0
+bun add --global @hraness/kb@0.17.1
 ```
 
 ## about
@@ -165,6 +165,14 @@ Start with a short inherited `AGENTS.md` path for rules whose omission would mak
 
 Treat the knowledge base as repository-adjacent durable memory. Authored Markdown and Git are the record; catalogs, indexes, embeddings, and graph views are replaceable ways to find and inspect it. Checks can validate structure, captures can preserve a selected surface, and similarity can suggest candidates. None of those mechanisms proves that a source is trustworthy or an explanation is still true. People and agents must revise the knowledge as the repository changes.
 
+## Upgrade to v0.17.1
+
+Version 0.17.1 adds the public `@hraness/kb` npm installation path without
+changing the runtime API introduced in 0.17.0. Bun `1.3.14` or newer is now an
+explicit package requirement. Consumers should review the package's declared
+dual-use capture boundary and the lifecycle scripts used by optional browser
+and native search adapters before enabling those scripts.
+
 ## Upgrade to v0.17.0
 
 Version 0.17 adds selected portfolio federation, stable note identities,
@@ -200,8 +208,8 @@ Copy this prompt into Codex, Claude Code, or another coding agent:
 
 ```text
 Install the `kb` Agent Skill from hraness/kb with the standard skills CLI. Use
-the skill's runtime instructions to install the `kb` CLI from the immutable
-v0.17.0 release only when the command is missing. Verify it with `kb doctor`
+the skill's runtime instructions to install the exact `@hraness/kb@0.17.1`
+registry release only when the command is missing. Verify it with `kb doctor`
 and `kb --help`, but do not initialize or modify a vault until I ask.
 ```
 
@@ -216,29 +224,82 @@ Both commands discover the same `kb` skill and install it into the selected
 agent runner. Skill installation is inert: it does not initialize a vault,
 refresh a catalog, or edit Markdown. When invoked, the skill uses an existing
 `kb` command or, when the command is missing, checks for Bun and installs the
-CLI from the immutable `v0.17.0` tag.
+CLI from the immutable `@hraness/kb@0.17.1` npm version.
 
 The public skills CLI reads `skills/kb/` from the repository. The immutable
-`v0.17.0` package includes the same tree under
+`0.17.1` npm package includes the same tree under
 `node_modules/@hraness/kb/skills/kb/`, and the package check verifies that the
 installed skill is byte-identical to the repository source.
 
-Install the CLI from the immutable `v0.17.0` tag:
+Install the two global commands with Bun:
 
 ```sh
-bun add --global github:hraness/kb#v0.17.0
+bun add --global @hraness/kb@0.17.1
+kb --help
+kb-evaluation-builder --help
+```
+
+The same registry package can be installed with npm:
+
+```sh
+npm install --global --ignore-scripts @hraness/kb@0.17.1
 kb --help
 ```
 
-For programmatic use, declare the same pinned source in a project:
+Both commands are Bun executables. Bun `1.3.14` or newer must remain in `PATH`
+even when npm performs the global installation. The conservative npm command
+above disables dependency lifecycle scripts. Optional native search and
+rendered-browser setup remain unavailable until the relevant scripts are
+reviewed and enabled; run `kb doctor` to inspect the resulting capabilities.
+
+For programmatic use, add the exact npm version to a Bun project:
+
+```sh
+bun add --exact @hraness/kb@0.17.1
+```
+
+The resulting dependency should remain exact:
 
 ```json
 {
   "dependencies": {
-    "@hraness/kb": "github:hraness/kb#v0.17.0"
+    "@hraness/kb": "0.17.1"
   }
 }
 ```
+
+Version 0.17.1 intentionally retains two public GitHub dependencies:
+`@steipete/sweet-cookie` at Hraness release `v0.4.2` for the cookie-scope safety
+fork, and `@tobilu/qmd` at commit
+`aa993dceb3ef8cfb71d470554ca437570f5a2b3c` for store-local model behavior. A
+registry installation therefore needs Git and public GitHub access while it
+resolves those dependencies. They remain part of this release's supported
+installation contract until equivalent registry releases are available.
+
+### Review lifecycle scripts before enabling optional adapters
+
+[Bun blocks dependency lifecycle scripts](https://bun.sh/docs/pm/lifecycle)
+unless the consumer trusts them. Run
+`bun pm untrusted` in the consuming project and inspect the exact resolved
+versions and scripts before allowing any of them. Do not use `bun pm trust
+--all` for this package's dependency graph.
+
+The pinned QMD Git dependency has a `prepare` script that installs development
+hooks only when its own `.git` directory exists; the packaged runtime does not
+need that script. Optional rendered capture uses `agent-browser`, whose
+postinstall downloads a platform-specific executable. QMD's native semantic
+and language-parser paths can report lifecycle scripts for `node-llama-cpp`,
+`tree-sitter-go`, `tree-sitter-javascript`, `tree-sitter-python`, and
+`tree-sitter-rust`. Trust only the packages required by the capability you have
+chosen, then reinstall and run `kb doctor` to verify that capability. npm runs
+dependency lifecycle scripts by default, so inspect the same packages before
+omitting `--ignore-scripts` from an npm installation.
+
+KB follows [npm's dual-use content
+policy](https://docs.npmjs.com/policies/dual-use/) because it can read
+explicitly selected signed-in browser state and perform bounded capture and
+network operations. Read [`DISCLOSURE`](DISCLOSURE) and the [security
+policy](SECURITY.md) before using authenticated capture.
 
 Contributors can install from a checkout instead:
 

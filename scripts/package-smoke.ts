@@ -1,8 +1,11 @@
-import { lstat, mkdir, mkdtemp, readFile, readdir, rm, writeFile } from "node:fs/promises";
+import { lstat, mkdir, mkdtemp, readFile, readdir, rm, stat, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { delimiter, join, resolve } from "node:path";
+import { basename, delimiter, join, resolve } from "node:path";
 
 const packageName = "@hraness/kb";
+const maximumPackageFiles = 210;
+const maximumPackedBytes = 1_200_000;
+const maximumUnpackedBytes = 5_250_000;
 const importSpecifiers = [
   "@hraness/kb",
   "@hraness/kb/agent-context",
@@ -62,11 +65,21 @@ const binNames = ["kb", "kb-evaluation-builder"];
 const verificationPackages = ["@types/bun@^1.3.14","fast-check@^4.8.0","typescript@^6.0.3"];
 const skillNames = ["kb"] as const;
 const metadataSearchToolFiles = [
-  "src/clip/metadata-search-tool/.gitignore",
   "src/clip/metadata-search-tool/Cargo.lock",
   "src/clip/metadata-search-tool/Cargo.toml",
   "src/clip/metadata-search-tool/runner.ts",
   "src/clip/metadata-search-tool/src/main.rs",
+] as const;
+const requiredPackageFiles = [
+  "DISCLOSURE",
+  "LICENSE",
+  "README.md",
+  "dist/cli.js",
+  "dist/evaluation-builder.js",
+  "package.json",
+  "skills/kb/AGENTS.md",
+  "skills/kb/SKILL.md",
+  "skills/kb/agents/openai.yaml",
 ] as const;
 
 async function run(command: string[], cwd: string): Promise<void> {
@@ -114,6 +127,30 @@ function resolveGenuineNodeExecutable(): string {
   throw new Error("package smoke requires a genuine Node 24 executable on PATH");
 }
 
+function resolveNpmExecutable(): string {
+  const executableName = process.platform === "win32" ? "npm.cmd" : "npm";
+  const candidates = [...new Set(
+    (process.env.PATH ?? "")
+      .split(delimiter)
+      .filter((directory) => directory.length > 0)
+      .map((directory) => resolve(directory, executableName)),
+  )];
+  for (const executable of candidates) {
+    try {
+      const probe = Bun.spawnSync([executable, "--version"], {
+        env: environment,
+        stdin: "ignore",
+        stdout: "ignore",
+        stderr: "ignore",
+      });
+      if (probe.exitCode === 0) return executable;
+    } catch {
+      // Continue past absent or inaccessible PATH candidates.
+    }
+  }
+  throw new Error("package smoke requires npm on PATH");
+}
+
 async function regularFiles(root: string, prefix = ""): Promise<string[]> {
   const entries = await readdir(root, { withFileTypes: true });
   const files: string[] = [];
@@ -121,10 +158,12 @@ async function regularFiles(root: string, prefix = ""): Promise<string[]> {
     left.name.localeCompare(right.name))) {
     const relativePath = prefix === "" ? entry.name : `${prefix}/${entry.name}`;
     if (entry.isSymbolicLink()) {
-      throw new Error(`packaged skill tree contains a symbolic link: ${relativePath}`);
+      throw new Error(`package tree contains a symbolic link: ${relativePath}`);
     }
     if (entry.isDirectory()) {
-      files.push(...await regularFiles(join(root, entry.name), relativePath));
+      if (entry.name !== "node_modules") {
+        files.push(...await regularFiles(join(root, entry.name), relativePath));
+      }
     } else if (entry.isFile()) {
       files.push(relativePath);
     }
@@ -189,8 +228,8 @@ async function verifyInstalledSkills(consumer: string): Promise<void> {
     readFile(join(installedRoot, "kb", "SKILL.md"), "utf8"),
     readFile(join(installedRoot, "kb", "agents", "openai.yaml"), "utf8"),
   ]);
-  if (!skill.includes(`github:hraness/kb#v${manifest.version}`)) {
-    throw new Error("installed KB skill pin does not match the package version");
+  if (!skill.includes(`@hraness/kb@${manifest.version}`)) {
+    throw new Error("installed KB skill npm pin does not match the package version");
   }
   if (!metadata.includes("$kb")) {
     throw new Error("installed KB skill metadata must invoke $kb explicitly");
@@ -216,6 +255,101 @@ async function verifyInstalledMetadataSearchTool(consumer: string): Promise<void
   }
 }
 
+async function verifyInstalledPackagePolicy(consumer: string): Promise<Readonly<{
+  readonly fileCount: number;
+  readonly unpackedBytes: number;
+}>> {
+  const installedPackage = join(consumer, "node_modules", "@hraness", "kb");
+  type PackageIdentity = {
+    readonly contentPolicy?: { readonly class?: unknown };
+    readonly engines?: { readonly bun?: unknown };
+    readonly name?: unknown;
+    readonly publishConfig?: {
+      readonly access?: unknown;
+      readonly registry?: unknown;
+    };
+    readonly version?: unknown;
+  };
+  const [manifest, sourceManifest] = await Promise.all([
+    readFile(join(installedPackage, "package.json"), "utf8").then(
+      (source) => JSON.parse(source) as PackageIdentity,
+    ),
+    readFile(join(repository, "package.json"), "utf8").then(
+      (source) => JSON.parse(source) as PackageIdentity,
+    ),
+  ]);
+  if (
+    sourceManifest.name !== packageName
+    || typeof sourceManifest.version !== "string"
+    || manifest.name !== sourceManifest.name
+    || manifest.version !== sourceManifest.version
+  ) {
+    throw new Error("installed package identity does not match the source package");
+  }
+  if (manifest.contentPolicy?.class !== "dual-use") {
+    throw new Error("installed package must retain contentPolicy.class=dual-use");
+  }
+  if (manifest.engines?.bun !== ">=1.3.14") {
+    throw new Error("installed package must require Bun >=1.3.14");
+  }
+  if (
+    manifest.publishConfig?.access !== "public"
+    || manifest.publishConfig.registry !== "https://registry.npmjs.org"
+  ) {
+    throw new Error("installed package must pin public publication to the canonical npm registry");
+  }
+  const files = await regularFiles(installedPackage);
+  for (const requiredPath of requiredPackageFiles) {
+    if (!files.includes(requiredPath)) {
+      throw new Error(`installed package is missing ${requiredPath}`);
+    }
+  }
+  for (const path of files) {
+    if (
+      path !== "DISCLOSURE"
+      && path !== "LICENSE"
+      && path !== "README.md"
+      && path !== "package.json"
+      && !path.startsWith("dist/")
+      && !path.startsWith("skills/kb/")
+      && !path.startsWith("src/")
+    ) {
+      throw new Error(`installed package contains an unexpected path: ${path}`);
+    }
+  }
+  if (files.length > maximumPackageFiles) {
+    throw new Error(
+      `installed package has ${String(files.length)} files; maximum is ${String(maximumPackageFiles)}`,
+    );
+  }
+  let unpackedBytes = 0;
+  for (const path of files) {
+    unpackedBytes += (await stat(join(installedPackage, path))).size;
+  }
+  if (unpackedBytes > maximumUnpackedBytes) {
+    throw new Error(
+      `installed package has ${String(unpackedBytes)} unpacked bytes; maximum is ${String(maximumUnpackedBytes)}`,
+    );
+  }
+  const [sourceDisclosure, installedDisclosure] = await Promise.all([
+    readFile(join(repository, "DISCLOSURE")),
+    readFile(join(installedPackage, "DISCLOSURE")),
+  ]);
+  if (!sourceDisclosure.equals(installedDisclosure)) {
+    throw new Error("installed dual-use disclosure differs from the source disclosure");
+  }
+  return { fileCount: files.length, unpackedBytes };
+}
+
+function archiveArgument(): string | null {
+  const args = process.argv.slice(2);
+  if (args.length === 0) return null;
+  if (args.length !== 2 || args[0] !== "--archive" || args[1] === undefined) {
+    throw new Error("usage: bun run scripts/package-smoke.ts [--archive <package.tgz>]");
+  }
+  return resolve(args[1]);
+}
+
 const repository = process.cwd();
 const work = await mkdtemp(join(tmpdir(), "hraness-package-smoke-"));
 const temporary = join(work, "tmp");
@@ -223,35 +357,85 @@ const environment = {
   ...process.env,
   BUN_TMPDIR: temporary,
   TMPDIR: temporary,
+  npm_config_audit: "false",
+  npm_config_cache: join(temporary, "npm-cache"),
+  npm_config_fund: "false",
+  npm_config_ignore_scripts: "true",
+  npm_config_registry: "https://registry.npmjs.org",
+  npm_config_update_notifier: "false",
 };
 try {
-  const archive = join(work, "package.tgz");
+  const suppliedArchive = archiveArgument();
+  const archive = suppliedArchive ?? join(work, "package.tgz");
   const consumer = join(work, "consumer");
+  const npmConsumer = join(work, "npm-consumer");
   await mkdir(temporary, { mode: 0o700 });
   await mkdir(consumer);
+  await mkdir(npmConsumer);
   const nodeExecutable = resolveGenuineNodeExecutable();
-  await run([
-    process.execPath,
-    "pm",
-    "pack",
-    "--filename",
-    archive,
-    "--ignore-scripts",
-    "--quiet",
-  ], repository);
+  const npmExecutable = resolveNpmExecutable();
+  if (suppliedArchive === null) {
+    await run([
+      process.execPath,
+      "pm",
+      "pack",
+      "--filename",
+      archive,
+      "--ignore-scripts",
+      "--quiet",
+    ], repository);
+  } else {
+    const archiveStat = await lstat(archive);
+    if (!archiveStat.isFile() || archiveStat.isSymbolicLink()) {
+      throw new Error("supplied package archive must be a regular file");
+    }
+  }
+  const packedBytes = (await stat(archive)).size;
+  if (packedBytes > maximumPackedBytes) {
+    throw new Error(
+      `package archive has ${String(packedBytes)} bytes; maximum is ${String(maximumPackedBytes)}`,
+    );
+  }
   await writeFile(join(consumer, "package.json"), JSON.stringify({ private: true, type: "module" }));
+  await writeFile(join(npmConsumer, "package.json"), JSON.stringify({ private: true, type: "module" }));
   await run([process.execPath, "add", archive, "--ignore-scripts"], consumer);
+  await run([
+    npmExecutable,
+    "install",
+    "--ignore-scripts",
+    "--no-audit",
+    "--no-fund",
+    "--save-exact",
+    archive,
+  ], npmConsumer);
+  const bunPackage = await verifyInstalledPackagePolicy(consumer);
+  const npmPackage = await verifyInstalledPackagePolicy(npmConsumer);
+  if (
+    bunPackage.fileCount !== npmPackage.fileCount
+    || bunPackage.unpackedBytes !== npmPackage.unpackedBytes
+  ) {
+    throw new Error("Bun and npm consumers installed different package trees");
+  }
   await verifyInstalledSkills(consumer);
+  await verifyInstalledSkills(npmConsumer);
   await verifyInstalledMetadataSearchTool(consumer);
+  await verifyInstalledMetadataSearchTool(npmConsumer);
   await run([nodeExecutable, "--input-type=module", "-e", `await import(${JSON.stringify(packageName)})`], consumer);
+  await run([nodeExecutable, "--input-type=module", "-e", `await import(${JSON.stringify(packageName)})`], npmConsumer);
   for (const binName of binNames) {
     await run([join(consumer, "node_modules", ".bin", binName), "--help"], consumer);
+    await run([join(npmConsumer, "node_modules", ".bin", binName), "--help"], npmConsumer);
   }
   await run([
     join(consumer, "node_modules", ".bin", "kb"),
     "url-metadata",
     "--help",
   ], consumer);
+  await run([
+    join(npmConsumer, "node_modules", ".bin", "kb"),
+    "url-metadata",
+    "--help",
+  ], npmConsumer);
   if (verificationPackages.length > 0) {
     await run([process.execPath, "add", ...verificationPackages, "--ignore-scripts"], consumer);
   }
@@ -267,6 +451,18 @@ for (const specifier of ${JSON.stringify(importSpecifiers)}) {
   }
 }`,
   ], consumer);
+  await run([
+    nodeExecutable,
+    "--input-type=module",
+    "-e",
+    `const required = ${JSON.stringify(requiredNamedExports)};
+for (const specifier of ${JSON.stringify(importSpecifiers)}) {
+  const surface = await import(specifier);
+  for (const name of required[specifier] ?? []) {
+    if (typeof surface[name] !== "function") throw new Error(specifier + " is missing " + name);
+  }
+}`,
+  ], npmConsumer);
   const consumerSource = `${importSpecifiers.map((specifier, index) =>
     `import * as surface${String(index)} from ${JSON.stringify(specifier)};`
   ).join("\n")}
@@ -300,6 +496,13 @@ void [${importSpecifiers.map((_specifier, index) =>
   await writeFile(join(consumer, "index.ts"), consumerSource);
   await writeFile(join(consumer, "tsconfig.bundler.json"), "{\n  \"compilerOptions\": {\n    \"target\": \"ES2023\",\n    \"lib\": [\n      \"ES2023\",\n      \"DOM\",\n      \"DOM.Iterable\"\n    ],\n    \"types\": [\n      \"bun\",\n      \"node\"\n    ],\n    \"strict\": true,\n    \"noEmit\": true,\n    \"skipLibCheck\": false,\n    \"module\": \"Preserve\",\n    \"moduleResolution\": \"Bundler\"\n  },\n  \"include\": [\n    \"index.ts\"\n  ]\n}");
   await run([process.execPath, "x", "tsc", "-p", "./tsconfig.bundler.json"], consumer);
+
+  console.log(JSON.stringify({
+    archive: basename(archive),
+    fileCount: bunPackage.fileCount,
+    packedBytes,
+    unpackedBytes: bunPackage.unpackedBytes,
+  }));
 
 } finally {
   await rm(work, { recursive: true, force: true });
