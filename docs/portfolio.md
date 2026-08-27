@@ -14,10 +14,10 @@ A v1 registry is a JSON file with the contract `hraness.kb-portfolio/v1` and `sc
   "schemaVersion": 1,
   "vaults": [
     {
-      "owner": "hraness",
-      "id": "stripedex",
-      "repository": "hraness/stripedex",
-      "checkout": "stripe-history",
+      "owner": "example",
+      "id": "product-history",
+      "repository": "example/product-history",
+      "checkout": "history-vault",
       "root": "kb",
       "role": "repository",
       "visibility": "organization",
@@ -49,7 +49,7 @@ A v1 registry is a JSON file with the contract `hraness.kb-portfolio/v1` and `sc
     {
       "id": "product-history",
       "members": [
-        "hraness/stripedex",
+        "example/product-history",
         "hraness/legacy-notes"
       ],
       "state": "unresolved",
@@ -60,7 +60,7 @@ A v1 registry is a JSON file with the contract `hraness.kb-portfolio/v1` and `sc
 }
 ```
 
-The vault key is the explicit `owner/id` pair. It remains `hraness/stripedex` even when the local checkout is named `stripe-history`. Do not derive a vault key from `checkout`, `root`, or a Git remote.
+The vault key is the explicit `owner/id` pair. It remains `example/product-history` even when the local checkout is named `history-vault`. Do not derive a vault key from `checkout`, `root`, or a Git remote.
 
 The other fields have separate purposes:
 
@@ -106,7 +106,7 @@ Select private or personal vaults by exact key:
 kb portfolio search "release rationale" \
   --registry ./kb-portfolio.json \
   --workspace /srv/knowledge \
-  --vault hraness/stripedex \
+  --vault example/product-history \
   --vault hraness/legacy-notes \
   --mode exact
 ```
@@ -116,10 +116,10 @@ The supported modes are `hybrid`, `exact`, `keyword`, and `semantic`. Add `--jso
 A query that is a canonical qualified URI routes directly to its named selected vault and uses exact retrieval:
 
 ```sh
-kb portfolio search "kb://hraness/stripedex/018f4b20-7c95-7af2-a11f-89011baf1137" \
+kb portfolio search "kb://example/product-history/018f4b20-7c95-7af2-a11f-89011baf1137" \
   --registry ./kb-portfolio.json \
   --workspace /srv/knowledge \
-  --vault hraness/stripedex
+  --vault example/product-history
 ```
 
 If that vault or document is outside the selection, the search does not reveal whether it exists elsewhere.
@@ -182,7 +182,7 @@ kb://owner/vault/document_id
 For example:
 
 ```text
-kb://hraness/stripedex/018f4b20-7c95-7af2-a11f-89011baf1137
+kb://example/product-history/018f4b20-7c95-7af2-a11f-89011baf1137
 ```
 
 The URI is byte-canonical. Uppercase aliases, percent-encoded components, path traversal, and extra path segments are rejected. A `document_id` must be unique within its vault. The same ID in two different vaults produces two different qualified URIs.
@@ -196,7 +196,7 @@ A typed relation may target a canonical qualified URI:
 ```yaml
 relations:
   supports:
-    - kb://hraness/stripedex/018f4b20-7c95-7af2-a11f-89011baf1137
+    - kb://example/product-history/018f4b20-7c95-7af2-a11f-89011baf1137
 ```
 
 The source note still owns the assertion. The local graph records it as an external authored relation instead of resolving it to a local note ID.
@@ -222,7 +222,7 @@ Audit exact vaults when the review includes private material:
 kb portfolio audit \
   --registry ./kb-portfolio.json \
   --workspace /srv/knowledge \
-  --vault hraness/stripedex \
+  --vault example/product-history \
   --vault hraness/legacy-notes \
   --strict
 ```
@@ -256,11 +256,11 @@ After review, change the state and name one member:
 {
   "id": "product-history",
   "members": [
-    "hraness/stripedex",
+    "example/product-history",
     "hraness/legacy-notes"
   ],
   "state": "resolved",
-  "canonical": "hraness/stripedex",
+  "canonical": "example/product-history",
   "reason": "The maintained repository owns current product history."
 }
 ```

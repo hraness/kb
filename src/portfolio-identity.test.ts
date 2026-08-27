@@ -12,13 +12,13 @@ import {
 
 describe("portfolio document identity", () => {
   test("keeps logical vault identity independent from physical checkout names", () => {
-    const vault = portfolioVaultIdentity("hraness", "stripedex");
+    const vault = portfolioVaultIdentity("example", "product-history");
     expect(vault).toEqual({
-      owner: "hraness",
-      id: "stripedex",
-      key: "hraness/stripedex",
+      owner: "example",
+      id: "product-history",
+      key: "example/product-history",
     });
-    expect(parseVaultKey("hraness/stripedex")).toEqual(vault);
+    expect(parseVaultKey("example/product-history")).toEqual(vault);
   });
 
   test("round-trips canonical stable URIs", () => {
@@ -48,7 +48,7 @@ describe("portfolio document identity", () => {
       expect(() => parseQualifiedDocumentUri(value)).toThrow();
     }
     expect(() => parseDocumentId("notes/alpha")).toThrow();
-    expect(() => parseVaultKey("hraness/stripe-history/extra")).toThrow();
+    expect(() => parseVaultKey("example/history-vault/extra")).toThrow();
   });
 
   test("uses a clearly tagged fallback when document_id is absent or invalid", () => {
