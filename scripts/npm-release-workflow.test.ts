@@ -140,9 +140,9 @@ describe("npm release workflows", () => {
     const opening = readme.slice(0, 1_500).replace(/\s+/gu, " ").toLowerCase();
     expect(opening).toContain(String(manifest.description).toLowerCase());
     for (const link of [
-      "[npm](https://www.npmjs.com/package/@hraness/kb)",
-      "[github](https://github.com/hraness/kb)",
-      "[overview](https://hraness.com/kb)",
+      "[Install `@hraness/kb` from npm](https://www.npmjs.com/package/@hraness/kb)",
+      "[KB source on GitHub](https://github.com/hraness/kb)",
+      "[KB overview](https://hraness.com/kb)",
     ]) expect(readme).toContain(link);
   });
 
@@ -311,6 +311,9 @@ describe("npm release workflows", () => {
     ]);
     for (const required of [
       "automatically starts",
+      "one-time `0.17.1` bootstrap",
+      "Do not reuse the\ninteractive path for a later release",
+      "[Stage a later version](#stage-a-later-version)",
       "version is unchanged",
       "protected `npm-stage` environment",
       "reviewer `0thernet`",
@@ -405,7 +408,7 @@ describe("canonical npm package identity", () => {
       });
       const verified = await verifyNpmPackageIdentity(validInput);
       expect(verified.fileCount).toBe(200);
-      expect(verified.unpackedBytes).toBe(4_860_653);
+      expect(verified.unpackedBytes).toBe(4_860_696);
       expect(verified.sourceArchiveSha512).not.toBe(verified.registryArchiveSha512);
 
       const originalTar = gunzipSync(sourceBytes);

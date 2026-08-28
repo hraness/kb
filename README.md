@@ -45,9 +45,9 @@ kb history search packages/parser --root . --repo .. --json
 
 ## links
 
-[npm](https://www.npmjs.com/package/@hraness/kb) ·
-[github](https://github.com/hraness/kb) ·
-[overview](https://hraness.com/kb)
+[Install `@hraness/kb` from npm](https://www.npmjs.com/package/@hraness/kb) ·
+[KB source on GitHub](https://github.com/hraness/kb) ·
+[KB overview](https://hraness.com/kb)
 <!-- hraness:kb-landing:end -->
 
 ## A knowledge base for your coding agents
