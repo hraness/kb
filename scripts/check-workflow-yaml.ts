@@ -85,7 +85,7 @@ export function validateNpmStageWorkflow(source: string, label: string): void {
     throw new Error(`${label} staging must hold only id-token: write`);
   }
   if (stage.environment !== "npm-stage") {
-    throw new Error(`${label} staging must use the protected npm-stage environment`);
+    throw new Error(`${label} staging must use the exact npm-stage environment`);
   }
   if (!Array.isArray(select.steps)) {
     throw new Error(`${label} select steps must be a sequence`);
