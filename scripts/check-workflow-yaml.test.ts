@@ -53,13 +53,24 @@ jobs:
     )).toThrow("must recheck current default-branch HEAD");
   });
 
-  test("keeps npm staging manual, tokenless, artifact-bound, and stage-only", async () => {
+  test("keeps npm staging version-selected, protected, tokenless, artifact-bound, and stage-only", async () => {
     const path = resolve(import.meta.dir, "../.github/workflows/npm-stage.yml");
     const source = await readFile(path, "utf8");
 
     for (const required of [
+      "push:",
+      "branches: [main]",
+      'paths:\n      - "package.json"',
       "workflow_dispatch:",
+      "name: Select stable package version",
+      "github.event.before",
+      "git merge-base --is-ancestor",
+      'git show "$BEFORE_SHA:package.json"',
+      "scripts/npm-stage-selection.ts",
+      "needs: select",
+      "if: needs.select.outputs.should_stage == 'true'",
       "contents: read",
+      "environment: npm-stage",
       "id-token: write",
       "runs-on: ubuntu-latest",
       "node-version: \"24\"",
@@ -82,13 +93,28 @@ jobs:
 
     expect(source).not.toContain("secrets.NPM_TOKEN");
     expect(source).not.toContain("NODE_AUTH_TOKEN");
-    expect(source).not.toMatch(/\n\s+push:/u);
     expect(source).not.toMatch(/\bnpm publish\b/u);
     expect(source.match(/id-token: write/gu) ?? []).toHaveLength(1);
     const stage = source.slice(source.indexOf("\n  stage:\n"));
     expect(stage).not.toContain("actions/checkout@");
     expect(stage).not.toContain("setup-bun@");
     expect(stage).not.toContain("./scripts/");
+  });
+
+  test("requires the protected environment and fail-closed version selector", async () => {
+    const path = resolve(import.meta.dir, "../.github/workflows/npm-stage.yml");
+    const source = await readFile(path, "utf8");
+    expect(() => validateNpmStageWorkflow(
+      source.replace("environment: npm-stage", "environment: unprotected"),
+      "npm-stage.yml",
+    )).toThrow("protected npm-stage environment");
+    expect(() => validateNpmStageWorkflow(
+      source.replace(
+        'git show "$BEFORE_SHA:package.json"',
+        'cp package.json "$previous_manifest"',
+      ),
+      "npm-stage.yml",
+    )).toThrow("package-version selection is missing");
   });
 
   test("gates the immutable GitHub release on the exact public npm artifact", async () => {
