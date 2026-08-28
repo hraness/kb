@@ -24,6 +24,25 @@ function stringField(value: Record<string, unknown>, key: string, label: string)
   return field;
 }
 
+function keywordField(value: Record<string, unknown>, key: string, label: string): void {
+  const field = value[key];
+  if (!Array.isArray(field) || field.length === 0 || field.length > 16) {
+    throw new Error(`${label}.${key} must contain 1-16 focused keywords`);
+  }
+  const keywords = field.map((keyword, index) => {
+    if (
+      typeof keyword !== "string"
+      || !/^[a-z0-9]+(?:-[a-z0-9]+)*$/u.test(keyword)
+    ) {
+      throw new Error(`${label}.${key}[${String(index)}] must be a lowercase keyword`);
+    }
+    return keyword;
+  });
+  if (new Set(keywords).size !== keywords.length) {
+    throw new Error(`${label}.${key} cannot contain duplicates`);
+  }
+}
+
 function integerField(value: Record<string, unknown>, key: string, label: string): number {
   const field = value[key];
   if (!Number.isSafeInteger(field) || (field as number) < 0) {
@@ -65,6 +84,7 @@ function verifyPublicManifest(manifest: Record<string, unknown>): string {
     throw new Error(`package.json version is not a stable semantic version: ${manifestVersion}`);
   }
   stringField(manifest, "description", "package.json");
+  keywordField(manifest, "keywords", "package.json");
   exactField(manifest, "license", "MIT", "package.json");
   exactField(manifest, "contentPolicy", { class: "dual-use" }, "package.json");
   exactField(manifest, "type", "module", "package.json");

@@ -1,6 +1,6 @@
 {
   "name": "@hraness/kb",
-  "version": "0.17.1",
+  "version": "0.17.2",
   "description": "A knowledge base for coding agents, built from Markdown, backlinks, semantic search, and Git context.",
   "license": "MIT",
   "contentPolicy": {
@@ -72,15 +72,16 @@
   },
   "keywords": [
     "knowledge-base",
+    "coding-agents",
+    "agent-memory",
+    "repository-context",
     "markdown",
     "obsidian",
+    "agents-md",
     "web-clipper",
     "backlinks",
     "knowledge-graph",
     "semantic-search",
-    "agent-memory",
-    "agents-md",
-    "context-engineering",
     "local-first"
   ],
   "exports": {

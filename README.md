@@ -3,12 +3,13 @@
 
 [![skills.sh](https://skills.sh/b/hraness/kb)](https://skills.sh/hraness/kb)
 
-a knowledge base for coding agents.
+a knowledge base for coding agents, built from Markdown, backlinks, semantic
+search, and Git context.
 
 ## install
 
 ```sh
-bun add --global @hraness/kb@0.17.1
+bun add --global @hraness/kb@0.17.2
 ```
 
 ## about
@@ -44,7 +45,9 @@ kb history search packages/parser --root . --repo .. --json
 
 ## links
 
-[github](https://github.com/hraness/kb)
+[npm](https://www.npmjs.com/package/@hraness/kb) ·
+[github](https://github.com/hraness/kb) ·
+[overview](https://hraness.com/kb)
 <!-- hraness:kb-landing:end -->
 
 ## A knowledge base for your coding agents
@@ -165,6 +168,12 @@ Start with a short inherited `AGENTS.md` path for rules whose omission would mak
 
 Treat the knowledge base as repository-adjacent durable memory. Authored Markdown and Git are the record; catalogs, indexes, embeddings, and graph views are replaceable ways to find and inspect it. Checks can validate structure, captures can preserve a selected surface, and similarity can suggest candidates. None of those mechanisms proves that a source is trustworthy or an explanation is still true. People and agents must revise the knowledge as the repository changes.
 
+## Upgrade to v0.17.2
+
+Version 0.17.2 improves package discovery through focused npm keywords, a more
+specific README opening, and direct links between npm, GitHub, and the project
+overview. Runtime APIs and package behavior are unchanged.
+
 ## Upgrade to v0.17.1
 
 Version 0.17.1 adds the public `@hraness/kb` npm installation path without
@@ -208,7 +217,7 @@ Copy this prompt into Codex, Claude Code, or another coding agent:
 
 ```text
 Install the `kb` Agent Skill from hraness/kb with the standard skills CLI. Use
-the skill's runtime instructions to install the exact `@hraness/kb@0.17.1`
+the skill's runtime instructions to install the exact `@hraness/kb@0.17.2`
 registry release only when the command is missing. Verify it with `kb doctor`
 and `kb --help`, but do not initialize or modify a vault until I ask.
 ```
@@ -224,17 +233,17 @@ Both commands discover the same `kb` skill and install it into the selected
 agent runner. Skill installation is inert: it does not initialize a vault,
 refresh a catalog, or edit Markdown. When invoked, the skill uses an existing
 `kb` command or, when the command is missing, checks for Bun and installs the
-CLI from the immutable `@hraness/kb@0.17.1` npm version.
+CLI from the immutable `@hraness/kb@0.17.2` npm version.
 
 The public skills CLI reads `skills/kb/` from the repository. The immutable
-`0.17.1` npm package includes the same tree under
+`0.17.2` npm package includes the same tree under
 `node_modules/@hraness/kb/skills/kb/`, and the package check verifies that the
 installed skill is byte-identical to the repository source.
 
 Install the two global commands with Bun:
 
 ```sh
-bun add --global @hraness/kb@0.17.1
+bun add --global @hraness/kb@0.17.2
 kb --help
 kb-evaluation-builder --help
 ```
@@ -242,7 +251,7 @@ kb-evaluation-builder --help
 The same registry package can be installed with npm:
 
 ```sh
-npm install --global --ignore-scripts @hraness/kb@0.17.1
+npm install --global --ignore-scripts @hraness/kb@0.17.2
 kb --help
 ```
 
@@ -255,7 +264,7 @@ reviewed and enabled; run `kb doctor` to inspect the resulting capabilities.
 For programmatic use, add the exact npm version to a Bun project:
 
 ```sh
-bun add --exact @hraness/kb@0.17.1
+bun add --exact @hraness/kb@0.17.2
 ```
 
 The resulting dependency should remain exact:
@@ -263,12 +272,12 @@ The resulting dependency should remain exact:
 ```json
 {
   "dependencies": {
-    "@hraness/kb": "0.17.1"
+    "@hraness/kb": "0.17.2"
   }
 }
 ```
 
-Version 0.17.1 intentionally retains two public GitHub dependencies:
+Version 0.17.2 retains two public GitHub dependencies:
 `@steipete/sweet-cookie` at Hraness release `v0.4.2` for the cookie-scope safety
 fork, and `@tobilu/qmd` at commit
 `aa993dceb3ef8cfb71d470554ca437570f5a2b3c` for store-local model behavior. A

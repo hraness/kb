@@ -407,7 +407,9 @@ async function verifyInstalledPackagePolicy(consumer: string): Promise<Readonly<
   const installedPackage = join(consumer, "node_modules", "@hraness", "kb");
   type PackageIdentity = {
     readonly contentPolicy?: { readonly class?: unknown };
+    readonly description?: unknown;
     readonly engines?: { readonly bun?: unknown };
+    readonly keywords?: unknown;
     readonly name?: unknown;
     readonly publishConfig?: {
       readonly access?: unknown;
@@ -426,8 +428,12 @@ async function verifyInstalledPackagePolicy(consumer: string): Promise<Readonly<
   if (
     sourceManifest.name !== packageName
     || typeof sourceManifest.version !== "string"
+    || typeof sourceManifest.description !== "string"
+    || !Array.isArray(sourceManifest.keywords)
     || manifest.name !== sourceManifest.name
     || manifest.version !== sourceManifest.version
+    || manifest.description !== sourceManifest.description
+    || JSON.stringify(manifest.keywords) !== JSON.stringify(sourceManifest.keywords)
   ) {
     throw new Error("installed package identity does not match the source package");
   }
