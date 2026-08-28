@@ -36,9 +36,43 @@ export function validateWorkflowYaml(source: string, label: string): void {
 
 export function validateNpmStageWorkflow(source: string, label: string): void {
   const workflow = workflowRecord(source, label);
+  const triggers = record(workflow.on, `${label} on`);
+  if (!("workflow_dispatch" in triggers)) {
+    throw new Error(`${label} must retain manual recovery dispatch`);
+  }
+  const push = record(triggers.push, `${label} push trigger`);
+  if (
+    !Array.isArray(push.branches)
+    || push.branches.length !== 1
+    || push.branches[0] !== "main"
+    || !Array.isArray(push.paths)
+    || push.paths.length !== 1
+    || push.paths[0] !== "package.json"
+  ) {
+    throw new Error(`${label} must run only for package.json pushes to main`);
+  }
   const jobs = record(workflow.jobs, `${label} jobs`);
+  const select = record(jobs.select, `${label} select job`);
   const verify = record(jobs.verify, `${label} verify job`);
   const stage = record(jobs.stage, `${label} stage job`);
+  const selectPermissions = record(select.permissions, `${label} select permissions`);
+  if (
+    selectPermissions.contents !== "read"
+    || "id-token" in selectPermissions
+    || Object.keys(selectPermissions).length !== 1
+  ) {
+    throw new Error(`${label} selection must remain read-only without OIDC authority`);
+  }
+  const selectOutputs = record(select.outputs, `${label} select outputs`);
+  if (selectOutputs.should_stage !== "${{ steps.selection.outputs.should_stage }}") {
+    throw new Error(`${label} selection must expose the reviewed should_stage decision`);
+  }
+  if (
+    verify.needs !== "select"
+    || verify.if !== "needs.select.outputs.should_stage == 'true'"
+  ) {
+    throw new Error(`${label} verification must require an affirmative stage selection`);
+  }
   const verifyPermissions = record(verify.permissions, `${label} verify permissions`);
   if (verifyPermissions.contents !== "read" || "id-token" in verifyPermissions) {
     throw new Error(`${label} verification must remain read-only without OIDC authority`);
@@ -49,6 +83,30 @@ export function validateNpmStageWorkflow(source: string, label: string): void {
     || Object.keys(stagePermissions).length !== 1
   ) {
     throw new Error(`${label} staging must hold only id-token: write`);
+  }
+  if (stage.environment !== "npm-stage") {
+    throw new Error(`${label} staging must use the protected npm-stage environment`);
+  }
+  if (!Array.isArray(select.steps)) {
+    throw new Error(`${label} select steps must be a sequence`);
+  }
+  const selectionSteps = select.steps.map((step, index) =>
+    record(step, `${label} select step ${String(index + 1)}`));
+  const selectionCommands = selectionSteps.filter((step) =>
+    typeof step.run === "string" && step.run.includes("scripts/npm-stage-selection.ts"));
+  if (selectionCommands.length !== 1 || typeof selectionCommands[0]?.run !== "string") {
+    throw new Error(`${label} must contain exactly one package-version selection step`);
+  }
+  const selectionCommand = selectionCommands[0].run;
+  for (const required of [
+    'git fetch --no-tags origin',
+    'git merge-base --is-ancestor "$BEFORE_SHA" "$default_head"',
+    'git show "$BEFORE_SHA:package.json"',
+    'bun run ./scripts/npm-stage-selection.ts',
+  ]) {
+    if (!selectionCommand.includes(required)) {
+      throw new Error(`${label} package-version selection is missing ${required}`);
+    }
   }
   if (!Array.isArray(stage.steps)) {
     throw new Error(`${label} stage steps must be a sequence`);

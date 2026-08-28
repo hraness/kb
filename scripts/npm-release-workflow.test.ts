@@ -110,15 +110,32 @@ function writeHeaderChecksum(tar: Buffer, offset: number): void {
 describe("npm release workflows", () => {
   test("keeps the exact terminal OIDC stage independent from repository code", async () => {
     const workflow = await readFile(stageWorkflowUrl, "utf8");
+    const selectStart = workflow.indexOf("\n  select:\n");
     const verifyStart = workflow.indexOf("\n  verify:\n");
     const stageStart = workflow.indexOf("\n  stage:\n");
-    expect(verifyStart).toBeGreaterThan(-1);
+    expect(selectStart).toBeGreaterThan(-1);
+    expect(verifyStart).toBeGreaterThan(selectStart);
     expect(stageStart).toBeGreaterThan(verifyStart);
+    const selectJob = workflow.slice(selectStart, verifyStart);
     const verifyJob = workflow.slice(verifyStart, stageStart);
     const stageJob = workflow.slice(stageStart);
 
     for (const required of [
+      "name: Select stable package version",
+      "permissions:\n      contents: read",
+      "should_stage: ${{ steps.selection.outputs.should_stage }}",
+      "BEFORE_SHA: ${{ github.event.before }}",
+      'expected_ref="refs/heads/$DEFAULT_BRANCH"',
+      'git merge-base --is-ancestor "$BEFORE_SHA" "$default_head"',
+      'git show "$BEFORE_SHA:package.json"',
+      'bun run ./scripts/npm-stage-selection.ts "${selection_args[@]}"',
+    ] as const) expect(selectJob).toContain(required);
+    expect(selectJob).not.toContain("id-token: write");
+
+    for (const required of [
       "name: Verify exact package",
+      "needs: select",
+      "if: needs.select.outputs.should_stage == 'true'",
       "permissions:\n      contents: read",
       "source_sha: ${{ steps.identity.outputs.source_sha }}",
       "artifact_name: ${{ steps.artifact.outputs.artifact_name }}",
@@ -137,6 +154,7 @@ describe("npm release workflows", () => {
     expect(verifyJob).not.toContain("npm stage publish");
 
     for (const required of [
+      "environment: npm-stage",
       "permissions:\n      id-token: write",
       "actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c",
       "Downloaded npm artifact must contain exactly the tarball, npm-pack.json, and npm-package.sha256",
@@ -183,8 +201,9 @@ describe("npm release workflows", () => {
     expect(rehashIndex).toBeLessThan(stageIndex);
     expect(workflow).not.toContain("secrets.NPM_TOKEN");
     expect(workflow).not.toContain("NODE_AUTH_TOKEN");
-    expect(workflow).not.toMatch(/\n\s+push:/u);
     expect(workflow).not.toMatch(/\bnpm publish\b/u);
+    expect(workflow).toContain('branches: [main]\n    paths:\n      - "package.json"');
+    expect(workflow).toContain("workflow_dispatch:");
   });
 
   test("gates immutable releases on canonical content and current-main recovery", async () => {
@@ -253,17 +272,25 @@ describe("npm release workflows", () => {
       readFile(agentGuideUrl, "utf8"),
     ]);
     for (const required of [
-      "checks out no source and runs no repository code",
+      "automatically starts",
+      "version is unchanged",
+      "protected `npm-stage` environment",
+      "reviewer `0thernet`",
+      "`prevent_self_review: false`",
       "rebinds the release helpers to their reviewed Git blobs",
       "invokes those files by absolute path",
       "`npm pack --ignore-scripts`",
       npmRegistry,
     ] as const) expect(guide).toContain(required);
     expect(guide).toMatch(/the only job with\s+OIDC authority/u);
+    expect(guide).toMatch(/requires maintainer\s+approval/u);
+    expect(guide).toMatch(/checks out no source and runs no\s+repository\s+code/u);
     expect(guide).toMatch(/exactly the tarball,\s+`npm-pack\.json`, and `npm-package\.sha256`/u);
     expect(guide).toMatch(/new bare\s+Git directory/u);
     expect(guide).toMatch(/do not import a\s+script from the tagged tree/u);
     expect(agents).toContain("only its minimal dependent staging job may request OIDC");
+    expect(agents).toContain("protected `npm-stage` environment");
+    expect(agents).toContain("require reviewer `0thernet` while allowing self-review");
     expect(agents).toContain("bind the current workflow helpers to reviewed Git blobs");
     expect(agents).toContain("recovery never depends on or reruns a historical `prepack`");
   });
