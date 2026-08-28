@@ -16,6 +16,7 @@ const stageWorkflowUrl = new URL("../.github/workflows/npm-stage.yml", import.me
 const releaseWorkflowUrl = new URL("../.github/workflows/release.yml", import.meta.url);
 const ciWorkflowUrl = new URL("../.github/workflows/ci.yml", import.meta.url);
 const manifestUrl = new URL("../package.json", import.meta.url);
+const readmeUrl = new URL("../README.md", import.meta.url);
 const packageSmokeUrl = new URL("./package-smoke.ts", import.meta.url);
 const packagePreparationUrl = new URL("./prepare-npm-package.ts", import.meta.url);
 const packageArtifactUrl = new URL("./package-artifact.ts", import.meta.url);
@@ -108,6 +109,43 @@ function writeHeaderChecksum(tar: Buffer, offset: number): void {
 }
 
 describe("npm release workflows", () => {
+  test("keeps npm discoverability metadata focused and aligned with the README", async () => {
+    const [manifestSource, readme] = await Promise.all([
+      readFile(manifestUrl, "utf8"),
+      readFile(readmeUrl, "utf8"),
+    ]);
+    const manifest = JSON.parse(manifestSource) as {
+      readonly description?: unknown;
+      readonly keywords?: unknown;
+      readonly version?: unknown;
+    };
+    expect(manifest).toEqual(expect.objectContaining({
+      version: "0.17.2",
+      description: "A knowledge base for coding agents, built from Markdown, backlinks, semantic search, and Git context.",
+      keywords: [
+        "knowledge-base",
+        "coding-agents",
+        "agent-memory",
+        "repository-context",
+        "markdown",
+        "obsidian",
+        "agents-md",
+        "web-clipper",
+        "backlinks",
+        "knowledge-graph",
+        "semantic-search",
+        "local-first",
+      ],
+    }));
+    const opening = readme.slice(0, 1_500).replace(/\s+/gu, " ").toLowerCase();
+    expect(opening).toContain(String(manifest.description).toLowerCase());
+    for (const link of [
+      "[npm](https://www.npmjs.com/package/@hraness/kb)",
+      "[github](https://github.com/hraness/kb)",
+      "[overview](https://hraness.com/kb)",
+    ]) expect(readme).toContain(link);
+  });
+
   test("keeps the exact terminal OIDC stage independent from repository code", async () => {
     const workflow = await readFile(stageWorkflowUrl, "utf8");
     const selectStart = workflow.indexOf("\n  select:\n");
@@ -367,7 +405,7 @@ describe("canonical npm package identity", () => {
       });
       const verified = await verifyNpmPackageIdentity(validInput);
       expect(verified.fileCount).toBe(200);
-      expect(verified.unpackedBytes).toBe(4_860_250);
+      expect(verified.unpackedBytes).toBe(4_860_653);
       expect(verified.sourceArchiveSha512).not.toBe(verified.registryArchiveSha512);
 
       const originalTar = gunzipSync(sourceBytes);
