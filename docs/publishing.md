@@ -77,10 +77,10 @@ in the npm package settings:
 - allowed action: `npm stage publish` only
 - environment: `npm-stage`
 
-Create the protected `npm-stage` GitHub environment before enabling later
-publishing. Require reviewer `0thernet`, allow that maintainer to approve their
-own deployment with `prevent_self_review: false`, and restrict deployments to
-`main`. The npm trusted publisher must name that exact environment. Then
+Create the `npm-stage` GitHub environment before enabling later publishing.
+Restrict deployments to `main` and configure no required deployment reviewers,
+so a verified version bump reaches npm staging without a second GitHub
+approval. The npm trusted publisher must name that exact environment. Then
 require publishing two-factor authentication and disallow traditional tokens.
 Do not add an npm publishing token to GitHub. Preserve
 `contentPolicy.class=dual-use` and the root `DISCLOSURE` in every package.
@@ -96,9 +96,9 @@ Do not add an npm publishing token to GitHub. Preserve
    `npm-pack.json`, and `npm-package.sha256`, bound to the source commit,
    version, complete inventory, size, integrity, dual-use declaration, and
    disclosure.
-3. Approve the protected `npm-stage` environment as a maintainer. The minimal
-   OIDC job then revalidates the artifact and current `main` before it stages
-   the package.
+3. The minimal OIDC job starts automatically after verification. Its exact
+   `npm-stage` environment allows only `main`, and the job revalidates the
+   artifact and current branch head before it stages the package.
 4. Inspect and approve the staged package through npm with two-factor
    authentication.
 5. Verify the public registry package in a clean consumer.
@@ -108,15 +108,16 @@ Do not add an npm publishing token to GitHub. Preserve
 
 If the automatic run is missing or fails before npm staging completes,
 dispatch **Stage npm package** from current `main`. Manual recovery runs the
-same verification and protected staging jobs. The workflow rejects a tag,
-another branch, or a commit behind the current default-branch head.
+same verification and main-branch-restricted staging jobs. The workflow rejects
+a tag, another branch, or a commit behind the current default-branch head.
 
 The verification job checks out source, installs dependencies without
 lifecycle scripts, runs the complete gate, creates the three-file artifact,
 and smokes the exact tarball. Its dependent staging job is the only job with
-OIDC authority, and the protected `npm-stage` environment requires maintainer
-approval before that job starts. It checks out no source and runs no repository
-code. It rebinds identity, filename, inventory, count, modes, sizes, SHA-1,
+OIDC authority. The exact `npm-stage` environment restricts deployments to
+`main` and has no required reviewers, so the job starts automatically after
+verification. It checks out no source and runs no repository code. It rebinds
+identity, filename, inventory, count, modes, sizes, SHA-1,
 SHA-512, and the independent SHA-256 manifest before mutation. Immediately
 before staging,
 it fetches current `main` into a new bare Git directory, then rehashes all

@@ -53,7 +53,7 @@ jobs:
     )).toThrow("must recheck current default-branch HEAD");
   });
 
-  test("keeps npm staging version-selected, protected, tokenless, artifact-bound, and stage-only", async () => {
+  test("keeps npm staging version-selected, environment-bound, tokenless, artifact-bound, and stage-only", async () => {
     const path = resolve(import.meta.dir, "../.github/workflows/npm-stage.yml");
     const source = await readFile(path, "utf8");
 
@@ -101,13 +101,13 @@ jobs:
     expect(stage).not.toContain("./scripts/");
   });
 
-  test("requires the protected environment and fail-closed version selector", async () => {
+  test("requires the exact environment and fail-closed version selector", async () => {
     const path = resolve(import.meta.dir, "../.github/workflows/npm-stage.yml");
     const source = await readFile(path, "utf8");
     expect(() => validateNpmStageWorkflow(
       source.replace("environment: npm-stage", "environment: unprotected"),
       "npm-stage.yml",
-    )).toThrow("protected npm-stage environment");
+    )).toThrow("exact npm-stage environment");
     expect(() => validateNpmStageWorkflow(
       source.replace(
         'git show "$BEFORE_SHA:package.json"',

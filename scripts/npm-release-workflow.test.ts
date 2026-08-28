@@ -315,23 +315,25 @@ describe("npm release workflows", () => {
       "Do not reuse the\ninteractive path for a later release",
       "[Stage a later version](#stage-a-later-version)",
       "version is unchanged",
-      "protected `npm-stage` environment",
-      "reviewer `0thernet`",
-      "`prevent_self_review: false`",
+      "exact `npm-stage` environment",
+      "configure no required deployment reviewers",
+      "allows only `main`",
       "rebinds the release helpers to their reviewed Git blobs",
       "invokes those files by absolute path",
       "`npm pack --ignore-scripts`",
       npmRegistry,
     ] as const) expect(guide).toContain(required);
     expect(guide).toMatch(/the only job with\s+OIDC authority/u);
-    expect(guide).toMatch(/requires maintainer\s+approval/u);
+    expect(guide).toMatch(/has no required reviewers, so the job starts automatically/u);
+    expect(guide).toMatch(/approve the staged package through npm with two-factor\s+authentication/u);
     expect(guide).toMatch(/checks out no source and runs no\s+repository\s+code/u);
     expect(guide).toMatch(/exactly the tarball,\s+`npm-pack\.json`, and `npm-package\.sha256`/u);
     expect(guide).toMatch(/new bare\s+Git directory/u);
     expect(guide).toMatch(/do not import a\s+script from the tagged tree/u);
     expect(agents).toContain("only its minimal dependent staging job may request OIDC");
-    expect(agents).toContain("protected `npm-stage` environment");
-    expect(agents).toContain("require reviewer `0thernet` while allowing self-review");
+    expect(agents).toContain("use the exact `npm-stage` environment");
+    expect(agents).toContain("restrict deployments to `main` without required deployment reviewers");
+    expect(agents).toContain("approve its promotion with human 2FA");
     expect(agents).toContain("bind the current workflow helpers to reviewed Git blobs");
     expect(agents).toContain("recovery never depends on or reruns a historical `prepack`");
   });
