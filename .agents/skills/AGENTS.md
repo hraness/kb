@@ -1,6 +1,8 @@
 # Contents
 
-- `phase-orchestrator/` – portable phased execution with Codex collaboration agents and explicit join gates.
+- `write-phase-plan/` – dependency-ordered plan authoring with explicit acceptance and validation criteria.
+- `phase-orchestrator/` – parent workflow for delegated phased execution, integration, and delivery.
+- `phase-implementer/`, `phase-reviewer/`, and `phase-final-reviewer/` – bounded implementation, independent phase review, and end-to-end review workers.
 
 # Guidelines
 

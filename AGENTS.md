@@ -5,7 +5,7 @@
 - `src/workflows/` – reusable code-mode decision-context, change-explanation, and plan-radar workflows with bounded parallel execution.
 - `dist/` – committed Bun-targeted ESM entrypoints plus the compiled Defuddle worker.
 - `skills/kb/` – the single public Agent Skill for querying, capturing into, planning in, percolating, refreshing, and validating a hraness/kb vault, with focused workflow references loaded on demand.
-- `.agents/skills/phase-orchestrator/` – internal phased execution with Codex collaboration agents and explicit join gates.
+- `.agents/skills/` – internal plan authoring, phased execution, implementation, and independent review workflows.
 - `kb/` – this source repository's authored rationale, maintained synthesis, and implementation plans; it is separate from the package's graph implementation and fixtures.
 - `WRITING.md` and `STYLE.md` – internal and public prose contracts.
 - `docs/` – design, capture, and agent-workflow documentation.

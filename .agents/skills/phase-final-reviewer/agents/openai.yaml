@@ -1,0 +1,4 @@
+interface:
+  display_name: "Phase Final Reviewer"
+  short_description: "Review the completed feature end to end"
+  default_prompt: "Use $phase-final-reviewer to review this completed multi-phase feature across phase boundaries."

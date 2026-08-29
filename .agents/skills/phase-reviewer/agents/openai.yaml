@@ -1,0 +1,4 @@
+interface:
+  display_name: "Phase Reviewer"
+  short_description: "Review and fix one implemented phase"
+  default_prompt: "Use $phase-reviewer to independently review the assigned phase and fix bounded low-risk findings."

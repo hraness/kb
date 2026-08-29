@@ -1,4 +1,4 @@
 interface:
   display_name: "Phase Orchestrator"
-  short_description: "Run phased plans with parallel agent lanes"
-  default_prompt: "Use $phase-orchestrator to execute this phased implementation plan safely."
+  short_description: "Execute plans with delegated phase workers"
+  default_prompt: "Use $phase-orchestrator to execute this phased implementation plan with independent implementation and review."

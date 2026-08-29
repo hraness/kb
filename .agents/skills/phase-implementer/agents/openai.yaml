@@ -1,0 +1,4 @@
+interface:
+  display_name: "Phase Implementer"
+  short_description: "Implement one assigned plan phase"
+  default_prompt: "Use $phase-implementer to implement exactly the assigned phase and return the required result contract."
