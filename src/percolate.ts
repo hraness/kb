@@ -1177,6 +1177,20 @@ function positiveSafeInteger(
   return value;
 }
 
+function parsedMinSupport(value: unknown, label: string): number {
+  if (
+    typeof value !== "number"
+    || !Number.isSafeInteger(value)
+    || value < DEFAULT_PERCOLATION_MIN_SUPPORT
+    || value > MAX_PERCOLATION_LIMIT
+  ) {
+    throw new TypeError(
+      `${label} must be an integer from ${DEFAULT_PERCOLATION_MIN_SUPPORT} through ${MAX_PERCOLATION_LIMIT}.`,
+    );
+  }
+  return value;
+}
+
 function predicateDisposition(
   value: unknown,
   label: string,
@@ -1813,11 +1827,7 @@ export function parsePercolationCliOutputV1(value: unknown): PercolationCliOutpu
   return Object.freeze({
     root: parsedText(record.root, `${label}.root`, budget),
     note: nullableText(record.note, `${label}.note`, budget),
-    minSupport: positiveSafeInteger(
-      record.minSupport,
-      `${label}.minSupport`,
-      MAX_PERCOLATION_LIMIT,
-    ),
+    minSupport: parsedMinSupport(record.minSupport, `${label}.minSupport`),
     candidates: fields.candidates,
     truncated: fields.truncated,
   });
@@ -1859,11 +1869,7 @@ export function parsePercolationCliOutputV2(value: unknown): PercolationCliOutpu
   return Object.freeze({
     root: parsedText(record.root, `${label}.root`, budget),
     note: nullableText(record.note, `${label}.note`, budget),
-    minSupport: positiveSafeInteger(
-      record.minSupport,
-      `${label}.minSupport`,
-      MAX_PERCOLATION_LIMIT,
-    ),
+    minSupport: parsedMinSupport(record.minSupport, `${label}.minSupport`),
     limit,
     schemaVersion: PERCOLATION_RESULT_SCHEMA_VERSION,
     candidates: fields.candidates,

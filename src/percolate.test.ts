@@ -162,6 +162,14 @@ describe("read-only graph percolation", () => {
     };
     expect(parsePercolationCliOutputV1(cliV1)).toEqual(cliV1);
     expect(parsePercolationCliOutput(cliV2)).toEqual(cliV2);
+    expect(() => parsePercolationCliOutputV1({
+      ...cliV1,
+      minSupport: 1,
+    })).toThrow("from 2 through 1000");
+    expect(() => parsePercolationCliOutput({
+      ...cliV2,
+      minSupport: 1,
+    })).toThrow("from 2 through 1000");
     expect(() => parsePercolationCliOutput(cliV1)).toThrow("exactly");
     expect(() => parsePercolationCliOutputV1(cliV2)).toThrow("exactly");
     expect(() => parsePercolationResult(cliV2)).toThrow("exactly");
