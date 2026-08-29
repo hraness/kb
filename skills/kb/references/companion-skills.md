@@ -31,6 +31,12 @@ Do not infer that an account operation is read-only from its HTTP method. Do
 not place secrets, cookies, tokens, session data, or ambient personal context
 in durable output.
 
+The shipped customization executor proves filesystem scaffolding only. It
+does not execute an application, account, network, or integration write. A
+companion skill that later needs such an action must treat it as a separate
+runtime request with its own exact proposal, approval, capable tool, and
+inspectable result.
+
 ## Approval boundary
 
 Separate read-only inspection from mutation. Present exact targets and writes

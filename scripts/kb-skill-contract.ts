@@ -54,27 +54,32 @@ export type CustomizationCapabilities = {
   ) => Promise<void>;
 };
 
-export type CustomizationExecutionResult =
-  | { readonly status: "awaiting-approval"; readonly proposalDigest: string }
-  | { readonly status: "denied"; readonly proposalDigest: string }
-  | { readonly status: "needs-reapproval"; readonly proposalDigest: string }
+export type RuntimePreparationStatus = "not-needed" | "completed" | "failed";
+
+type CustomizationExecutionTrace = {
+  readonly proposalDigest: string;
+  readonly runtimePreparation: RuntimePreparationStatus;
+};
+
+export type CustomizationExecutionResult = CustomizationExecutionTrace & (
+  | { readonly status: "awaiting-approval" }
+  | { readonly status: "denied" }
+  | { readonly status: "needs-reapproval" }
   | {
     readonly status: "rejected";
-    readonly proposalDigest: string;
     readonly reason: string;
   }
   | {
     readonly status: "no-op" | "applied";
-    readonly proposalDigest: string;
     readonly changed: readonly string[];
   }
   | {
     readonly status: "partial";
-    readonly proposalDigest: string;
     readonly changed: readonly string[];
     readonly failedTarget: string;
     readonly reason: string;
-  };
+  }
+);
 
 export type CustomizationInspectionResult =
   | { readonly status: "inspected"; readonly proposalDigest: string }
@@ -149,6 +154,10 @@ function confinedTarget(root: string, target: string): string | null {
   return absolutePath;
 }
 
+function portableTargetIdentity(absolutePath: string): string {
+  return absolutePath.normalize("NFC").toLocaleLowerCase("en-US");
+}
+
 function validateProposalShape(proposal: CustomizationProposal): string | null {
   if (proposal.id.trim().length === 0) {
     return "proposal id is required";
@@ -169,10 +178,11 @@ function validateProposalShape(proposal: CustomizationProposal): string | null {
     if (absolutePath === null) {
       return `write target ${JSON.stringify(write.target)} escapes the approved root`;
     }
-    if (targets.has(absolutePath)) {
-      return `write target ${JSON.stringify(write.target)} is duplicated`;
+    const targetIdentity = portableTargetIdentity(absolutePath);
+    if (targets.has(targetIdentity)) {
+      return `write target ${JSON.stringify(write.target)} aliases another scaffold target after portable path normalization`;
     }
-    targets.add(absolutePath);
+    targets.add(targetIdentity);
     contentBytes += Buffer.byteLength(write.contents, "utf8");
     if (contentBytes > MAX_CONTENT_BYTES) {
       return `proposal exceeds ${MAX_CONTENT_BYTES} bytes of durable output`;
@@ -187,20 +197,24 @@ export async function executeCustomizationContract(
   capabilities: CustomizationCapabilities,
 ): Promise<CustomizationExecutionResult> {
   const proposalDigest = customizationProposalDigest(proposal);
+  const noRuntime = {
+    proposalDigest,
+    runtimePreparation: "not-needed" as const,
+  };
 
   if (approval.kind === "unanswered") {
-    return { status: "awaiting-approval", proposalDigest };
+    return { status: "awaiting-approval", ...noRuntime };
   }
   if (approval.kind === "denied") {
-    return { status: "denied", proposalDigest };
+    return { status: "denied", ...noRuntime };
   }
   if (approval.proposalDigest !== proposalDigest) {
-    return { status: "needs-reapproval", proposalDigest };
+    return { status: "needs-reapproval", ...noRuntime };
   }
 
   const shapeError = validateProposalShape(proposal);
   if (shapeError !== null) {
-    return { status: "rejected", proposalDigest, reason: shapeError };
+    return { status: "rejected", ...noRuntime, reason: shapeError };
   }
 
   const prepared: PreparedWrite[] = [];
@@ -209,7 +223,7 @@ export async function executeCustomizationContract(
     if (absolutePath === null) {
       return {
         status: "rejected",
-        proposalDigest,
+        ...noRuntime,
         reason: `write target ${JSON.stringify(write.target)} escapes the approved root`,
       };
     }
@@ -217,21 +231,21 @@ export async function executeCustomizationContract(
     if (state.hasSymlinkAncestor || state.kind === "symlink") {
       return {
         status: "rejected",
-        proposalDigest,
+        ...noRuntime,
         reason: `write target ${JSON.stringify(write.target)} crosses a symbolic link`,
       };
     }
     if (state.kind === "other") {
       return {
         status: "rejected",
-        proposalDigest,
+        ...noRuntime,
         reason: `write target ${JSON.stringify(write.target)} is not a regular file`,
       };
     }
     if (state.kind === "file" && state.contents !== write.contents) {
       return {
         status: "rejected",
-        proposalDigest,
+        ...noRuntime,
         reason: `write target ${JSON.stringify(write.target)} has divergent content`,
       };
     }
@@ -248,18 +262,21 @@ export async function executeCustomizationContract(
   if (changed.length === 0) {
     return {
       status: "no-op",
-      proposalDigest,
+      ...noRuntime,
       changed: Object.freeze([]),
     };
   }
 
+  let runtimePreparation: RuntimePreparationStatus = "not-needed";
   if (proposal.runtime === "kb-cli") {
     try {
       await capabilities.prepareRuntime();
+      runtimePreparation = "completed";
     } catch (error) {
       return {
         status: "rejected",
         proposalDigest,
+        runtimePreparation: "failed",
         reason: error instanceof Error ? error.message : String(error),
       };
     }
@@ -277,6 +294,7 @@ export async function executeCustomizationContract(
       return {
         status: "partial",
         proposalDigest,
+        runtimePreparation,
         changed: Object.freeze([...completed]),
         failedTarget: write.absolutePath,
         reason: error instanceof Error ? error.message : String(error),
@@ -287,6 +305,7 @@ export async function executeCustomizationContract(
   return {
     status: "applied",
     proposalDigest,
+    runtimePreparation,
     changed: Object.freeze(completed),
   };
 }
@@ -296,6 +315,10 @@ export type KbSkillContractResources = {
   readonly customize: string;
   readonly companionSkills: string;
   readonly template: string;
+  readonly percolate: string;
+  readonly design: string;
+  readonly readme: string;
+  readonly publicSource: string;
 };
 
 const CUSTOMIZE_HEADINGS = [
@@ -384,6 +407,9 @@ export function validateKbSkillContractResources(
       errors.push(`SKILL.md must link ${link}`);
     }
   }
+  if (!resources.skill.includes("bun add --global @hraness/kb@0.17.2")) {
+    errors.push("SKILL.md must retain the immutable 0.17.2 runtime pin");
+  }
   for (const [name, contents, headings] of [
     ["customize.md", resources.customize, CUSTOMIZE_HEADINGS],
     ["companion-skills.md", resources.companionSkills, COMPANION_HEADINGS],
@@ -406,9 +432,54 @@ export function validateKbSkillContractResources(
     "Silence, a denial, or an ambiguous response is not approval.",
     "<explicit-skill-root>/<name>/SKILL.md",
     "Do not run `kb doctor`, `kb init`, `kb index`, QMD",
+    "The scaffold executor writes filesystem targets only.",
   ]) {
     if (!resources.customize.includes(required)) {
       errors.push(`customize.md must include ${JSON.stringify(required)}`);
+    }
+  }
+  for (const required of [
+    "available through the 0.18 release line",
+    "not removed before 0.19.0",
+    "any canonical custom predicate",
+    "Never write inverse edges",
+    "https://gist.github.com/fxchen/773397095d7a6bffda621e4237da0da9",
+    "https://gist.github.com/fxchen/09cb410b22c9c5256d80243ee925b57e",
+  ]) {
+    if (!resources.percolate.includes(required)) {
+      errors.push(`percolate.md must include ${JSON.stringify(required)}`);
+    }
+  }
+  for (const required of [
+    "ships no `kb_role` field",
+    "lifecycle resolver or API",
+    "lifecycle CLI",
+  ]) {
+    if (!resources.design.includes(required) && !resources.readme.includes(required)) {
+      errors.push(`public documentation must include ${JSON.stringify(required)}`);
+    }
+  }
+  for (const { label, pattern } of [
+    { label: "kb_role", pattern: /\bkb_role\b/iu },
+    {
+      label: "a lifecycle-role identity",
+      pattern:
+        /\b(?:KbLifecycle|Lifecycle|Memory|Document|Knowledge|Authority)Role(?:Resolver|Resolution)?\b/iu,
+    },
+    {
+      label: "a lifecycle-role resolver",
+      pattern:
+        /\b(?:resolve|classify|infer|assign|audit|inspect)(?:KbLifecycle|Lifecycle|Memory|Document|Knowledge|Authority)Role\b/iu,
+    },
+    {
+      label: "a lifecycle-role CLI option",
+      pattern:
+        /--(?:kb-)?(?:lifecycle-|memory-|document-|knowledge-|authority-)?role\b/iu,
+    },
+    { label: "kb lifecycle", pattern: /\bkb[ -]lifecycle\b/iu },
+  ]) {
+    if (pattern.test(resources.publicSource)) {
+      errors.push(`public package source must not expose ${label}`);
     }
   }
   return Object.freeze(errors);

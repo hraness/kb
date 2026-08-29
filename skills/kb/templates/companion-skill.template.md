@@ -25,7 +25,9 @@ these preconditions.
 
 List every filesystem, repository, application, account, network, and
 integration surface this workflow may read or write. Discovery and an existing
-session grant no authority.
+session grant no authority. The setup scaffold writes filesystem targets only;
+describe any later external action as a separate runtime request with its own
+proposal, approval, capable tool, and result.
 
 ## Approval
 

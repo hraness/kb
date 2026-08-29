@@ -85,6 +85,11 @@ skill's pinned installation instructions. Installation does not authorize
 `kb init`, indexing, semantic search, or vault writes. Run only the approved
 commands and exact allowlisted writes.
 
+The scaffold executor writes filesystem targets only. It never performs an
+application, account, network, or integration write. A companion skill may
+describe one of those later actions, but its execution is a separate runtime
+request with its own exact proposal, approval, tool boundary, and result.
+
 On a repeated request, compare the desired bytes with the approved targets.
 Treat an exact match as a no-op. Stop on divergent existing content, a symlink,
 a path that escapes the approved root, an unapproved external surface, or a
