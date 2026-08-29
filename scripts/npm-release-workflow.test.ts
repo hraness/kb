@@ -120,7 +120,7 @@ describe("npm release workflows", () => {
       readonly version?: unknown;
     };
     expect(manifest).toEqual(expect.objectContaining({
-      version: "0.17.2",
+      version: "0.17.3",
       description: "A knowledge base for coding agents, built from Markdown, backlinks, semantic search, and Git context.",
       keywords: [
         "knowledge-base",
@@ -410,7 +410,7 @@ describe("canonical npm package identity", () => {
       });
       const verified = await verifyNpmPackageIdentity(validInput);
       expect(verified.fileCount).toBe(200);
-      expect(verified.unpackedBytes).toBe(4_861_264);
+      expect(verified.unpackedBytes).toBe(4_861_496);
       expect(verified.sourceArchiveSha512).not.toBe(verified.registryArchiveSha512);
 
       const originalTar = gunzipSync(sourceBytes);
