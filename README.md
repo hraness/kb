@@ -130,7 +130,15 @@ kb history search packages/parser/src/index.ts --root kb --repo . --json
 
 ### Preserve evidence and plans as working records
 
-Durable reasoning needs inspectable evidence. `kb clip` can read a public URL, saved HTML, rendered page, a page already open in an authenticated browser, or an existing exact Archive.today snapshot after the direct routes fail. Archive fallback is read-only and always partial. The [capture documentation](<https://github.com/hraness/kb/blob/main/docs/capture.md>) defines the supported routes. A capture writes readable Markdown beside localized assets and `capture.json`, whose manifest records where the material came from, how it was extracted, what was saved, and any warnings. “Complete” describes the selected page surface, not every hidden branch or future version of the site.
+Durable reasoning needs inspectable evidence. `kb clip` can read a public URL,
+saved HTML, rendered page, a page already open in an authenticated browser, or
+an existing exact Archive.today snapshot after the direct routes fail. Archive
+fallback is read-only and always partial. The
+[capture documentation](docs/capture.md) defines the supported routes. A capture
+writes readable Markdown beside localized assets and `capture.json`, whose
+manifest records where the material came from, how it was extracted, what was
+saved, and any warnings. “Complete” describes the selected page surface, not
+every hidden branch or future version of the site.
 
 **Capture a web source or local PDF**
 
@@ -239,17 +247,18 @@ audit projection disposable.
 Copy this prompt into Codex, Claude Code, or another coding agent:
 
 ```text
-Install the `kb` Agent Skill from hraness/kb with the standard skills CLI. Use
-the skill's runtime instructions to install the exact `@hraness/kb@0.17.3`
-registry release only when the command is missing. Verify it with `kb doctor`
-and `kb --help`, but do not initialize or modify a vault until I ask.
+Install the `kb` Agent Skill from `hraness/kb#v0.17.3` with the standard skills
+CLI. Use the skill's runtime instructions to install the exact
+`@hraness/kb@0.17.3` registry release only when the command is missing. Verify it
+with `kb doctor` and `kb --help`, but do not initialize or modify a vault until
+I ask.
 ```
 
 Install the single public skill with either runner:
 
 ```sh
-npx skills add hraness/kb
-bunx skills add hraness/kb
+npx skills add hraness/kb#v0.17.3
+bunx skills add hraness/kb#v0.17.3
 ```
 
 Both commands discover the same `kb` skill and install it into the selected
@@ -563,9 +572,9 @@ a vault. The package smoke test keeps future tagged packages byte-identical to
 that source tree.
 
 ```sh
-npx skills add hraness/kb
+npx skills add hraness/kb#v0.17.3
 # or
-bunx skills add hraness/kb
+bunx skills add hraness/kb#v0.17.3
 ```
 
 The skill invokes the installed `kb` command without depending on a repository
