@@ -33,7 +33,11 @@ import {
   type AuthoringDependencies,
   type AuthoringOptions,
 } from "./authoring.js";
-import { analyzeVault, parseNote } from "./graph.js";
+import {
+  analyzeVault,
+  isCanonicalRelationPredicate,
+  parseNote,
+} from "./graph.js";
 
 const fixtures: string[] = [];
 
@@ -966,5 +970,7 @@ describe("single-note authoring", () => {
     expect(listNoteRelations(root, "notes/source"))
       .rejects.toThrow("canonical kebab-case");
     expect(normalizeRelationPredicate(" Depends_On ")).toBe("depends-on");
+    expect(isCanonicalRelationPredicate(normalizeRelationPredicate("Evidence_By")))
+      .toBe(true);
   });
 });

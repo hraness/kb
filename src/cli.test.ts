@@ -16,6 +16,7 @@ import {
   MAX_QUERY_TEXT_UTF8_BYTES,
 } from "./query.js";
 import type { KnowledgeBaseSession } from "./sdk.js";
+import { parsePercolationCliOutput } from "./percolate.js";
 import {
   MAX_SEARCH_NOTE_REFERENCE_BYTES,
   MAX_SEARCH_RELATED_SEEDS,
@@ -1394,6 +1395,8 @@ describe("kb vault commands", () => {
         "Alpha",
         "--tag",
         "agent-memory",
+        "--tag",
+        "shared-signal",
         "--body",
         "# Alpha\n\nA durable write path.\n",
         "--root",
@@ -1440,6 +1443,8 @@ describe("kb vault commands", () => {
         "Gamma",
         "--tag",
         "agent-memory",
+        "--tag",
+        "shared-signal",
         "--root",
         vault,
         "--json",
@@ -1539,13 +1544,37 @@ describe("kb vault commands", () => {
       expect(percolation).toMatchObject({
         note: "notes/alpha",
         minSupport: 2,
+        limit: 25,
+        schemaVersion: 2,
       });
+      expect(parsePercolationCliOutput(percolation)).toEqual(percolation);
       expect(arrayProperty(percolation, "candidates")).toContainEqual(expect.objectContaining({
         kind: "missing-concept",
         tag: "agent-memory",
         suggestedId: "notes/agent-memory",
         support: 3,
       }));
+      expect(arrayProperty(percolation, "candidates")).toContainEqual(expect.objectContaining({
+        kind: "missing-relation",
+        source: "notes/alpha",
+        target: "notes/gamma",
+        predicate: { kind: "required" },
+        support: 2,
+      }));
+
+      const terminalPercolation = captureOutput();
+      expect(await main([
+        "percolate",
+        "notes/alpha",
+        "--root",
+        vault,
+        "--min-support",
+        "2",
+      ], terminalPercolation.output)).toBe(0);
+      expect(terminalPercolation.stdout()).toContain(
+        "relation pair  {notes/alpha, notes/gamma}  (predicate required; 2 shared signals)",
+      );
+      expect(terminalPercolation.stdout()).not.toContain("notes/alpha → notes/gamma");
 
       const removeOutput = captureOutput();
       expect(await main([

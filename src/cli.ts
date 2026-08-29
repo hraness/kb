@@ -81,6 +81,7 @@ import {
   MAX_PERCOLATION_NOTES,
   MAX_SCOPED_PERCOLATION_MENTION_PAIRS,
   percolateVault,
+  type PercolationCliOutputV2,
   type PercolationResult,
 } from "./percolate.js";
 import {
@@ -2693,7 +2694,7 @@ function renderPercolation(result: PercolationResult, note: string | undefined):
       );
     } else if (candidate.kind === "missing-relation") {
       lines.push(
-        `  relation  ${safe(candidate.source)} ${safe(candidate.suggestedPredicate)} ${safe(candidate.target)}  (${candidate.support} shared signals)`,
+        `  relation pair  {${safe(candidate.source)}, ${safe(candidate.target)}}  (predicate required; ${candidate.support} shared signals)`,
       );
     } else if (candidate.kind === "unlinked-mention") {
       lines.push(
@@ -2754,13 +2755,17 @@ async function runPercolate(
       limit: command.limit,
     },
   );
+  const jsonOutput: PercolationCliOutputV2 = {
+    root: snapshot.root,
+    note: command.note ?? null,
+    minSupport: command.minSupport,
+    limit: command.limit,
+    schemaVersion: result.schemaVersion,
+    candidates: result.candidates,
+    truncated: result.truncated,
+  };
   output.stdout(command.json
-    ? terminalSafeJson({
-        root: snapshot.root,
-        note: command.note ?? null,
-        minSupport: command.minSupport,
-        ...result,
-      })
+    ? terminalSafeJson(jsonOutput)
     : sanitizeTerminalText(renderPercolation(result, command.note)));
   return 0;
 }

@@ -35,7 +35,10 @@ import {
   type NoteLock,
   type NoteLockOptions,
 } from "./note-lock.js";
-import { isCanonicalNoteId } from "./graph.js";
+import {
+  isCanonicalNoteId,
+  isCanonicalRelationPredicate,
+} from "./graph.js";
 import {
   parseDocumentId,
   parseQualifiedDocumentUri,
@@ -43,7 +46,6 @@ import {
 
 const MAX_NOTE_BYTES = 16 * 1024 * 1024;
 const NOTE_REVISION_PATTERN = /^sha256:[0-9a-f]{64}$/u;
-const PREDICATE_PATTERN = /^[a-z][a-z0-9]*(?:-[a-z0-9]+)*$/u;
 const MAX_PARENT_DIRECTORY_ENTRIES = 100_000;
 const MAX_RECOVERY_LOCATIONS_PER_NOTE = 8;
 
@@ -259,7 +261,7 @@ export function normalizeRelationPredicate(value: string): string {
     .replaceAll("_", "-")
     .replace(/\s+/gu, "-")
     .replace(/-{2,}/gu, "-");
-  if (!PREDICATE_PATTERN.test(normalized)) {
+  if (!isCanonicalRelationPredicate(normalized)) {
     throw new TypeError(`not a valid relation predicate: ${JSON.stringify(value)}`);
   }
   return normalized;
