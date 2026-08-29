@@ -335,6 +335,7 @@
     "src/init.ts",
     "src/navigation.ts",
     "src/note-lock.ts",
+    "src/oh-adoption.ts",
     "src/percolate.ts",
     "src/portfolio.ts",
     "src/portfolio-audit.ts",

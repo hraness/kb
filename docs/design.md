@@ -217,6 +217,25 @@ and avoids a repository-wide merge hotspot. A future cache may live outside the
 vault only if measurements justify it; it must be content-addressed by source
 and analysis version and rebuild on any mismatch.
 
+## Oh adoption stops at a review candidate
+
+`prepareOhAdoptionCandidateV1` accepts one dependency-closed capsule from an
+Oh working authority and produces deterministic Markdown for destination-owned
+review. The caller must pin the exact expected source binding and head, state
+the destination purpose and proposed `notes/` path, provide a purpose-matched
+rights decision, name the required review route, and record the conflict
+assessment and any transformations or redactions. The parser rejects a
+tampered, incomplete, over-complete, wrong-authority, or derived-only capsule.
+
+The returned status is always `prepared`. The function does not open a vault,
+write a note, invoke Git, import an operation chain or database, retain a
+projection, or write to canonical Oh. A reviewer must inspect the candidate and
+author destination Markdown through KB's existing revision-checked write path;
+the source's proposed assertion is never relabeled as reviewed knowledge. The
+temporary structural verifier is intentionally narrow and must be replaced by
+the immutable `@hraness/oh` dependency-closure verifier once version 0.2.0 is
+published and pinned.
+
 ## Catalog ownership is explicit
 
 A managed vault gives one marked region in `index.md` to the tool. `kb refresh`
