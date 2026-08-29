@@ -1,0 +1,4 @@
+interface:
+  display_name: "Write Phase Plan"
+  short_description: "Turn a spec into executable phases"
+  default_prompt: "Use $write-phase-plan to turn this request into a dependency-ordered implementation plan."
