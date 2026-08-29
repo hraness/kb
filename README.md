@@ -3,31 +3,55 @@
 
 [![skills.sh](https://skills.sh/b/hraness/kb)](https://skills.sh/hraness/kb)
 
-a knowledge base for coding agents, built from Markdown, backlinks, semantic
+A knowledge base for coding agents, built from Markdown, backlinks, semantic
 search, and Git context.
+It turns sources, plans, and decisions into inspectable context that agents can
+recover across sessions without coupling application code to the knowledge
+system.
 
-## install
+## Install
+
+Bun 1.3.14 or newer is required.
 
 ```sh
 bun add --global @hraness/kb@0.17.2
 ```
 
-## about
+## Why kb
 
-Turn research, plans, and decisions into reusable context for coding agents.
-Keep sources and repository context beside your code in Markdown and Git. Your
-application stays independent.
+- **Inspect what agents recover.** Markdown and Git stay authoritative,
+  retrieval signals stay distinct, and indexes, embeddings, and graph views
+  remain replaceable.
+- **Keep the application independent.** Application code imports neither the
+  vault nor a hosted knowledge service. Capture and semantic adapters declare
+  their network, browser, native-tool, and model-download effects.
 
-Search identifiers and metadata. Find meaning locally with QMD. Follow
-backlinks and typed relations. Inspect Git provenance. Search an explicitly
-authorized portfolio of vaults without merging their Markdown or comparing
-their local QMD scores.
+## Create one durable note
 
-Capture signed-in pages and PDFs. Use the TypeScript SDK and bounded workflows.
+From a directory without an existing `kb/` path, this local task creates a
+vault, writes one typed note, and finds it without a network request or
+embedding model:
 
-Markdown and Git stay authoritative. Indexes and graph views are replaceable.
+```sh
+kb init kb
+kb note create notes/parser-contract \
+  --title "Parser contract" --type concept --tag architecture --root kb
+kb search "parser contract" --root kb --mode exact
+```
 
-## use
+The note is stored at `kb/notes/parser-contract.md`. Exact search reads the
+current Markdown and returns that record. Commit the vault when it should
+travel with the repository.
+
+<!-- hraness:kb-landing:end -->
+
+## Links
+
+[Install `@hraness/kb` from npm](https://www.npmjs.com/package/@hraness/kb) ·
+[KB source on GitHub](https://github.com/hraness/kb) ·
+[KB overview](https://hraness.com/kb)
+
+## Use
 
 ```sh
 kb init kb
@@ -42,13 +66,6 @@ kb portfolio search "parser-v2" --registry kb-portfolio.json \
   --workspace .. --shared
 kb history search packages/parser --root . --repo .. --json
 ```
-
-## links
-
-[Install `@hraness/kb` from npm](https://www.npmjs.com/package/@hraness/kb) ·
-[KB source on GitHub](https://github.com/hraness/kb) ·
-[KB overview](https://hraness.com/kb)
-<!-- hraness:kb-landing:end -->
 
 ## A knowledge base for your coding agents
 
@@ -207,7 +224,7 @@ Existing Markdown is not rewritten automatically. Add IDs to maintained legacy
 notes only through reviewed edits, and keep every QMD, graph, portfolio, and
 audit projection disposable.
 
-## Install
+## Installation reference
 
 [Bun](https://bun.sh/docs/installation) is the required runtime.
 
