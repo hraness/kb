@@ -14,12 +14,12 @@ function manifest(version: unknown, name: unknown = "@hraness/kb"): string {
 describe("npm stage selection", () => {
   test("selects a strictly increasing stable version from a push", () => {
     expect(selectNpmStage({
-      currentManifest: manifest("0.17.2"),
+      currentManifest: manifest("0.17.3"),
       eventName: "push",
-      previousManifest: manifest("0.17.1"),
+      previousManifest: manifest("0.17.2"),
     })).toEqual({
-      currentVersion: "0.17.2",
-      previousVersion: "0.17.1",
+      currentVersion: "0.17.3",
+      previousVersion: "0.17.2",
       reason: "stable-version-increase",
       shouldStage: true,
     });
@@ -27,12 +27,12 @@ describe("npm stage selection", () => {
 
   test("makes an unrelated package.json edit a successful no-op", () => {
     expect(selectNpmStage({
-      currentManifest: manifest("0.17.2"),
+      currentManifest: manifest("0.17.3"),
       eventName: "push",
-      previousManifest: manifest("0.17.2"),
+      previousManifest: manifest("0.17.3"),
     })).toEqual({
-      currentVersion: "0.17.2",
-      previousVersion: "0.17.2",
+      currentVersion: "0.17.3",
+      previousVersion: "0.17.3",
       reason: "version-unchanged",
       shouldStage: false,
     });
@@ -40,10 +40,10 @@ describe("npm stage selection", () => {
 
   test("retains a manual current-version recovery request", () => {
     expect(selectNpmStage({
-      currentManifest: manifest("0.17.2"),
+      currentManifest: manifest("0.17.3"),
       eventName: "workflow_dispatch",
     })).toEqual({
-      currentVersion: "0.17.2",
+      currentVersion: "0.17.3",
       reason: "manual-recovery",
       shouldStage: true,
     });
@@ -53,17 +53,17 @@ describe("npm stage selection", () => {
     expect(() => selectNpmStage({
       currentManifest: manifest("0.17.0"),
       eventName: "push",
-      previousManifest: manifest("0.17.2"),
+      previousManifest: manifest("0.17.3"),
     })).toThrow("Package version must increase");
     expect(() => selectNpmStage({
       currentManifest: manifest("0.18.0-beta.1"),
       eventName: "push",
-      previousManifest: manifest("0.17.2"),
+      previousManifest: manifest("0.17.3"),
     })).toThrow("stable semantic version");
     expect(() => selectNpmStage({
       currentManifest: manifest("0.18.0", "@hraness/not-kb"),
       eventName: "push",
-      previousManifest: manifest("0.17.2"),
+      previousManifest: manifest("0.17.3"),
     })).toThrow("must identify @hraness/kb");
     expect(() => selectNpmStage({
       currentManifest: manifest("0.18.0"),
@@ -113,8 +113,8 @@ describe("npm stage selection", () => {
       const previousManifest = join(work, "previous-package.json");
       const githubOutput = join(work, "github-output.txt");
       await Promise.all([
-        writeFile(currentManifest, manifest("0.17.2")),
-        writeFile(previousManifest, manifest("0.17.1")),
+        writeFile(currentManifest, manifest("0.17.3")),
+        writeFile(previousManifest, manifest("0.17.2")),
       ]);
       const child = Bun.spawn([
         process.execPath,
@@ -136,12 +136,12 @@ describe("npm stage selection", () => {
       ]);
       expect(error).toBe("");
       expect(exitCode).toBe(0);
-      expect(output).toContain("Stage @hraness/kb@0.17.2: stable-version-increase");
+      expect(output).toContain("Stage @hraness/kb@0.17.3: stable-version-increase");
       expect(await readFile(githubOutput, "utf8")).toBe(
-        "current_version=0.17.2\n"
+        "current_version=0.17.3\n"
         + "reason=stable-version-increase\n"
         + "should_stage=true\n"
-        + "previous_version=0.17.1\n",
+        + "previous_version=0.17.2\n",
       );
     } finally {
       await rm(work, { force: true, recursive: true });
