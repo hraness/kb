@@ -212,9 +212,21 @@ function orderedUnique(values: readonly string[]): boolean {
   return values.every((value, index) => index === 0 || (values[index - 1] as string) < value);
 }
 
+function unsafeReviewCodePoint(codePoint: number): boolean {
+  return codePoint <= 0x1f
+    || (codePoint >= 0x7f && codePoint <= 0x9f)
+    || codePoint === 0x061c
+    || codePoint === 0x200e
+    || codePoint === 0x200f
+    || (codePoint >= 0x2028 && codePoint <= 0x202e)
+    || (codePoint >= 0x2066 && codePoint <= 0x2069)
+    || codePoint === 0xfeff;
+}
+
 function singleLine(value: unknown): string | null {
   if (typeof value !== "string" || value.length < 1 || value.normalize("NFC") !== value
-    || !validUnicode(value) || /[\u0000-\u001f\u007f-\u009f]/u.test(value)
+    || !validUnicode(value) || [...value].some((character) =>
+      unsafeReviewCodePoint(character.codePointAt(0) ?? 0))
     || Buffer.byteLength(value, "utf8") > MAX_TEXT_BYTES) return null;
   return value;
 }

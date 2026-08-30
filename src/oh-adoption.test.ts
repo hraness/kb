@@ -209,6 +209,37 @@ describe("Oh dependency-closure adoption", () => {
     expect(candidate.markdown).toContain("\\<script\\>");
   });
 
+  test("rejects terminal, bidi, and Unicode line controls from every review disclosure", () => {
+    const { hostPolicy, prepareInput } = fixture();
+    const unsafeCodePoints = [
+      ...Array.from({ length: 0x20 }, (_, index) => index),
+      ...Array.from({ length: 0x9f - 0x7f + 1 }, (_, index) => 0x7f + index),
+      0x061c,
+      0x200e,
+      0x200f,
+      ...Array.from({ length: 0x202e - 0x2028 + 1 }, (_, index) => 0x2028 + index),
+      ...Array.from({ length: 0x2069 - 0x2066 + 1 }, (_, index) => 0x2066 + index),
+      0xfeff,
+    ];
+    for (const codePoint of unsafeCodePoints) {
+      const character = String.fromCodePoint(codePoint);
+      expect(() => createOhAdoptionPreparerV1({
+        ...hostPolicy,
+        conflicts: {
+          ...hostPolicy.conflicts,
+          notes: [`No conflict ${character}confirmed.`],
+        },
+      })).toThrow("host policy");
+      expect(() => createOhAdoptionPreparerV1(hostPolicy).prepare({
+        ...prepareInput,
+        transformations: [{
+          ...prepareInput.transformations[0]!,
+          summary: `Approved ${character}txt.exe`,
+        }],
+      })).toThrow("valid disclosures");
+    }
+  });
+
   test("rejects accessors, symbols, oversized capsules, and deep input without invoking code", () => {
     const { capsule, hostPolicy, prepareInput } = fixture();
     const preparer = createOhAdoptionPreparerV1(hostPolicy);

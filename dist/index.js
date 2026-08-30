@@ -364,8 +364,11 @@ function recordKey(value) {
 function orderedUnique(values) {
   return values.every((value, index) => index === 0 || values[index - 1] < value);
 }
+function unsafeReviewCodePoint(codePoint) {
+  return codePoint <= 31 || codePoint >= 127 && codePoint <= 159 || codePoint === 1564 || codePoint === 8206 || codePoint === 8207 || codePoint >= 8232 && codePoint <= 8238 || codePoint >= 8294 && codePoint <= 8297 || codePoint === 65279;
+}
 function singleLine(value) {
-  if (typeof value !== "string" || value.length < 1 || value.normalize("NFC") !== value || !validUnicode(value) || /[\u0000-\u001f\u007f-\u009f]/u.test(value) || Buffer.byteLength(value, "utf8") > MAX_TEXT_BYTES)
+  if (typeof value !== "string" || value.length < 1 || value.normalize("NFC") !== value || !validUnicode(value) || [...value].some((character) => unsafeReviewCodePoint(character.codePointAt(0) ?? 0)) || Buffer.byteLength(value, "utf8") > MAX_TEXT_BYTES)
     return null;
   return value;
 }
