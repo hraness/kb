@@ -1,6 +1,6 @@
 {
   "name": "@hraness/kb",
-  "version": "0.17.3",
+  "version": "0.18.0",
   "description": "A knowledge base for coding agents, built from Markdown, backlinks, semantic search, and Git context.",
   "license": "MIT",
   "contentPolicy": {
@@ -392,6 +392,7 @@
     "prepack": "bun run check"
   },
   "dependencies": {
+    "@hraness/oh": "github:hraness/oh#v0.2.0",
     "@steipete/sweet-cookie": "github:hraness/sweet-cookie#v0.4.2",
     "@tobilu/qmd": "git+https://github.com/hraness/qmd.git#aa993dceb3ef8cfb71d470554ca437570f5a2b3c",
     "agent-browser": "0.32.3",

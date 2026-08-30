@@ -2,69 +2,103 @@ import { describe, expect, test } from "bun:test";
 import { createHash } from "node:crypto";
 
 import {
-  parseOhDependencyClosureCapsuleV1,
-  prepareOhAdoptionCandidateV1,
-} from "./oh-adoption.js";
+  canonicalSha256,
+  createKnowledgeGraphRecordV1,
+  knowledgeGraphRecordRefV1,
+  type KnowledgeGraphRecordKindV1,
+} from "@hraness/oh";
+import {
+  createOhDependencyClosureV1,
+  createOhStoreBindingV1,
+  OH_CANONICAL_STORE_PROFILE_V1,
+  OH_WORKING_STORE_PROFILE_V1,
+} from "@hraness/oh/store";
 
-function canonical(value: unknown): string {
-  if (value === null || typeof value === "boolean" || typeof value === "string" || typeof value === "number") {
-    return JSON.stringify(value);
-  }
-  if (Array.isArray(value)) return `[${value.map(canonical).join(",")}]`;
-  const record = value as Record<string, unknown>;
-  return `{${Object.keys(record).sort().map((key) => `${JSON.stringify(key)}:${canonical(record[key])}`).join(",")}}`;
-}
+import { createOhAdoptionPreparerV1 } from "./oh-adoption.js";
 
-function sha(value: unknown): string {
-  return createHash("sha256").update(canonical(value)).digest("hex");
-}
-
-function fixture(kind = "assertion") {
-  const capabilities = { changesSince: true, dependencyClosureExport: true, exactSnapshots: true,
-    operationReplication: false, semanticBundleCommit: true, v: 1, wholeSpacePurge: true } as const;
-  const profilePayload = { applicationProfileSha256: null, capabilities, profileId: "kb.working.v1",
-    profileKind: "working", v: 1 } as const;
-  const profile = { ...profilePayload, profileSha256: sha(profilePayload) };
-  const bindingPayload = { contractSha256: "a".repeat(64), profile, realmId: "tenant:test/thread:one",
-    spaceId: "thread:one", v: 1 } as const;
-  const binding = { ...bindingPayload, bindingSha256: sha(bindingPayload) };
-  const evidencePayload = { dependencies: [], key: "evidence:source", kind: "evidence", v: 1,
-    value: { locator: "https://example.test/source" } } as const;
-  const evidence = { ...evidencePayload, recordSha256: sha(evidencePayload) };
-  const assertionPayload = { dependencies: ["evidence:source"], key: "assertion:candidate", kind, v: 1,
-    value: { state: "proposed", text: "A bounded candidate." } } as const;
-  const assertion = { ...assertionPayload, recordSha256: sha(assertionPayload) };
+function fixture(kind: KnowledgeGraphRecordKindV1 = "assertion") {
+  const binding = createOhStoreBindingV1({
+    profile: OH_WORKING_STORE_PROFILE_V1,
+    realmId: "tenant:test/thread:one",
+    spaceId: "thread:one",
+    v: 1,
+  });
+  const evidence = createKnowledgeGraphRecordV1({
+    dependencies: [],
+    key: "evidence:source",
+    kind: "evidence",
+    v: 1,
+    value: { locator: "https://example.test/source" },
+  });
+  const assertion = createKnowledgeGraphRecordV1({
+    dependencies: ["evidence:source"],
+    key: "assertion:candidate",
+    kind,
+    v: 1,
+    value: { state: "proposed", text: "A bounded candidate." },
+  });
   const records = [assertion, evidence];
-  const recordRefs = records.map((record) => ({ dependencies: record.dependencies, key: record.key,
-    kind: record.kind, sha256: record.recordSha256, v: 1 }));
-  const head = { generation: 3, graphRevisionSha256: "b".repeat(64), operationSha256: "c".repeat(64),
-    recordsSha256: sha(recordRefs), sequence: 3, v: 1 } as const;
-  const capsulePayload = { binding, head, records, roots: ["assertion:candidate"], v: 1 } as const;
-  const capsule = { ...capsulePayload, closureSha256: sha(capsulePayload) };
-  const expectedSource = { authorityId: "sponge.working.primary", binding, head, v: 1 } as const;
-  const input = {
-    capsule,
-    conflicts: { notes: ["No destination collision was found; review must confirm."],
-      status: "none-observed", v: 1 },
-    destination: { purpose: "kb.maintained-knowledge", targetPath: "notes/adopted-candidate.md", v: 1 },
-    expectedSource,
-    redactions: [],
-    review: { route: "kb.adoption-review", status: "required", v: 1 },
-    rights: { decisionId: "rights:decision-one", disposition: "cleared-for-purpose",
-      purpose: "kb.maintained-knowledge", v: 1 },
-    transformations: [{ id: "transform:normalize-title", recordKey: "assertion:candidate",
-      summary: "Normalize the title without changing the proposed claim.", v: 1 }],
+  const head = {
+    generation: 3,
+    graphRevisionSha256: canonicalSha256({ fixture: "graph-revision", v: 1 }),
+    operationSha256: canonicalSha256({ fixture: "operation", v: 1 }),
+    recordsSha256: canonicalSha256(records.map(knowledgeGraphRecordRefV1)),
+    sequence: 3,
     v: 1,
   } as const;
-  return { assertion, binding, capsule, evidence, expectedSource, head, input };
+  const capsule = createOhDependencyClosureV1({
+    binding,
+    roots: [assertion.key],
+    snapshot: { head, records, v: 1 },
+  });
+  const expectedSource = {
+    authorityId: "sponge.working.primary",
+    binding,
+    head,
+    v: 1,
+  } as const;
+  const hostPolicy = {
+    conflicts: {
+      notes: ["No destination collision was found; review must confirm."],
+      status: "none-observed",
+      v: 1,
+    },
+    destination: {
+      purpose: "kb.maintained-knowledge",
+      targetPath: "notes/adopted-candidate.md",
+      v: 1,
+    },
+    expectedSource,
+    review: { route: "kb.adoption-review", status: "required", v: 1 },
+    rights: {
+      decisionId: "rights:decision-one",
+      disposition: "cleared-for-purpose",
+      purpose: "kb.maintained-knowledge",
+      v: 1,
+    },
+    v: 1,
+  } as const;
+  const prepareInput = {
+    capsule,
+    redactions: [],
+    transformations: [{
+      id: "transform:normalize-title",
+      recordKey: assertion.key,
+      summary: "Normalize the title without changing the proposed claim.",
+      v: 1,
+    }],
+    v: 1,
+  } as const;
+  return { assertion, binding, capsule, evidence, expectedSource, head, hostPolicy, prepareInput };
 }
 
 describe("Oh dependency-closure adoption", () => {
-  test("prepares deterministic review-only Markdown without laundering proposal authority", () => {
-    const { input } = fixture();
-    const first = prepareOhAdoptionCandidateV1(input);
-    const second = prepareOhAdoptionCandidateV1({ ...input,
-      transformations: [...input.transformations].reverse() });
+  test("prepares deterministic immutable review bytes from a host-bound policy", () => {
+    const { hostPolicy, prepareInput } = fixture();
+    const preparer = createOhAdoptionPreparerV1(hostPolicy);
+    const first = preparer.prepare(prepareInput);
+    const second = preparer.prepare({ ...prepareInput,
+      transformations: [...prepareInput.transformations].reverse() });
     expect(second).toEqual(first);
     expect(first.manifest.status).toBe("prepared");
     expect(first.manifest.review.status).toBe("required");
@@ -73,66 +107,144 @@ describe("Oh dependency-closure adoption", () => {
     expect(first.markdown).not.toContain("status: reviewed");
     expect(first.artifactSha256).toBe(createHash("sha256").update(first.markdown).digest("hex"));
     expect(Object.keys(first)).toEqual(["artifactSha256", "candidateSha256", "manifest", "markdown", "v"]);
+    expect(Object.keys(first.manifest.source.binding)).toEqual(["bindingSha256", "v"]);
+    expect("realmId" in first.manifest.source.binding).toBeFalse();
+    expect(Object.isFrozen(first)).toBeTrue();
+    expect(Object.isFrozen(first.manifest)).toBeTrue();
+    expect(Object.isFrozen(first.manifest.source.head)).toBeTrue();
+    expect(Object.isFrozen(first.manifest.source.records)).toBeTrue();
+    expect(Object.isFrozen(first.manifest.source.records[0]!.dependencies)).toBeTrue();
   });
 
-  test("verifies the exact expected binding and head and rejects closure tampering", () => {
-    const { assertion, capsule, evidence, expectedSource, head } = fixture();
-    expect(parseOhDependencyClosureCapsuleV1(capsule, expectedSource)).toEqual(capsule);
-    expect(parseOhDependencyClosureCapsuleV1(capsule, { ...expectedSource,
-      head: { ...head, operationSha256: "d".repeat(64) } })).toBeNull();
-    expect(parseOhDependencyClosureCapsuleV1(capsule, { ...expectedSource,
-      binding: { ...expectedSource.binding, bindingSha256: "e".repeat(64) } })).toBeNull();
-    expect(parseOhDependencyClosureCapsuleV1({ ...capsule,
-      records: [{ ...assertion, value: { state: "reviewed", text: "Tampered." } }, evidence] }, expectedSource)).toBeNull();
-    expect(parseOhDependencyClosureCapsuleV1({ ...capsule, records: [assertion] }, expectedSource)).toBeNull();
-    const extraPayload = { dependencies: [], key: "entity:smuggled", kind: "entity", v: 1,
-      value: { name: "Smuggled" } } as const;
-    const extra = { ...extraPayload, recordSha256: sha(extraPayload) };
-    const extraCapsulePayload = { binding: capsule.binding, head: capsule.head,
-      records: [...capsule.records, extra].sort((left, right) => left.key.localeCompare(right.key)),
-      roots: capsule.roots, v: 1 } as const;
-    expect(parseOhDependencyClosureCapsuleV1({ ...extraCapsulePayload,
-      closureSha256: sha(extraCapsulePayload) }, expectedSource)).toBeNull();
-  });
-
-  test("fails closed on unsafe targets, missing policy, derived-only roots, and projection-shaped inputs", () => {
-    const { capsule, expectedSource, input } = fixture();
-    for (const targetPath of ["../notes/out.md", "/tmp/out.md", "notes/../../out.md", "plans/out.md", "notes/out.txt"]) {
-      expect(() => prepareOhAdoptionCandidateV1({ ...input,
-        destination: { ...input.destination, targetPath } })).toThrow("source capsule or destination");
+  test("binds authority and policy before exposing the narrow preparation facade", () => {
+    const { hostPolicy, prepareInput } = fixture();
+    const mutablePolicy = structuredClone(hostPolicy);
+    const preparer = createOhAdoptionPreparerV1(mutablePolicy);
+    Reflect.set(mutablePolicy.destination, "targetPath", "notes/laundered.md");
+    Reflect.set(mutablePolicy.expectedSource, "authorityId", "attacker.working");
+    Reflect.set(mutablePolicy.conflicts.notes, "0", "Silently replace the destination.");
+    const candidate = preparer.prepare(prepareInput);
+    expect(candidate.manifest.destination.targetPath).toBe("notes/adopted-candidate.md");
+    expect(candidate.manifest.source.authorityId).toBe("sponge.working.primary");
+    expect(candidate.manifest.conflicts.notes).toEqual([
+      "No destination collision was found; review must confirm.",
+    ]);
+    expect(Object.keys(preparer)).toEqual(["prepare"]);
+    for (const forbidden of ["commit", "purge", "store", "write", "expectedSource", "destination"]) {
+      expect(forbidden in preparer).toBeFalse();
     }
-    const { rights: _rights, ...withoutRights } = input;
-    expect(() => prepareOhAdoptionCandidateV1(withoutRights)).toThrow("Invalid Oh adoption");
-    expect(() => prepareOhAdoptionCandidateV1({ ...input,
-      review: { route: "kb.adoption-review", status: "reviewed", v: 1 } })).toThrow("requires rights");
-    const derived = fixture("view");
-    expect(() => prepareOhAdoptionCandidateV1(derived.input)).toThrow("authoritative-root");
-    expect(parseOhDependencyClosureCapsuleV1({ authority: "derived", rows: [], v: 1 }, expectedSource)).toBeNull();
-    expect(parseOhDependencyClosureCapsuleV1({ ...capsule, projection: { rows: [] } }, expectedSource)).toBeNull();
+    expect(() => preparer.prepare({ ...prepareInput,
+      destination: hostPolicy.destination })).toThrow("Invalid Oh adoption preparation input");
+    expect(() => preparer.prepare({ ...prepareInput,
+      expectedSource: hostPolicy.expectedSource })).toThrow("Invalid Oh adoption preparation input");
   });
 
-  test("requires disclosures to reference exact capsule records and escapes review prose", () => {
-    const { input } = fixture();
-    expect(() => prepareOhAdoptionCandidateV1({ ...input,
+  test("uses Oh's verifier for exact binding, head, closure, and records", () => {
+    const { assertion, binding, capsule, evidence, head, hostPolicy, prepareInput } = fixture();
+    const wrongHead = createOhAdoptionPreparerV1({ ...hostPolicy,
+      expectedSource: { ...hostPolicy.expectedSource,
+        head: { ...head, operationSha256: canonicalSha256({ wrong: "head" }) } } });
+    expect(() => wrongHead.prepare(prepareInput)).toThrow("bound authority and head");
+
+    const otherBinding = createOhStoreBindingV1({ profile: OH_WORKING_STORE_PROFILE_V1,
+      realmId: "tenant:test/thread:other", spaceId: "thread:other", v: 1 });
+    const wrongBinding = createOhAdoptionPreparerV1({ ...hostPolicy,
+      expectedSource: { ...hostPolicy.expectedSource, binding: otherBinding } });
+    expect(() => wrongBinding.prepare(prepareInput)).toThrow("bound authority and head");
+
+    const preparer = createOhAdoptionPreparerV1(hostPolicy);
+    expect(() => preparer.prepare({ ...prepareInput, capsule: { ...capsule,
+      records: [{ ...assertion, value: { state: "reviewed", text: "Tampered." } }, evidence] } }))
+      .toThrow("source capsule");
+    expect(() => preparer.prepare({ ...prepareInput,
+      capsule: { ...capsule, records: [assertion] } })).toThrow("source capsule");
+
+    const extra = createKnowledgeGraphRecordV1({ dependencies: [], key: "entity:smuggled",
+      kind: "entity", v: 1, value: { name: "Smuggled" } });
+    const extraPayload = { binding, head,
+      records: [...capsule.records, extra].sort((left, right) => left.key.localeCompare(right.key)),
+      roots: capsule.roots, v: 1 as const };
+    expect(() => preparer.prepare({ ...prepareInput, capsule: { ...extraPayload,
+      closureSha256: canonicalSha256(extraPayload) } })).toThrow("source capsule");
+  });
+
+  test("fails closed on unsafe host policy, canonical sources, and derived-only roots", () => {
+    const { head, hostPolicy } = fixture();
+    for (const targetPath of ["../notes/out.md", "/tmp/out.md", "notes/../../out.md",
+      "plans/out.md", "notes/out.txt", "notes/.hidden.md"]) {
+      expect(() => createOhAdoptionPreparerV1({ ...hostPolicy,
+        destination: { ...hostPolicy.destination, targetPath } })).toThrow("host policy");
+    }
+    const { rights: _rights, ...withoutRights } = hostPolicy;
+    expect(() => createOhAdoptionPreparerV1(withoutRights)).toThrow("host policy");
+    expect(() => createOhAdoptionPreparerV1({ ...hostPolicy,
+      review: { route: "kb.adoption-review", status: "reviewed", v: 1 } })).toThrow("host policy");
+    expect(() => createOhAdoptionPreparerV1({ ...hostPolicy,
+      rights: { ...hostPolicy.rights, purpose: "kb.some-other-purpose" } })).toThrow("host policy");
+
+    const canonicalBinding = createOhStoreBindingV1({ profile: OH_CANONICAL_STORE_PROFILE_V1,
+      realmId: "tenant:test/canonical", spaceId: "canonical", v: 1 });
+    expect(() => createOhAdoptionPreparerV1({ ...hostPolicy,
+      expectedSource: { ...hostPolicy.expectedSource, binding: canonicalBinding, head } }))
+      .toThrow("host policy");
+
+    const derived = fixture("view");
+    expect(() => createOhAdoptionPreparerV1(derived.hostPolicy).prepare(derived.prepareInput))
+      .toThrow("authoritative root");
+    expect(() => createOhAdoptionPreparerV1(hostPolicy).prepare({
+      authority: "derived", rows: [], v: 1,
+    })).toThrow("preparation input");
+  });
+
+  test("requires exact record disclosures and escapes host review prose", () => {
+    const { hostPolicy, prepareInput } = fixture();
+    const preparer = createOhAdoptionPreparerV1(hostPolicy);
+    expect(() => preparer.prepare({ ...prepareInput,
       redactions: [{ id: "redact:one", recordKey: "entity:outside", summary: "Remove", v: 1 }] }))
-      .toThrow("requires rights");
-    const candidate = prepareOhAdoptionCandidateV1({ ...input,
-      conflicts: { notes: ["<script>alert(1)</script>"], status: "requires-resolution", v: 1 } });
+      .toThrow("valid disclosures");
+    const candidate = createOhAdoptionPreparerV1({ ...hostPolicy,
+      conflicts: { notes: ["<script>alert(1)</script>"], status: "requires-resolution", v: 1 } })
+      .prepare(prepareInput);
     expect(candidate.markdown).not.toContain("<script>");
     expect(candidate.markdown).toContain("\\<script\\>");
   });
 
-  test("rejects accessors and non-JSON properties without invoking foreign code", () => {
-    const { expectedSource, input } = fixture();
+  test("rejects accessors, symbols, oversized capsules, and deep input without invoking code", () => {
+    const { capsule, hostPolicy, prepareInput } = fixture();
+    const preparer = createOhAdoptionPreparerV1(hostPolicy);
     let invoked = false;
-    const hostile = { ...input.capsule } as Record<string, unknown>;
-    Object.defineProperty(hostile, "records", { enumerable: true, get: () => {
+    const hostileCapsule = { ...capsule } as Record<string, unknown>;
+    Object.defineProperty(hostileCapsule, "records", { enumerable: true, get: () => {
       invoked = true;
-      return input.capsule.records;
+      return capsule.records;
     } });
-    expect(parseOhDependencyClosureCapsuleV1(hostile, expectedSource)).toBeNull();
+    expect(() => preparer.prepare({ ...prepareInput, capsule: hostileCapsule })).toThrow("preparation input");
     expect(invoked).toBeFalse();
-    expect(parseOhDependencyClosureCapsuleV1({ ...input.capsule,
-      [Symbol("smuggled")]: true }, expectedSource)).toBeNull();
+    expect(() => preparer.prepare({ ...prepareInput,
+      [Symbol("smuggled")]: true })).toThrow("preparation input");
+    expect(() => preparer.prepare({ ...prepareInput,
+      capsule: { ...capsule, records: Array.from({ length: 1_025 }, () => capsule.records[0]) } }))
+      .toThrow("preparation input");
+
+    let deep: unknown = "leaf";
+    for (let index = 0; index < 130; index += 1) deep = { next: deep };
+    expect(() => preparer.prepare({ ...prepareInput, redactions: deep })).toThrow("preparation input");
+
+    const hostilePolicy = { ...hostPolicy } as Record<string, unknown>;
+    Object.defineProperty(hostilePolicy, "rights", { enumerable: true, get: () => {
+      invoked = true;
+      return hostPolicy.rights;
+    } });
+    expect(() => createOhAdoptionPreparerV1(hostilePolicy)).toThrow("host policy");
+    expect(invoked).toBeFalse();
+  });
+
+  test("detaches candidate provenance from mutable capsule-owned arrays", () => {
+    const { capsule, hostPolicy, prepareInput } = fixture();
+    const candidate = createOhAdoptionPreparerV1(hostPolicy).prepare(prepareInput);
+    const original = candidate.manifest.source.records[0]!.dependencies;
+    (capsule.records[0]!.dependencies as string[]).push("entity:late-mutation");
+    expect(candidate.manifest.source.records[0]!.dependencies).toEqual(original);
+    expect(candidate.manifest.source.records[0]!.dependencies).not.toContain("entity:late-mutation");
   });
 });

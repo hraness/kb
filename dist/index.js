@@ -248,37 +248,20 @@ import"./index-1xxnjn0d.js";
 // src/oh-adoption.ts
 import { createHash } from "crypto";
 import { posix } from "path";
-var SHA256_PATTERN = /^[0-9a-f]{64}$/u;
+import { canonicalJson, canonicalSha256 } from "@hraness/oh";
+import {
+  parseOhHeadV1,
+  parseOhStoreBindingV1,
+  verifyOhDependencyClosureAgainstV1
+} from "@hraness/oh/store";
 var CODE_PATTERN = /^[a-z][a-z0-9]*(?:[._:/-][a-z0-9]+)*$/u;
 var RECORD_KEY_PATTERN = /^[a-z][a-z0-9]*(?:[._:/-][a-z0-9]+)*$/u;
 var MAX_CAPSULE_BYTES = 16 * 1024 * 1024;
 var MAX_RECORDS = 1024;
 var MAX_ROOTS = 256;
-var MAX_RECORD_BYTES = 1024 * 1024;
-var MAX_DEPENDENCIES = 4096;
 var MAX_TEXT_BYTES = 4096;
 var MAX_STRUCTURAL_NODES = 262144;
 var MAX_STRUCTURAL_DEPTH = 128;
-var OH_RECORD_KINDS = new Set([
-  "activity",
-  "assertion",
-  "context",
-  "dependency-manifest",
-  "edition",
-  "entity",
-  "evidence",
-  "identity-operation",
-  "inquiry",
-  "inquiry-event",
-  "review-decision",
-  "rights-decision",
-  "schema",
-  "shape",
-  "statement",
-  "type-membership",
-  "view",
-  "vocabulary"
-]);
 function isRecord(value) {
   if (typeof value !== "object" || value === null || Array.isArray(value))
     return false;
@@ -307,75 +290,24 @@ function validUnicode(value) {
   }
   return true;
 }
-function canonicalJson(value, path = "$", ancestors = new Set) {
-  if (value === null || typeof value === "boolean")
-    return JSON.stringify(value);
-  if (typeof value === "string") {
-    if (!validUnicode(value))
-      throw new TypeError(`${path} contains invalid Unicode.`);
-    return JSON.stringify(value);
-  }
-  if (typeof value === "number") {
-    if (!Number.isFinite(value) || Object.is(value, -0))
-      throw new TypeError(`${path} is not a canonical number.`);
-    return JSON.stringify(value);
-  }
-  if (typeof value !== "object" || value === null || ancestors.has(value)) {
-    throw new TypeError(`${path} is not an acyclic JSON value.`);
-  }
-  ancestors.add(value);
-  try {
-    if (Array.isArray(value)) {
-      const keys2 = Reflect.ownKeys(value);
-      if (keys2.some((key) => key !== "length" && (typeof key !== "string" || !/^(?:0|[1-9][0-9]*)$/u.test(key) || Number(key) >= value.length))) {
-        throw new TypeError(`${path} has non-index array properties.`);
-      }
-      const output = [];
-      for (let index = 0;index < value.length; index += 1) {
-        if (!Object.hasOwn(value, index))
-          throw new TypeError(`${path} contains a sparse array.`);
-        const descriptor = Object.getOwnPropertyDescriptor(value, String(index));
-        if (descriptor === undefined || !descriptor.enumerable || !("value" in descriptor)) {
-          throw new TypeError(`${path}[${index}] is not an enumerable data property.`);
-        }
-        output.push(canonicalJson(descriptor.value, `${path}[${index}]`, ancestors));
-      }
-      return `[${output.join(",")}]`;
-    }
-    if (!isRecord(value))
-      throw new TypeError(`${path} is not a plain JSON object.`);
-    const ownKeys = Reflect.ownKeys(value);
-    if (ownKeys.some((key) => typeof key !== "string"))
-      throw new TypeError(`${path} has symbol properties.`);
-    const keys = ownKeys;
-    keys.sort();
-    return `{${keys.map((key) => {
-      if (!validUnicode(key))
-        throw new TypeError(`${path} contains an invalid key.`);
-      const descriptor = Object.getOwnPropertyDescriptor(value, key);
-      if (descriptor === undefined || !descriptor.enumerable || !("value" in descriptor)) {
-        throw new TypeError(`${path}.${key} is not an enumerable data property.`);
-      }
-      return `${JSON.stringify(key)}:${canonicalJson(descriptor.value, `${path}.${key}`, ancestors)}`;
-    }).join(",")}}`;
-  } finally {
-    ancestors.delete(value);
-  }
-}
-function digest(value) {
-  return createHash("sha256").update(canonicalJson(value)).digest("hex");
-}
 function structurallyBounded(value) {
   const pending = [[value, 0]];
   const seen = new Set;
   let nodes = 0;
+  let scalarBytes = 0;
   while (pending.length > 0) {
     const [candidate, depth] = pending.pop();
     nodes += 1;
-    if (nodes > MAX_STRUCTURAL_NODES || depth > MAX_STRUCTURAL_DEPTH)
+    scalarBytes += 4;
+    if (nodes > MAX_STRUCTURAL_NODES || depth > MAX_STRUCTURAL_DEPTH || scalarBytes > MAX_CAPSULE_BYTES)
       return false;
-    if (typeof candidate === "string" && Buffer.byteLength(candidate, "utf8") > MAX_CAPSULE_BYTES)
-      return false;
+    if (typeof candidate === "string") {
+      if (!validUnicode(candidate))
+        return false;
+      scalarBytes += Buffer.byteLength(candidate, "utf8");
+      if (scalarBytes > MAX_CAPSULE_BYTES)
+        return false;
+    }
     if (typeof candidate !== "object" || candidate === null)
       continue;
     if (seen.has(candidate))
@@ -399,7 +331,10 @@ function structurallyBounded(value) {
         return false;
       for (const key of keys) {
         const descriptor = Object.getOwnPropertyDescriptor(candidate, key);
-        if (descriptor === undefined || !descriptor.enumerable || !("value" in descriptor))
+        if (descriptor === undefined || !descriptor.enumerable || !("value" in descriptor) || !validUnicode(key))
+          return false;
+        scalarBytes += Buffer.byteLength(key, "utf8");
+        if (scalarBytes > MAX_CAPSULE_BYTES)
           return false;
         pending.push([descriptor.value, depth + 1]);
       }
@@ -408,8 +343,17 @@ function structurallyBounded(value) {
   }
   return true;
 }
-function sha(value) {
-  return typeof value === "string" && SHA256_PATTERN.test(value) ? value : null;
+function immutableClone(value) {
+  if (Array.isArray(value)) {
+    return Object.freeze(value.map((item) => immutableClone(item)));
+  }
+  if (isRecord(value)) {
+    const clone = {};
+    for (const key of Object.keys(value))
+      clone[key] = immutableClone(value[key]);
+    return Object.freeze(clone);
+  }
+  return value;
 }
 function code(value, maximum = 256) {
   return typeof value === "string" && value.length <= maximum && CODE_PATTERN.test(value) ? value : null;
@@ -420,150 +364,18 @@ function recordKey(value) {
 function orderedUnique(values) {
   return values.every((value, index) => index === 0 || values[index - 1] < value);
 }
-function parseProfile(value) {
-  if (!isRecord(value) || !exactKeys(value, [
-    "applicationProfileSha256",
-    "capabilities",
-    "profileId",
-    "profileKind",
-    "profileSha256",
-    "v"
-  ]) || value.v !== 1 || value.profileKind !== "working" || !isRecord(value.capabilities) || !exactKeys(value.capabilities, [
-    "changesSince",
-    "dependencyClosureExport",
-    "exactSnapshots",
-    "operationReplication",
-    "semanticBundleCommit",
-    "v",
-    "wholeSpacePurge"
-  ]))
+function singleLine(value) {
+  if (typeof value !== "string" || value.length < 1 || value.normalize("NFC") !== value || !validUnicode(value) || /[\u0000-\u001f\u007f-\u009f]/u.test(value) || Buffer.byteLength(value, "utf8") > MAX_TEXT_BYTES)
     return null;
-  const capabilities = value.capabilities;
-  if (capabilities.changesSince !== true || capabilities.dependencyClosureExport !== true || capabilities.exactSnapshots !== true || capabilities.operationReplication !== false || capabilities.semanticBundleCommit !== true || capabilities.v !== 1 || capabilities.wholeSpacePurge !== true)
-    return null;
-  const applicationProfileSha256 = value.applicationProfileSha256 === null ? null : sha(value.applicationProfileSha256);
-  const profileId = code(value.profileId);
-  const profileSha256 = sha(value.profileSha256);
-  if (value.applicationProfileSha256 !== null && applicationProfileSha256 === null || profileId === null || profileSha256 === null)
-    return null;
-  const payload = { applicationProfileSha256, capabilities: {
-    changesSince: true,
-    dependencyClosureExport: true,
-    exactSnapshots: true,
-    operationReplication: false,
-    semanticBundleCommit: true,
-    v: 1,
-    wholeSpacePurge: true
-  }, profileId, profileKind: "working", v: 1 };
-  return digest(payload) === profileSha256 ? { ...payload, profileSha256 } : null;
-}
-function parseBinding(value) {
-  if (!isRecord(value) || !exactKeys(value, [
-    "bindingSha256",
-    "contractSha256",
-    "profile",
-    "realmId",
-    "spaceId",
-    "v"
-  ]) || value.v !== 1)
-    return null;
-  const bindingSha256 = sha(value.bindingSha256);
-  const contractSha256 = sha(value.contractSha256);
-  const profile = parseProfile(value.profile);
-  const realmId = code(value.realmId);
-  const spaceId = code(value.spaceId);
-  if (bindingSha256 === null || contractSha256 === null || profile === null || realmId === null || spaceId === null) {
-    return null;
-  }
-  const payload = { contractSha256, profile, realmId, spaceId, v: 1 };
-  return digest(payload) === bindingSha256 ? { ...payload, bindingSha256 } : null;
-}
-function parseHead(value) {
-  if (!isRecord(value) || !exactKeys(value, [
-    "generation",
-    "graphRevisionSha256",
-    "operationSha256",
-    "recordsSha256",
-    "sequence",
-    "v"
-  ]) || value.v !== 1)
-    return null;
-  const generation = Number.isSafeInteger(value.generation) && value.generation >= 0 ? value.generation : null;
-  const sequence = Number.isSafeInteger(value.sequence) && value.sequence >= 0 ? value.sequence : null;
-  const graphRevisionSha256 = value.graphRevisionSha256 === null ? null : sha(value.graphRevisionSha256);
-  const operationSha256 = value.operationSha256 === null ? null : sha(value.operationSha256);
-  const recordsSha256 = sha(value.recordsSha256);
-  return generation !== null && generation === sequence && recordsSha256 !== null && (value.graphRevisionSha256 === null || graphRevisionSha256 !== null) && (value.operationSha256 === null || operationSha256 !== null) && sequence === 0 === (operationSha256 === null) && sequence === 0 === (graphRevisionSha256 === null) ? { generation, graphRevisionSha256, operationSha256, recordsSha256, sequence, v: 1 } : null;
-}
-function parseRecord(value) {
-  if (!isRecord(value) || !exactKeys(value, ["dependencies", "key", "kind", "recordSha256", "v", "value"]) || value.v !== 1 || !Array.isArray(value.dependencies) || value.dependencies.length > MAX_DEPENDENCIES || !OH_RECORD_KINDS.has(value.kind) || !structurallyBounded(value.value))
-    return null;
-  const key = recordKey(value.key);
-  const kind = typeof value.kind === "string" ? value.kind : null;
-  const recordSha256 = sha(value.recordSha256);
-  const dependencies = value.dependencies.map(recordKey);
-  if (key === null || kind === null || recordSha256 === null || dependencies.some((item) => item === null) || !orderedUnique(dependencies) || dependencies.includes(key))
-    return null;
-  const payload = {
-    dependencies,
-    key,
-    kind,
-    v: 1,
-    value: value.value
-  };
-  const encoded = canonicalJson(payload.value);
-  return Buffer.byteLength(encoded, "utf8") <= MAX_RECORD_BYTES && digest(payload) === recordSha256 ? { ...payload, recordSha256 } : null;
+  return value;
 }
 function parseExpectedSource(value) {
   if (!isRecord(value) || !exactKeys(value, ["authorityId", "binding", "head", "v"]) || value.v !== 1)
     return null;
   const authorityId = code(value.authorityId);
-  const binding = parseBinding(value.binding);
-  const head = parseHead(value.head);
-  return authorityId !== null && binding !== null && head !== null ? { authorityId, binding, head, v: 1 } : null;
-}
-function parseOhDependencyClosureCapsuleV1(value, expectedSource) {
-  try {
-    if (!structurallyBounded(value) || Buffer.byteLength(canonicalJson(value), "utf8") > MAX_CAPSULE_BYTES || !isRecord(value) || !exactKeys(value, ["binding", "closureSha256", "head", "records", "roots", "v"]) || value.v !== 1 || !Array.isArray(value.records) || !Array.isArray(value.roots) || value.records.length < 1 || value.records.length > MAX_RECORDS || value.roots.length < 1 || value.roots.length > MAX_ROOTS)
-      return null;
-    const expected = parseExpectedSource(expectedSource);
-    const binding = parseBinding(value.binding);
-    const head = parseHead(value.head);
-    const closureSha256 = sha(value.closureSha256);
-    const roots = value.roots.map(recordKey);
-    const records = value.records.map(parseRecord);
-    if (expected === null || binding === null || head === null || closureSha256 === null || roots.some((root) => root === null) || !orderedUnique(roots) || records.some((record) => record === null))
-      return null;
-    const parsedRecords = records;
-    if (!orderedUnique(parsedRecords.map((record) => record.key)))
-      return null;
-    if (canonicalJson(binding) !== canonicalJson(expected.binding) || canonicalJson(head) !== canonicalJson(expected.head))
-      return null;
-    const byKey = new Map(parsedRecords.map((record) => [record.key, record]));
-    const reachable = new Set;
-    const pending = [...roots];
-    while (pending.length > 0) {
-      const key = pending.pop();
-      if (reachable.has(key))
-        continue;
-      const record = byKey.get(key);
-      if (record === undefined)
-        return null;
-      reachable.add(key);
-      pending.push(...record.dependencies);
-    }
-    if (reachable.size !== parsedRecords.length)
-      return null;
-    const payload = { binding, head, records: parsedRecords, roots, v: 1 };
-    return digest(payload) === closureSha256 ? { ...payload, closureSha256 } : null;
-  } catch {
-    return null;
-  }
-}
-function singleLine(value) {
-  if (typeof value !== "string" || value.length < 1 || value.normalize("NFC") !== value || !validUnicode(value) || /[\u0000-\u001f\u007f-\u009f]/u.test(value) || Buffer.byteLength(value, "utf8") > MAX_TEXT_BYTES)
-    return null;
-  return value;
+  const binding = parseOhStoreBindingV1(value.binding);
+  const head = parseOhHeadV1(value.head);
+  return authorityId !== null && binding !== null && binding.profile.profileKind === "working" && head !== null ? immutableClone({ authorityId, binding, head, v: 1 }) : null;
 }
 function parseDestination(value) {
   if (!isRecord(value) || !exactKeys(value, ["purpose", "targetPath", "v"]) || value.v !== 1)
@@ -594,6 +406,29 @@ function parseConflicts(value) {
     return null;
   const sorted = [...notes].sort();
   return orderedUnique(sorted) ? { notes: sorted, status: value.status, v: 1 } : null;
+}
+function parseHostPolicy(value) {
+  if (!structurallyBounded(value) || !isRecord(value) || !exactKeys(value, ["conflicts", "destination", "expectedSource", "review", "rights", "v"]) || value.v !== 1)
+    return null;
+  const destination = parseDestination(value.destination);
+  const expectedSource = parseExpectedSource(value.expectedSource);
+  const conflicts = parseConflicts(value.conflicts);
+  const review = parseReview(value.review);
+  const rights = destination === null ? null : parseRights(value.rights, destination.purpose);
+  return destination !== null && expectedSource !== null && conflicts !== null && review !== null && rights !== null ? immutableClone({ conflicts, destination, expectedSource, review, rights, v: 1 }) : null;
+}
+function verifyCapsule(value, expectedSource) {
+  try {
+    if (!structurallyBounded(value) || !isRecord(value) || !exactKeys(value, ["binding", "closureSha256", "head", "records", "roots", "v"]) || value.v !== 1 || !Array.isArray(value.records) || !Array.isArray(value.roots) || value.records.length < 1 || value.records.length > MAX_RECORDS || value.roots.length < 1 || value.roots.length > MAX_ROOTS || Buffer.byteLength(canonicalJson(value), "utf8") > MAX_CAPSULE_BYTES)
+      return null;
+    const verified = verifyOhDependencyClosureAgainstV1(value, {
+      binding: expectedSource.binding,
+      head: expectedSource.head
+    });
+    return verified.ok && verified.closure.binding.profile.profileKind === "working" ? verified.closure : null;
+  } catch {
+    return null;
+  }
 }
 function parseDisclosures(value, keys) {
   if (!Array.isArray(value) || value.length > 256)
@@ -655,39 +490,23 @@ function renderMarkdown(manifest, candidateSha256) {
 `)}
 `;
 }
-function prepareOhAdoptionCandidateV1(value) {
-  if (!isRecord(value) || !exactKeys(value, [
-    "capsule",
-    "conflicts",
-    "destination",
-    "expectedSource",
-    "redactions",
-    "review",
-    "rights",
-    "transformations",
-    "v"
-  ]) || value.v !== 1) {
-    throw new TypeError("Invalid Oh adoption candidate input.");
+function prepareWithPolicy(value, policy) {
+  if (!structurallyBounded(value) || !isRecord(value) || !exactKeys(value, ["capsule", "redactions", "transformations", "v"]) || value.v !== 1) {
+    throw new TypeError("Invalid Oh adoption preparation input.");
   }
-  const expectedSource = parseExpectedSource(value.expectedSource);
-  const capsule = parseOhDependencyClosureCapsuleV1(value.capsule, value.expectedSource);
-  const destination = parseDestination(value.destination);
-  if (expectedSource === null || capsule === null || destination === null) {
-    throw new TypeError("The source capsule or destination is invalid.");
-  }
-  const rights = parseRights(value.rights, destination.purpose);
-  const review = parseReview(value.review);
-  const conflicts = parseConflicts(value.conflicts);
+  const capsule = verifyCapsule(value.capsule, policy.expectedSource);
+  if (capsule === null)
+    throw new TypeError("The source capsule is invalid for the bound authority and head.");
   const recordKeys = new Set(capsule.records.map((record) => record.key));
   const transformations = parseDisclosures(value.transformations, recordKeys);
   const redactions = parseDisclosures(value.redactions, recordKeys);
   const roots = new Set(capsule.roots);
-  if (rights === null || review === null || conflicts === null || transformations === null || redactions === null || capsule.records.filter((record) => roots.has(record.key)).every((record) => record.kind === "view")) {
-    throw new TypeError("Adoption requires rights, review, conflict, and authoritative-root declarations.");
+  if (transformations === null || redactions === null || capsule.records.filter((record) => roots.has(record.key)).every((record) => record.kind === "view")) {
+    throw new TypeError("Adoption requires valid disclosures and an authoritative root.");
   }
   const source = {
-    authorityId: expectedSource.authorityId,
-    binding: capsule.binding,
+    authorityId: policy.expectedSource.authorityId,
+    binding: { bindingSha256: capsule.binding.bindingSha256, v: 1 },
     closureSha256: capsule.closureSha256,
     head: capsule.head,
     records: capsule.records.map((record) => ({
@@ -701,29 +520,35 @@ function prepareOhAdoptionCandidateV1(value) {
     v: 1
   };
   const manifest = {
-    conflicts,
-    destination,
+    conflicts: policy.conflicts,
+    destination: policy.destination,
     format: "hraness.kb.oh-adoption-candidate.v1",
     redactions,
-    review,
-    rights,
+    review: policy.review,
+    rights: policy.rights,
     source,
     status: "prepared",
     transformations,
     v: 1
   };
-  const candidateSha256 = digest(manifest);
+  const candidateSha256 = canonicalSha256(manifest);
   const markdown = renderMarkdown(manifest, candidateSha256);
   if (Buffer.byteLength(markdown, "utf8") > MAX_CAPSULE_BYTES) {
     throw new RangeError("The adoption candidate exceeds its Markdown byte limit.");
   }
-  return {
+  return immutableClone({
     artifactSha256: createHash("sha256").update(markdown).digest("hex"),
     candidateSha256,
     manifest,
     markdown,
     v: 1
-  };
+  });
+}
+function createOhAdoptionPreparerV1(value) {
+  const policy = parseHostPolicy(value);
+  if (policy === null)
+    throw new TypeError("Invalid Oh adoption host policy.");
+  return Object.freeze({ prepare: (input) => prepareWithPolicy(input, policy) });
 }
 export {
   workflowFromUnknown,
@@ -762,11 +587,9 @@ export {
   readVaultNotes,
   queryVault,
   qmdIndexerVersion,
-  prepareOhAdoptionCandidateV1,
   planStatuses,
   percolateVault,
   parseRetrievalEvaluationCorpus,
-  parseOhDependencyClosureCapsuleV1,
   parseNote,
   parseLocalAttachmentReferences,
   parseGitHistoryOutput,
@@ -812,6 +635,7 @@ export {
   createVerifiedEmbeddingModelLease,
   createSyntheticRankFusionFixture,
   createRepresentativeRetrievalFixture,
+  createOhAdoptionPreparerV1,
   createNote,
   createConceptNote,
   compareAgentGuideAudits,

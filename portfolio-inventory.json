@@ -8,10 +8,17 @@
       "name": "@hraness/kb",
       "path": ".",
       "visibility": "public",
-      "version": "0.17.3"
+      "version": "0.18.0"
     }
   ],
   "dependencies": [
+    {
+      "from": "@hraness/kb",
+      "scope": "runtime",
+      "specifier": "github:hraness/oh#v0.2.0",
+      "to": "@hraness/oh",
+      "sourceRepository": "hraness/oh"
+    },
     {
       "from": "@hraness/kb",
       "scope": "runtime",
