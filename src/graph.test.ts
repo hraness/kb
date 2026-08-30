@@ -4,6 +4,7 @@ import {
   analyzeVault,
   catalogEnd,
   catalogStart,
+  isCanonicalRelationPredicate,
   lookupNote,
   metadataValueFromUnknown,
   parseNote,
@@ -14,6 +15,15 @@ import {
 } from "./graph.js";
 
 describe("note parsing", () => {
+  test("shares one exact canonical predicate language with authoring", () => {
+    expect(isCanonicalRelationPredicate("evidenced-by")).toBe(true);
+    expect(isCanonicalRelationPredicate("related-to")).toBe(true);
+    expect(isCanonicalRelationPredicate("custom-predicate-2")).toBe(true);
+    expect(isCanonicalRelationPredicate("Related-To")).toBe(false);
+    expect(isCanonicalRelationPredicate("related_to")).toBe(false);
+    expect(isCanonicalRelationPredicate("e\u0301vidence")).toBe(false);
+  });
+
   test("reads Obsidian properties and ignores links in code and comments", () => {
     const note = parseNote("notes/context.md", [
       "---",

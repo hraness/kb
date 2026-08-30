@@ -60,6 +60,7 @@ const importSpecifiers = [
   "@hraness/kb/workflows/plan-radar",
 ];
 const requiredNamedExports = {
+  "@hraness/kb": ["createOhAdoptionPreparerV1"],
   "@hraness/kb/clip/bundle-reader": ["readCaptureBundle", "verifyCaptureBundle"],
   "@hraness/kb/clip/jobs": ["createCaptureJob", "openCaptureJobStore", "updateCaptureJob"],
   "@hraness/kb/clip/refresh": ["diffCaptureBundle"],
@@ -625,6 +626,7 @@ for (const specifier of ${JSON.stringify(importSpecifiers)}) {
   const consumerSource = `${importSpecifiers.map((specifier, index) =>
     `import * as surface${String(index)} from ${JSON.stringify(specifier)};`
   ).join("\n")}
+import { createOhAdoptionPreparerV1 } from "@hraness/kb";
 import { readCaptureBundle, verifyCaptureBundle } from "@hraness/kb/clip/bundle-reader";
 import { createCaptureJob, openCaptureJobStore, updateCaptureJob } from "@hraness/kb/clip/jobs";
 import { diffCaptureBundle } from "@hraness/kb/clip/refresh";
@@ -644,6 +646,7 @@ const registry = parsePortfolioRegistry({
 const identity = parseQualifiedDocumentUri("kb://hraness/kb/note-id");
 const projected = projectUntrustedJson([{ title: "stored source" }]);
 void [
+  createOhAdoptionPreparerV1,
   readCaptureBundle, verifyCaptureBundle,
   createCaptureJob, openCaptureJobStore, updateCaptureJob,
   diffCaptureBundle, openKnowledgePortfolio, prioritizeSearchHits,

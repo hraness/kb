@@ -21,6 +21,40 @@ The vault is an ordinary directory of Obsidian-compatible Markdown, suitable for
 
 The boundaries separate what a source said from what the vault currently concludes. They are conventions expressed in Markdown and agent guides, not proprietary file formats.
 
+## Setup is an approved instruction workflow
+
+The packaged Agent Skill routes setup and evolution requests before it prepares
+a runtime. It can inspect an explicitly proposed location, interview the user,
+and present exact read and write surfaces without installing KB, creating a
+vault, building a QMD index, or accessing an ambient account. Only the approved
+proposal may scaffold files. A changed path, skill, repository, account, or
+integration requires renewed approval.
+
+A vault may add zero to three companion skills for recurring rituals whose
+inputs, authority, durable output, and failure behavior need a distinct
+contract. These are inert instruction files. They do not form a runtime plugin
+registry, execute vault metadata, inherit account authority, or couple the
+vault to application code. An exact repeated scaffold is a no-op; divergent
+content, path escape, symbolic links, partial failure, and unapproved external
+surfaces stop the workflow.
+
+The repository models these transitions with fake capabilities and verifies
+preapproval zero mutation, exact approved writes, no-op repeats, renewed
+approval, divergence, confinement, symbolic links, partial failure, and
+external-surface rejection. This is a tested contract example, not proof that
+every agent or host integration complies.
+
+This interview-first setup and bounded extension model builds on Frank Chen's
+public notes about [designing a personal knowledge base with an
+agent](https://gist.github.com/fxchen/773397095d7a6bffda621e4237da0da9)
+and [extending it with skills](https://gist.github.com/fxchen/09cb410b22c9c5256d80243ee925b57e).
+
+KB ships no `kb_role` field, lifecycle resolver or API, lifecycle CLI,
+compatibility diagnostic, or metadata migration. A frozen value gate must show
+that those surfaces improve deterministic agent decisions before they are
+introduced. Current and historical plan routing remains derived from existing
+note type, path, and status.
+
 ## Repository instructions and context have different authority
 
 An `AGENTS.md` file is normative, path-scoped, and always loaded before an
@@ -161,6 +195,12 @@ without `.md`. The source note is the implicit subject. Different agents can
 therefore edit relationships on different notes without contending on a central
 ontology or edge file.
 
+The recommended vocabulary covers common KB claims: `synthesizes`,
+`evidenced-by`, `informed-by`, `supersedes`, and `contradicts`. It is advisory,
+not a closed ontology. A vault may author another canonical predicate when its
+prose and evidence define the claim. Note type, directory, chronology, shared
+tags, and semantic similarity do not choose a predicate.
+
 Four rules keep the result honest:
 
 1. Backlinks and inverse relationships are derived, never written into source
@@ -170,8 +210,10 @@ Four rules keep the result honest:
 3. A title, alias, recurring tag, shared neighborhood, or semantic match is a
    candidate. It becomes an edge only after an agent or person reviews the
    evidence and authors the assertion.
-4. Transitive paths and other inferred relationships remain query results.
-   They never silently become Markdown facts.
+4. Reciprocal, inverse, transitive, and similarity-derived relationships
+   remain query results. They never silently become Markdown facts. External or
+   unclassified material remains unresolved until evidence supports an authored
+   assertion.
 
 This makes inbound and outbound counts, backlinks, relationships, and orphans
 reproducible. It also prevents reciprocal sections and generated catalogs from
@@ -196,6 +238,15 @@ without concept notes, unconnected shared-concept neighborhoods, exact
 unlinked mentions, and relationship-hygiene findings. The output cites the
 authored evidence that caused each candidate. A person or agent decides whether
 to run `kb note create` or `kb relation add`.
+
+Percolation Result V2 emits missing relationships as unordered endpoint pairs
+with a required predicate. It does not present either endpoint as the source,
+draw a directional edge, or suggest `related-to`. The reviewer reads both
+notes, then authors a directed assertion only when the evidence determines its
+owner, target, and predicate. Explicit V1 parsers preserve historical
+unversioned results for one deprecation cycle; the default parser accepts V2
+only, and no compatibility path guesses a semantic upgrade. V1 remains
+available throughout 0.18.x and is not removed before 0.19.0.
 
 This named-command surface is deliberate. Common graph questions receive a
 small typed contract, deterministic ordering, and an operation-specific bound
