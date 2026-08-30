@@ -1547,7 +1547,8 @@ describe("kb vault commands", () => {
         limit: 25,
         schemaVersion: 2,
       });
-      expect(parsePercolationCliOutput(percolation)).toEqual(percolation);
+      expect(JSON.stringify(parsePercolationCliOutput(percolation)))
+        .toBe(JSON.stringify(percolation));
       expect(arrayProperty(percolation, "candidates")).toContainEqual(expect.objectContaining({
         kind: "missing-concept",
         tag: "agent-memory",
