@@ -217,6 +217,30 @@ and avoids a repository-wide merge hotspot. A future cache may live outside the
 vault only if measurements justify it; it must be content-addressed by source
 and analysis version and rebuild on any mismatch.
 
+## Oh adoption stops at a review candidate
+
+`createOhAdoptionPreparerV1` captures, in trusted host code, one exact Oh
+working-authority binding and head plus the destination purpose and proposed
+`notes/` path, a purpose-matched rights decision, the required review route,
+and the conflict assessment. Its returned facade accepts only an Oh dependency
+closure and explicit transformation or redaction disclosures. A model cannot
+replace the source authority, destination, rights, review, or conflict policy
+inside a preparation call.
+
+KB delegates contract, binding, head, record, and exact dependency-closure
+verification to the immutable `@hraness/oh` v0.2.0 store API. KB keeps lower
+local byte, record, root, depth, and node ceilings and rejects accessors,
+symbols, cycles, canonical-authority bindings, tampered or incomplete records,
+over-complete closures, wrong bindings or heads, and derived-only roots. The
+review artifact records the source authority and binding digest, full head,
+closure roots, and record digests without copying source realm or space IDs.
+
+The returned status is always `prepared`. The function does not open a vault,
+write a note, invoke Git, import an operation chain or database, retain a
+projection, or write to canonical Oh. A reviewer must inspect the candidate and
+author destination Markdown through KB's existing revision-checked write path;
+the source's proposed assertion is never relabeled as reviewed knowledge.
+
 ## Catalog ownership is explicit
 
 A managed vault gives one marked region in `index.md` to the tool. `kb refresh`

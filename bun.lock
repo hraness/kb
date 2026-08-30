@@ -5,6 +5,7 @@
     "": {
       "name": "@hraness/kb",
       "dependencies": {
+        "@hraness/oh": "github:hraness/oh#v0.2.0",
         "@steipete/sweet-cookie": "github:hraness/sweet-cookie#v0.4.2",
         "@tobilu/qmd": "git+https://github.com/hraness/qmd.git#aa993dceb3ef8cfb71d470554ca437570f5a2b3c",
         "agent-browser": "0.32.3",
@@ -21,6 +22,8 @@
   },
   "packages": {
     "@hono/node-server": ["@hono/node-server@1.19.17", "", { "peerDependencies": { "hono": "^4" } }, "sha512-dSneS5qhiauZWGDCeK4o695Xd9nUNjviSZCMQrj10eetr8Uln1ucn6bbphOM6UynAMMtNIzZNSpL9vnASJwrPQ=="],
+
+    "@hraness/oh": ["@hraness/oh@github:hraness/oh#89fb133", { "peerDependencies": { "@libsql/client": ">=0.17.4 <1", "@suss/datalog": "0.20.0", "@tobilu/qmd": "2.5.3" }, "optionalPeers": ["@libsql/client", "@suss/datalog", "@tobilu/qmd"], "bin": { "oh": "./dist/cli.js" } }, "hraness-oh-89fb133", "sha512-huk8DqOAhnwMm4QAOU+JiyxfdfUF0pZth1jnzOkOmZQe6NqZjR+LXAe2swIVdBMn1hCHb47+c7IqFH3QUTBWTQ=="],
 
     "@huggingface/jinja": ["@huggingface/jinja@0.5.9", "", {}, "sha512-uWTG+l3VJRsl7EXxYizuL3P+cCPoc3cRqbWWRcQN0FhejRfbdq0RNhCmbY/YDtnTcz9icdLYuLDjsnz4d8JMuw=="],
 

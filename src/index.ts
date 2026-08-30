@@ -9,6 +9,7 @@ export * from "./git.js";
 export * from "./graph.js";
 export * from "./init.js";
 export * from "./navigation.js";
+export * from "./oh-adoption.js";
 export * from "./percolate.js";
 export * from "./query.js";
 export * from "./repository-memory.js";
