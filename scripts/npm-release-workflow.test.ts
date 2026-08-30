@@ -10,7 +10,10 @@ import {
   inspectPackageArtifact,
   type PackageArtifactInventory,
 } from "./package-artifact.js";
-import { verifyNpmPackageIdentity } from "./npm-package-identity.js";
+import {
+  requiresOhAdoptionPreparerExport,
+  verifyNpmPackageIdentity,
+} from "./npm-package-identity.js";
 
 const stageWorkflowUrl = new URL("../.github/workflows/npm-stage.yml", import.meta.url);
 const releaseWorkflowUrl = new URL("../.github/workflows/release.yml", import.meta.url);
@@ -40,6 +43,32 @@ function sha1(bytes: Uint8Array): string {
 function integrity(bytes: Uint8Array): string {
   return `sha512-${createHash("sha512").update(bytes).digest("base64")}`;
 }
+
+describe("package smoke version policy", () => {
+  test("requires the Oh adoption preparer only from its stable introduction", () => {
+    expect(requiresOhAdoptionPreparerExport("0.17.1")).toBe(false);
+    expect(requiresOhAdoptionPreparerExport("0.17.3")).toBe(false);
+    expect(requiresOhAdoptionPreparerExport("0.18.0")).toBe(true);
+    expect(requiresOhAdoptionPreparerExport("0.18.1")).toBe(true);
+    expect(requiresOhAdoptionPreparerExport("1.0.0")).toBe(true);
+  });
+
+  test("rejects noncanonical or non-stable package versions", () => {
+    for (const version of [
+      "",
+      "v0.18.0",
+      "0.18",
+      "0.18.0-beta.1",
+      "00.18.0",
+      "0.018.0",
+      "0.18.00",
+    ]) {
+      expect(() => requiresOhAdoptionPreparerExport(version)).toThrow(
+        "canonical stable semantic version",
+      );
+    }
+  });
+});
 
 function packJson(
   bytes: Uint8Array,
@@ -409,8 +438,8 @@ describe("canonical npm package identity", () => {
         sourcePackJson,
       });
       const verified = await verifyNpmPackageIdentity(validInput);
-      expect(verified.fileCount).toBe(201);
-      expect(verified.unpackedBytes).toBe(4_895_276);
+      expect(verified.fileCount).toBe(204);
+      expect(verified.unpackedBytes).toBe(4_974_382);
       expect(verified.sourceArchiveSha512).not.toBe(verified.registryArchiveSha512);
 
       const originalTar = gunzipSync(sourceBytes);

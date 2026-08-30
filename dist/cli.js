@@ -13,7 +13,7 @@ import {
   loadPortfolioRegistry,
   openKnowledgePortfolio,
   snapshotPortfolioRegistry
-} from "./index-jsmvyyvf.js";
+} from "./index-ey46z1zf.js";
 import {
   diffCaptureBundle
 } from "./index-j4zgmzjr.js";
@@ -34,11 +34,11 @@ import {
   MAX_PERCOLATION_NOTES,
   MAX_SCOPED_PERCOLATION_MENTION_PAIRS,
   percolateVault
-} from "./index-dyqwejk5.js";
+} from "./index-f9fy4w1n.js";
 import {
   knowledgeBaseEvaluationRetrieverIds,
   openKnowledgeBaseEvaluation
-} from "./index-n5dd7r0v.js";
+} from "./index-xw9ac71d.js";
 import {
   DEFAULT_SEARCH_RESULTS,
   MAX_SEARCH_CANDIDATES,
@@ -46,7 +46,7 @@ import {
   MAX_SEARCH_RELATED_SEEDS,
   MAX_SEARCH_RESULTS,
   openKnowledgeBase
-} from "./index-zzhgcwyt.js";
+} from "./index-vxmf14m1.js";
 import {
   MAX_SEARCH_RULE_CONFIG_BYTES,
   parseSearchRules
@@ -59,7 +59,7 @@ import {
   refreshVault,
   scanVault,
   sha256EmbeddingModelFile
-} from "./index-zxdy5pby.js";
+} from "./index-5m2ydj5q.js";
 import"./index-4j3tt0c3.js";
 import"./index-1gwbassd.js";
 import {
@@ -79,11 +79,11 @@ import {
   addNoteRelation,
   createNote,
   removeNoteRelation
-} from "./index-01jj6rbv.js";
+} from "./index-gxr0fctd.js";
 import"./index-3rm7cz6h.js";
 import {
   validateSearchQuery
-} from "./index-cv6fh7z5.js";
+} from "./index-gm9t95d9.js";
 import {
   navigateLinks
 } from "./index-d13v9ckt.js";
@@ -111,7 +111,7 @@ import {
   lookupNote,
   parseVaultKey,
   renderCatalog
-} from "./index-cxfrakt7.js";
+} from "./index-ekpwvbra.js";
 import {
   main
 } from "./index-0kavxzqj.js";
@@ -2885,7 +2885,7 @@ function renderPercolation(result, note) {
     if (candidate.kind === "missing-concept") {
       lines.push(`  concept  #${safe(candidate.tag)} \u2192 ${safe(candidate.suggestedId)}  (${candidate.support} supporting notes)` + (candidate.collidesWith === null ? "" : `; natural ID is occupied by ${safe(candidate.collidesWith)}`));
     } else if (candidate.kind === "missing-relation") {
-      lines.push(`  relation  ${safe(candidate.source)} ${safe(candidate.suggestedPredicate)} ${safe(candidate.target)}  (${candidate.support} shared signals)`);
+      lines.push(`  relation pair  {${safe(candidate.source)}, ${safe(candidate.target)}}  (predicate required; ${candidate.support} shared signals)`);
     } else if (candidate.kind === "unlinked-mention") {
       lines.push(`  mention  ${safe(candidate.source)} \u2192 ${safe(candidate.target)}  (${candidate.support})`);
     } else {
@@ -2927,12 +2927,16 @@ async function runPercolate(command, output, dependencies) {
     minSupport: command.minSupport,
     limit: command.limit
   });
-  output.stdout(command.json ? terminalSafeJson({
+  const jsonOutput = {
     root: snapshot.root,
     note: command.note ?? null,
     minSupport: command.minSupport,
-    ...result
-  }) : sanitizeTerminalText(renderPercolation(result, command.note)));
+    limit: command.limit,
+    schemaVersion: result.schemaVersion,
+    candidates: result.candidates,
+    truncated: result.truncated
+  };
+  output.stdout(command.json ? terminalSafeJson(jsonOutput) : sanitizeTerminalText(renderPercolation(result, command.note)));
   return 0;
 }
 async function runList(command, output, dependencies) {

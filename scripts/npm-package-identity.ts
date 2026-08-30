@@ -11,6 +11,7 @@ import {
 const packageName = "@hraness/kb";
 const npmRegistry = "https://registry.npmjs.org";
 const stableVersionPattern = /^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$/u;
+const ohAdoptionPreparerIntroduction = [0n, 18n, 0n] as const;
 
 type NpmPackFile = Readonly<{ mode: number; path: string; size: number }>;
 type NpmPackIdentity = Readonly<{
@@ -54,6 +55,27 @@ export type VerifiedNpmPackageIdentity = Readonly<{
   unpackedBytes: number;
   version: string;
 }>;
+
+function stableVersionParts(version: string): readonly [bigint, bigint, bigint] {
+  const match = stableVersionPattern.exec(version);
+  if (match === null || match[1] === undefined || match[2] === undefined || match[3] === undefined) {
+    throw new TypeError(`Package version must be a canonical stable semantic version: ${version}`);
+  }
+  return [BigInt(match[1]), BigInt(match[2]), BigInt(match[3])];
+}
+
+export function requiresOhAdoptionPreparerExport(packageVersion: string): boolean {
+  const current = stableVersionParts(packageVersion);
+  for (let index = 0; index < current.length; index += 1) {
+    const currentPart = current[index];
+    const introductionPart = ohAdoptionPreparerIntroduction[index];
+    if (currentPart === undefined || introductionPart === undefined) {
+      throw new TypeError("Stable semantic version comparison is incomplete");
+    }
+    if (currentPart !== introductionPart) return currentPart > introductionPart;
+  }
+  return true;
+}
 
 function record(value: unknown, label: string): Record<string, unknown> {
   if (typeof value !== "object" || value === null || Array.isArray(value)) {

@@ -15,6 +15,25 @@ import {
 
 const root = "/approved/skills";
 
+async function regularFiles(directory: string, prefix = ""): Promise<string[]> {
+  const files: string[] = [];
+  const entries = await readdir(directory, { withFileTypes: true });
+  for (const entry of entries.toSorted((left, right) => left.name.localeCompare(right.name))) {
+    const relativePath = prefix === "" ? entry.name : `${prefix}/${entry.name}`;
+    if (entry.isSymbolicLink()) {
+      throw new Error(`skill resources must not contain symbolic links: ${relativePath}`);
+    }
+    if (entry.isDirectory()) {
+      files.push(...await regularFiles(resolve(directory, entry.name), relativePath));
+    } else if (entry.isFile()) {
+      files.push(relativePath);
+    } else {
+      throw new Error(`skill resources must be regular files or directories: ${relativePath}`);
+    }
+  }
+  return files;
+}
+
 function proposal(
   overrides: Partial<CustomizationProposal> = {},
 ): CustomizationProposal {
@@ -100,7 +119,7 @@ test("the shipped skill resources preserve routing and companion contracts", asy
     readFile(resolve(repositoryRoot, "src/cli.ts"), "utf8"),
     readFile(resolve(repositoryRoot, "src/index.ts"), "utf8"),
     readFile(resolve(repositoryRoot, "package.json"), "utf8"),
-    readdir(resolve(repositoryRoot, "skills/kb"), { recursive: true }),
+    regularFiles(resolve(repositoryRoot, "skills/kb")),
   ]);
   const manifest = JSON.parse(manifestSource) as {
     readonly exports?: unknown;

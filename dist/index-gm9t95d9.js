@@ -7,7 +7,7 @@ import {
 } from "./index-48pz4jpc.js";
 import {
   lookupNote
-} from "./index-cxfrakt7.js";
+} from "./index-ekpwvbra.js";
 
 // src/search.ts
 var MAX_EXACT_RESULTS = 500;

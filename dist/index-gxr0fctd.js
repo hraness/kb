@@ -4,9 +4,10 @@ import {
 } from "./index-3rm7cz6h.js";
 import {
   isCanonicalNoteId,
+  isCanonicalRelationPredicate,
   parseDocumentId,
   parseQualifiedDocumentUri
-} from "./index-cxfrakt7.js";
+} from "./index-ekpwvbra.js";
 
 // src/authoring.ts
 import { createHash, randomUUID } from "crypto";
@@ -40,7 +41,6 @@ import {
 } from "yaml";
 var MAX_NOTE_BYTES = 16 * 1024 * 1024;
 var NOTE_REVISION_PATTERN = /^sha256:[0-9a-f]{64}$/u;
-var PREDICATE_PATTERN = /^[a-z][a-z0-9]*(?:-[a-z0-9]+)*$/u;
 var MAX_PARENT_DIRECTORY_ENTRIES = 1e5;
 var MAX_RECOVERY_LOCATIONS_PER_NOTE = 8;
 
@@ -113,7 +113,7 @@ function canonicalRelationTarget(value) {
 }
 function normalizeRelationPredicate(value) {
   const normalized = value.trim().normalize("NFC").toLocaleLowerCase("en-US").replaceAll("_", "-").replace(/\s+/gu, "-").replace(/-{2,}/gu, "-");
-  if (!PREDICATE_PATTERN.test(normalized)) {
+  if (!isCanonicalRelationPredicate(normalized)) {
     throw new TypeError(`not a valid relation predicate: ${JSON.stringify(value)}`);
   }
   return normalized;
