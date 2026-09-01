@@ -15,33 +15,66 @@ Bun 1.3.14 or newer is required.
 
 ```sh
 bun add --global @hraness/kb@0.18.0
+kb --help
 ```
 
-## Why kb
+## Keep one decision available to the next session
 
-- **Inspect what agents recover.** Markdown and Git stay authoritative,
-  retrieval signals stay distinct, and indexes, embeddings, and graph views
-  remain replaceable.
-- **Keep the application independent.** Application code imports neither the
-  vault nor a hosted knowledge service. Capture and semantic adapters declare
-  their network, browser, native-tool, and model-download effects.
+Suppose a parser must stop retrying after three attempts. Record that constraint
+in a note, then link the plan that will implement it:
 
-## Create one durable note
-
-From a directory without an existing `kb/` path, this local task creates a
-vault, writes one typed note, and finds it without a network request or
-embedding model:
-
-```sh
+```shell
 kb init kb
 kb note create notes/parser-contract \
-  --title "Parser contract" --type concept --tag architecture --root kb
-kb search "parser contract" --root kb --mode exact
+  --title "Parser contract" --type concept --tag architecture \
+  --body "Parser retries stop after three attempts." --root kb
+kb note create plans/parser-v2 \
+  --title "Parser v2" --type plan \
+  --body "The plan implements [[notes/parser-contract|the parser contract]]." \
+  --root kb
 ```
 
-The note is stored at `kb/notes/parser-contract.md`. Exact search reads the
-current Markdown and returns that record. Commit the vault when it should
-travel with the repository.
+The first `kb note create` command stores ordinary Markdown at
+`kb/notes/parser-contract.md` and assigns its stable `document_id`. Add the
+exact code boundary to that note's frontmatter so path lookup can recover it:
+
+```yaml
+repository_scopes:
+  - packages/parser
+```
+
+Commit the vault with the repository. The Markdown and its Git history are the
+durable record.
+
+## Recover the stopped session
+
+In a later session, start from the code path and inspect each independent
+signal:
+
+```shell
+kb context packages/parser/src/index.ts --root kb --repo .
+kb search "why parser retries stop" --root kb --mode exact \
+  --history --repo .
+kb backlinks notes/parser-contract --root kb
+kb history notes/parser-contract --root kb --repo .
+```
+
+| Signal | What it recovers |
+| --- | --- |
+| Markdown | The current parser constraint in the file you can review and edit. |
+| Backlinks | The plan that explicitly links to the constraint. |
+| Exact search | The current note matched from its words, without a network request or embedding model. |
+| Repository context | Inherited `AGENTS.md` guides and records scoped to `packages/parser`. |
+| Git history | The commits and bounded co-change evidence associated with the note. |
+
+Together, those views recover the persisted decision, related plan, applicable
+rules, and provenance needed to resume the work. They do not reconstruct
+private chat or prove that the note is still correct. Open the returned
+Markdown and guides before acting on them.
+
+The boundaries stay visible: Markdown and Git are authoritative, backlinks and
+indexes are replaceable views, and Git work is opt-in. Application code imports
+neither the vault nor a hosted knowledge service.
 
 <!-- hraness:kb-landing:end -->
 
@@ -50,22 +83,6 @@ travel with the repository.
 [Install `@hraness/kb` from npm](https://www.npmjs.com/package/@hraness/kb) ·
 [KB source on GitHub](https://github.com/hraness/kb) ·
 [KB overview](https://hraness.com/kb)
-
-## Use
-
-```sh
-kb init kb
-kb clip https://example.com/article --output articles
-kb pdf ./report.pdf --output articles
-kb percolate notes/topic --root .
-kb context packages/parser/src/index.ts --root kb --repo .
-kb list --where type=plan --scope packages/parser --root .
-kb links notes/topic --root . --direction both
-kb search "parser-v2" --root . --mode exact
-kb portfolio search "parser-v2" --registry kb-portfolio.json \
-  --workspace .. --shared
-kb history search packages/parser --root . --repo .. --json
-```
 
 ## A knowledge base for your coding agents
 
@@ -192,63 +209,6 @@ Search finds candidates. Similarity does not establish that a passage is current
 Start with a short inherited `AGENTS.md` path for rules whose omission would make an edit wrong. A small knowledge base may need only Markdown, Git, an index page, and ordinary file search. Add source capture when evidence keeps disappearing. Add repository scopes when agents need to recover current memory from code paths. Add metadata or hybrid search when file search stops answering the repository's questions. Add links and graph views only when the relationships themselves help people make decisions.
 
 Treat the knowledge base as repository-adjacent durable memory. Authored Markdown and Git are the record; catalogs, indexes, embeddings, and graph views are replaceable ways to find and inspect it. Checks can validate structure, captures can preserve a selected surface, and similarity can suggest candidates. None of those mechanisms proves that a source is trustworthy or an explanation is still true. People and agents must revise the knowledge as the repository changes.
-
-## Upgrade to v0.18.0
-
-Version 0.18.0 adds a review-only adoption seam for exact dependency closures
-from an Oh working authority. Trusted host code creates a
-`createOhAdoptionPreparerV1` facade with the expected binding and head,
-destination, rights clearance, review route, and conflict policy. The narrow
-`prepare` call accepts only a capsule plus transformation and redaction
-disclosures, returns deeply immutable deterministic Markdown and manifest
-bytes with status `prepared`, and has no vault, Git, Oh-store, or promotion
-capability. KB pins `@hraness/oh` v0.2.0 and delegates closure integrity to its
-official store verifier.
-
-## Upgrade to v0.17.3
-
-Version 0.17.3 restructures the README around an inspectable first task,
-explicit operating boundaries, and a shorter path from installation to useful
-output. Runtime APIs and package behavior are unchanged.
-
-## Upgrade to v0.17.2
-
-Version 0.17.2 improves package discovery through focused npm keywords, a more
-specific README opening, and direct links between npm, GitHub, and the project
-overview. Runtime APIs and package behavior are unchanged.
-
-## Upgrade to v0.17.1
-
-Version 0.17.1 adds the public `@hraness/kb` npm installation path without
-changing the runtime API introduced in 0.17.0. Bun `1.3.14` or newer is now an
-explicit package requirement. Consumers should review the package's declared
-dual-use capture boundary and the lifecycle scripts used by optional browser
-and native search adapters before enabling those scripts.
-
-## Upgrade to v0.17.0
-
-Version 0.17 adds selected portfolio federation, stable note identities,
-qualified external relations, search rules, capture inspection, and untrusted
-context packing. Consumers with typed fixtures or custom capture writers should
-make these migrations before upgrading:
-
-- Capture writers now emit manifest schema v4 and must provide the stored
-  document `path`, exact UTF-8 `bytes`, and lowercase SHA-256 digest. The reader
-  can inspect schema v1-v3, but verification reports their document integrity as
-  unavailable instead of success.
-- `DecisionContextOutput.search` has been removed. Consume the bounded untrusted
-  `context` projection and its `truncated` flag instead of transporting the raw
-  search result into an agent prompt.
-- `VaultAnalysis` fixtures must include `externalAuthoredRelations`, even when
-  the value is an empty array. This keeps qualified authored edges distinct
-  from locally resolved graph edges.
-- `createNote` and `kb note create` now assign `document_id` to new ordinary
-  notes. Preserve that ID across renames and update snapshots that intentionally
-  assert the generated frontmatter.
-
-Existing Markdown is not rewritten automatically. Add IDs to maintained legacy
-notes only through reviewed edits, and keep every QMD, graph, portfolio, and
-audit projection disposable.
 
 ## Installation reference
 
@@ -597,3 +557,62 @@ effect. The repository's phase-orchestration skill remains available to local
 repository agents but is marked internal, so public skill discovery omits it.
 
 See [Design](docs/design.md), [Portfolio federation](docs/portfolio.md), [Agent workflow](docs/agent-workflow.md), [PDF capture](docs/pdf.md), and [Contributing](CONTRIBUTING.md) for the durable contracts and development gate. hraness/kb is available under the [MIT License](LICENSE).
+
+## Release notes
+
+### Upgrade to v0.18.0
+
+Version 0.18.0 adds a review-only adoption seam for exact dependency closures
+from an Oh working authority. Trusted host code creates a
+`createOhAdoptionPreparerV1` facade with the expected binding and head,
+destination, rights clearance, review route, and conflict policy. The narrow
+`prepare` call accepts only a capsule plus transformation and redaction
+disclosures, returns deeply immutable deterministic Markdown and manifest
+bytes with status `prepared`, and has no vault, Git, Oh-store, or promotion
+capability. KB pins `@hraness/oh` v0.2.0 and delegates closure integrity to its
+official store verifier.
+
+### Upgrade to v0.17.3
+
+Version 0.17.3 restructures the README around an inspectable first task,
+explicit operating boundaries, and a shorter path from installation to useful
+output. Runtime APIs and package behavior are unchanged.
+
+### Upgrade to v0.17.2
+
+Version 0.17.2 improves package discovery through focused npm keywords, a more
+specific README opening, and direct links between npm, GitHub, and the project
+overview. Runtime APIs and package behavior are unchanged.
+
+### Upgrade to v0.17.1
+
+Version 0.17.1 adds the public `@hraness/kb` npm installation path without
+changing the runtime API introduced in 0.17.0. Bun `1.3.14` or newer is now an
+explicit package requirement. Consumers should review the package's declared
+dual-use capture boundary and the lifecycle scripts used by optional browser
+and native search adapters before enabling those scripts.
+
+### Upgrade to v0.17.0
+
+Version 0.17 adds selected portfolio federation, stable note identities,
+qualified external relations, search rules, capture inspection, and untrusted
+context packing. Consumers with typed fixtures or custom capture writers should
+make these migrations before upgrading:
+
+- Capture writers now emit manifest schema v4 and must provide the stored
+  document `path`, exact UTF-8 `bytes`, and lowercase SHA-256 digest. The reader
+  can inspect schema v1-v3, but verification reports their document integrity as
+  unavailable instead of success.
+- `DecisionContextOutput.search` has been removed. Consume the bounded untrusted
+  `context` projection and its `truncated` flag instead of transporting the raw
+  search result into an agent prompt.
+- `VaultAnalysis` fixtures must include `externalAuthoredRelations`, even when
+  the value is an empty array. This keeps qualified authored edges distinct
+  from locally resolved graph edges.
+- `createNote` and `kb note create` now assign `document_id` to new ordinary
+  notes. Preserve that ID across renames and update snapshots that intentionally
+  assert the generated frontmatter.
+
+Existing Markdown is not rewritten automatically. Add IDs to maintained legacy
+notes only through reviewed edits, and keep every QMD, graph, portfolio, and
+audit projection disposable.

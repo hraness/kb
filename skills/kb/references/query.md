@@ -14,6 +14,27 @@ authority; search scores, metadata rows, and graph results are derived views.
 - Pass the resolved path to every `--root`; do not scan a repository root merely
   because that is where the agent session started.
 
+## Recover a stopped session
+
+When the user asks to resume earlier work, begin with the path being changed.
+Keep each retrieval signal separate so the agent can inspect why a record was
+returned:
+
+```sh
+kb context packages/parser/src/index.ts --root "$KB_ROOT" --repo "$KB_REPO"
+kb search "why parser retries stop" --root "$KB_ROOT" --mode exact \
+  --history --repo "$KB_REPO" --json
+kb backlinks notes/parser-contract --root "$KB_ROOT" --json
+kb history notes/parser-contract --root "$KB_ROOT" \
+  --repo "$KB_REPO" --json
+```
+
+Replace the example path, query, and note ID with values from the current task.
+Read the inherited guides and authoritative Markdown returned by these views.
+Use the backlink to inspect related plans and use Git history as provenance,
+not as proof that the note remains correct. This workflow recovers only context
+that was persisted in files or Git; it does not reconstruct private chat.
+
 ## Choose the retrieval lane
 
 - Repository file or directory: run `kb context` first. Read its inherited

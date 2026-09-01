@@ -3,12 +3,13 @@ name: kb
 description: >-
   Operate a hraness/kb local-first Markdown knowledge base for coding-agent
   memory. Use when a user asks to search or query a KB or Obsidian vault; load
-  repository context, plans, decisions, concepts, backlinks, semantic search,
-  or Git provenance; save, clip, scrape, or archive a URL, article, social
-  thread, signed-in browser page, or PDF as auditable Markdown; create or
-  update a durable plan in the vault; or refresh, check, percolate, and
-  maintain its knowledge graph. Do not use for generic web research, generic
-  PDF reading, or ordinary planning that will not use a hraness/kb vault.
+  or recover repository context, plans, decisions, concepts, backlinks,
+  semantic search, or Git provenance from an earlier coding session; save,
+  clip, scrape, or archive a URL, article, social thread, signed-in browser
+  page, or PDF as auditable Markdown; create or update a durable plan in the
+  vault; or refresh, check, percolate, and maintain its knowledge graph. Do not
+  use for generic web research, generic PDF reading, or ordinary planning that
+  will not use a hraness/kb vault.
 ---
 
 # Work with KB
@@ -50,7 +51,7 @@ Initialize or mutate a vault only when the user's request requires that change.
 
 | User intent | Read |
 | --- | --- |
-| Find notes, search one vault or an authorized portfolio, load repository-path context, inspect plans or decisions, follow backlinks or relationships, audit vault organization, or retrieve Git provenance | [Query the knowledge base](references/query.md) |
+| Recover work from an earlier session, find notes, search one vault or an authorized portfolio, load repository-path context, inspect plans or decisions, follow backlinks or relationships, audit vault organization, or retrieve Git provenance | [Query the knowledge base](references/query.md) |
 | Save, clip, scrape, or archive a URL, article, social post or thread, GitHub or Discourse discussion, signed-in page, feed, inbox, private document, WhatsApp conversation, or YouTube page | [Capture web content](references/save-url.md); add [browser authentication](references/url-authentication.md) for signed-in sources and [platform routing](references/url-platforms.md) when route choice or completeness matters |
 | Import, extract, archive, OCR, or convert a local or public PDF into Markdown | [Save a PDF](references/save-pdf.md); add [PDF image review](references/pdf-review.md) for scans, screenshots, conversations, charts, or mixed media |
 | Create or update an implementation plan, proposal, RFC, migration plan, execution audit, or phased checklist in the vault | [Write a durable plan](references/plan.md) and [use its structure](references/plan-structure.md) |
