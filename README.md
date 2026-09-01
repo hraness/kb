@@ -14,7 +14,7 @@ system.
 Bun 1.3.14 or newer is required.
 
 ```sh
-bun add --global @hraness/kb@0.18.0
+bun add --global @hraness/kb@0.18.1
 kb --help
 ```
 
@@ -219,9 +219,9 @@ Treat the knowledge base as repository-adjacent durable memory. Authored Markdow
 Copy this prompt into Codex, Claude Code, or another coding agent:
 
 ```text
-Install the `kb` Agent Skill from `hraness/kb#v0.18.0` with the standard skills
+Install the `kb` Agent Skill from `hraness/kb#v0.18.1` with the standard skills
 CLI. Use the skill's runtime instructions to install the exact
-`@hraness/kb@0.18.0` registry release only when the command is missing. Verify it
+`@hraness/kb@0.18.1` registry release only when the command is missing. Verify it
 with `kb doctor` and `kb --help`, but do not initialize or modify a vault until
 I ask.
 ```
@@ -229,25 +229,25 @@ I ask.
 Install the single public skill with either runner:
 
 ```sh
-npx skills add hraness/kb#v0.18.0
-bunx skills add hraness/kb#v0.18.0
+npx skills add hraness/kb#v0.18.1
+bunx skills add hraness/kb#v0.18.1
 ```
 
 Both commands discover the same `kb` skill and install it into the selected
 agent runner. Skill installation is inert: it does not initialize a vault,
 refresh a catalog, or edit Markdown. When invoked, the skill uses an existing
 `kb` command or, when the command is missing, checks for Bun and installs the
-CLI from the immutable `@hraness/kb@0.18.0` npm version.
+CLI from the immutable `@hraness/kb@0.18.1` npm version.
 
 The public skills CLI reads `skills/kb/` from the repository. The immutable
-`0.18.0` npm package includes the same tree under
+`0.18.1` npm package includes the same tree under
 `node_modules/@hraness/kb/skills/kb/`, and the package check verifies that the
 installed skill is byte-identical to the repository source.
 
 Install the two global commands with Bun:
 
 ```sh
-bun add --global @hraness/kb@0.18.0
+bun add --global @hraness/kb@0.18.1
 kb --help
 kb-evaluation-builder --help
 ```
@@ -255,7 +255,7 @@ kb-evaluation-builder --help
 The same registry package can be installed with npm:
 
 ```sh
-npm install --global --ignore-scripts @hraness/kb@0.18.0
+npm install --global --ignore-scripts @hraness/kb@0.18.1
 kb --help
 ```
 
@@ -268,7 +268,7 @@ reviewed and enabled; run `kb doctor` to inspect the resulting capabilities.
 For programmatic use, add the exact npm version to a Bun project:
 
 ```sh
-bun add --exact @hraness/kb@0.18.0
+bun add --exact @hraness/kb@0.18.1
 ```
 
 The resulting dependency should remain exact:
@@ -276,12 +276,12 @@ The resulting dependency should remain exact:
 ```json
 {
   "dependencies": {
-    "@hraness/kb": "0.18.0"
+    "@hraness/kb": "0.18.1"
   }
 }
 ```
 
-Version 0.18.0 retains three public GitHub dependencies: `@hraness/oh` at
+Version 0.18.1 retains three public GitHub dependencies: `@hraness/oh` at
 immutable release `v0.2.0` for closure verification,
 `@steipete/sweet-cookie` at Hraness release `v0.4.2` for the cookie-scope safety
 fork, and `@tobilu/qmd` at commit
@@ -545,9 +545,9 @@ a vault. The package smoke test keeps future tagged packages byte-identical to
 that source tree.
 
 ```sh
-npx skills add hraness/kb#v0.18.0
+npx skills add hraness/kb#v0.18.1
 # or
-bunx skills add hraness/kb#v0.18.0
+bunx skills add hraness/kb#v0.18.1
 ```
 
 The skill invokes the installed `kb` command without depending on a repository
@@ -559,6 +559,13 @@ repository agents but is marked internal, so public skill discovery omits it.
 See [Design](docs/design.md), [Portfolio federation](docs/portfolio.md), [Agent workflow](docs/agent-workflow.md), [PDF capture](docs/pdf.md), and [Contributing](CONTRIBUTING.md) for the durable contracts and development gate. hraness/kb is available under the [MIT License](LICENSE).
 
 ## Release notes
+
+### Upgrade to v0.18.1
+
+Version 0.18.1 restructures the public README and hosted projection around one
+durable note, the exact recovery workflow, inspectable retrieval signals, and
+explicit authority boundaries. Runtime APIs and package behavior are
+unchanged.
 
 ### Upgrade to v0.18.0
 
