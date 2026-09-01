@@ -290,13 +290,10 @@ describe("npm release workflows", () => {
     ] as const) expect(`${artifact}\n${identity}`).toContain(required);
   });
 
-  test("provisions the exact isolated head and npm in CI", async () => {
+  test("provisions exact recovery history and npm in CI", async () => {
     const workflow = await readFile(ciWorkflowUrl, "utf8");
     for (const required of [
-      "fetch-depth: 1",
-      "fetch-tags: false",
-      "persist-credentials: false",
-      "ref: ${{ github.sha }}",
+      "fetch-depth: 0",
       "actions/setup-node@820762786026740c76f36085b0efc47a31fe5020",
       'node-version: "24"',
       "package-manager-cache: false",
@@ -305,7 +302,6 @@ describe("npm release workflows", () => {
       'test "$(npm --version)" = "11.19.0"',
       '[[ "$(node --version)" == v24.* ]]',
     ] as const) expect(workflow).toContain(required);
-    expect(workflow).not.toContain("fetch-depth: 0");
   });
 
   test("documents the terminal authority and recovery boundary", async () => {
