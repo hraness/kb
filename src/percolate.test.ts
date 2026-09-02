@@ -21,31 +21,33 @@ import {
   type VaultAnalysis,
 } from "./graph.js";
 
+const frozenV018DuplicateCandidate = Object.freeze({
+  kind: "relation-hygiene" as const,
+  problem: "malformed-relation" as const,
+  source: "notes/legacy-source",
+  target: "../legacy-target",
+  predicate: "Bad Predicate",
+  message: "Legacy malformed relationship at line 4.",
+  support: 1,
+  evidenceTruncated: false,
+  evidence: Object.freeze([
+    Object.freeze({
+      kind: "relation-issue" as const,
+      issue: "malformed" as const,
+      source: "notes/legacy-source",
+      line: 4,
+      predicate: "Bad Predicate",
+      target: "../legacy-target",
+      candidates: Object.freeze([]),
+      candidatesTruncated: false,
+      message: "Legacy malformed relationship at line 4.",
+    }),
+  ]),
+});
+
 const frozenV018MalformedFixture = Object.freeze({
   candidates: Object.freeze([
-    Object.freeze({
-      kind: "relation-hygiene" as const,
-      problem: "malformed-relation" as const,
-      source: "notes/legacy-source",
-      target: "../legacy-target",
-      predicate: "Bad Predicate",
-      message: "Legacy malformed relationship at line 4.",
-      support: 1,
-      evidenceTruncated: false,
-      evidence: Object.freeze([
-        Object.freeze({
-          kind: "relation-issue" as const,
-          issue: "malformed" as const,
-          source: "notes/legacy-source",
-          line: 4,
-          predicate: "Bad Predicate",
-          target: "../legacy-target",
-          candidates: Object.freeze([]),
-          candidatesTruncated: false,
-          message: "Legacy malformed relationship at line 4.",
-        }),
-      ]),
-    }),
+    frozenV018DuplicateCandidate,
     Object.freeze({
       kind: "relation-hygiene" as const,
       problem: "malformed-relation" as const,
@@ -69,6 +71,7 @@ const frozenV018MalformedFixture = Object.freeze({
         }),
       ]),
     }),
+    frozenV018DuplicateCandidate,
   ]),
   truncated: false,
 }) satisfies PercolationResultV1;
@@ -233,7 +236,8 @@ describe("read-only graph percolation", () => {
     const serialized = JSON.stringify(frozenV018MalformedFixture);
     const parsed = parsePercolationResultV1(JSON.parse(serialized));
 
-    expect(parsed.candidates).toHaveLength(2);
+    expect(parsed.candidates).toHaveLength(3);
+    expect(parsed.candidates[0]).toEqual(parsed.candidates[2]);
     expect(parsed).toEqual(frozenV018MalformedFixture);
     expect(JSON.stringify(parsed)).toBe(serialized);
   });
@@ -509,6 +513,46 @@ describe("read-only graph percolation", () => {
       },
     ]);
     expect(new Set(concepts.map(({ suggestedId }) => suggestedId)).size).toBe(2);
+  });
+
+  test("allocates dense colliding concept IDs with bounded work", () => {
+    const separators = ["!", "@", "$", "%", "&", "*", "+", "?"] as const;
+    const tags = Array.from({ length: 16_384 }, (_, index) => {
+      let cursor = index;
+      let separator = "";
+      for (let digit = 0; digit < 5; digit += 1) {
+        separator += separators[cursor % separators.length];
+        cursor = Math.floor(cursor / separators.length);
+      }
+      return `dense${separator}collision`;
+    });
+    const notes: readonly Note[] = ["a", "b"].map((name) => ({
+      path: `notes/${name}.md`,
+      id: `notes/${name}`,
+      title: name.toUpperCase(),
+      aliases: [],
+      tags,
+      properties: {},
+      metadata: {},
+      content: "",
+      summary: "",
+      searchableText: name,
+      links: name === "a"
+        ? [{ target: "notes/b", line: 1, embedded: false }]
+        : [],
+      relationDeclarations: [],
+      relationIssues: [],
+    }));
+    const analysis = analyzeVault(notes);
+    const startedAt = performance.now();
+    const result = percolateVault(notes, analysis, { limit: 1_000 });
+
+    expect(performance.now() - startedAt).toBeLessThan(5_000);
+    expect(result.candidates).toHaveLength(1_000);
+    expect(result.truncated).toBe(true);
+    expect(new Set(result.candidates.map((candidate) =>
+      candidate.kind === "missing-concept" ? candidate.suggestedId : "",
+    )).size).toBe(1_000);
   });
 
   test("keeps suggestions compact for unusually long authored tags", () => {

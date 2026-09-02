@@ -405,6 +405,7 @@ function suggestedConceptId(
   tag: string,
   occupiedIds: ReadonlyMap<string, string>,
   reservedIds: Set<string>,
+  nextSuffixByNaturalId: Map<string, number>,
 ): { readonly id: string; readonly collidesWith: string | null } {
   const natural = naturalConceptId(tag);
   const foldedNatural = natural.toLocaleLowerCase("en-US");
@@ -418,13 +419,20 @@ function suggestedConceptId(
   const foldedSuffixed = suffixed.toLocaleLowerCase("en-US");
   if (!occupiedIds.has(foldedSuffixed) && !reservedIds.has(foldedSuffixed)) {
     reservedIds.add(foldedSuffixed);
+    nextSuffixByNaturalId.set(foldedNatural, 2);
     return { id: suffixed, collidesWith };
   }
-  for (let suffix = 2; suffix <= MAX_PERCOLATION_EVIDENCE + 2; suffix += 1) {
+  const nextSuffix = nextSuffixByNaturalId.get(foldedNatural) ?? 2;
+  for (
+    let suffix = nextSuffix;
+    suffix <= MAX_PERCOLATION_EVIDENCE + 2;
+    suffix += 1
+  ) {
     const candidate = `${suffixed}-${suffix}`;
     const foldedCandidate = candidate.toLocaleLowerCase("en-US");
     if (!occupiedIds.has(foldedCandidate) && !reservedIds.has(foldedCandidate)) {
       reservedIds.add(foldedCandidate);
+      nextSuffixByNaturalId.set(foldedNatural, suffix + 1);
       return { id: candidate, collidesWith };
     }
   }
@@ -630,6 +638,7 @@ export function percolateVault(
     note.id,
   ]));
   const reservedConceptIds = new Set<string>();
+  const nextConceptSuffixByNaturalId = new Map<string, number>();
   const nonConceptNotes = indexed.notes.filter((note) => !conceptIds.has(note.id));
   const conceptLabelKeys = new Set(
     indexed.notes
@@ -677,6 +686,7 @@ export function percolateVault(
         tag,
         occupiedIds,
         reservedConceptIds,
+        nextConceptSuffixByNaturalId,
       );
       candidates.push({
         kind: "missing-concept",

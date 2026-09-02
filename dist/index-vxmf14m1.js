@@ -8,7 +8,7 @@ import {
   openSemanticSearchSession,
   recommendedEmbeddingModel,
   scanVault
-} from "./index-zxdy5pby.js";
+} from "./index-5m2ydj5q.js";
 import {
   UntrustedContentBudgetError,
   createUntrustedToolResult
@@ -27,7 +27,7 @@ import {
   fuseRankedCandidates,
   searchExactVault,
   validateSearchQuery
-} from "./index-cv6fh7z5.js";
+} from "./index-gm9t95d9.js";
 import {
   NavigationBudgetError,
   navigateLinks
@@ -37,7 +37,7 @@ import {
 } from "./index-48pz4jpc.js";
 import {
   lookupNote
-} from "./index-cxfrakt7.js";
+} from "./index-ekpwvbra.js";
 
 // src/sdk.ts
 import { resolve } from "path";
