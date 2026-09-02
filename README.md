@@ -14,7 +14,7 @@ system.
 Bun 1.3.14 or newer is required.
 
 ```sh
-bun add --global @hraness/kb@0.18.1
+bun add --global @hraness/kb@0.19.0
 kb --help
 ```
 
@@ -188,6 +188,14 @@ Retrieval is bounded. The high-level `kb search` and `KnowledgeBaseSession.searc
 
 Each note owns its outbound typed relationships in frontmatter. KB derives backlinks, inverse edges, and bounded traversal at read time, so parallel agents do not contend on one generated fact file. `kb percolate <note>` reports recurring concepts and missing-link candidates with inspectable support but writes nothing. An agent reads the cited notes before creating a reusable concept or relationship. Semantic similarity never creates an edge automatically.
 
+Percolation Result V2 presents a missing relationship as an unordered pair of
+notes with a required predicate. It does not choose the source, direction, or a
+`related-to` fallback. Recommended authored predicates include `synthesizes`,
+`evidenced-by`, `informed-by`, `supersedes`, and `contradicts`; they are an
+advisory vocabulary, so a vault can use another canonical predicate when its
+prose and evidence define the claim. KB never infers reciprocal, inverse,
+transitive, or similarity-derived relationships.
+
 Git provenance is opt-in. A search without `--history` performs no Git indexing. `--history` requests best-effort provenance, while `--require-history` rejects unavailable history or incomplete provenance for the selected notes. If one commit exceeds the 2,000-path detail limit, KB retains its identity and vault-local note associations, marks its co-change detail incomplete, and continues through later commits. Best-effort search reports that requested lane as partial.
 
 Local attachment checks cover Markdown and Obsidian references to images, PDFs, and editable tldraw sources. They reject missing or escaping files while leaving external URLs alone. A source-inbox view separately lists recent captures that have no inbound disposition from maintained knowledge. It is an advisory, not an automatic backlink requirement: a saved source may intentionally remain a leaf.
@@ -204,6 +212,39 @@ The same mixed-cache, single-run test recorded p95 latencies of 44.345 milliseco
 
 Search finds candidates. Similarity does not establish that a passage is current, correct, or supported by its sources. The Markdown, cited captures, explicit relationships, and requested Git history supply the material a reader must inspect.
 
+### Customize through an approved proposal
+
+The Agent Skill routes setup and evolution requests before it prepares a
+runtime. It inspects the proposed location without mutation, interviews the
+user about the memory questions the KB should answer, and presents exact read
+and write targets. Only the approved targets may be scaffolded. A changed path,
+repository, account, integration, or companion skill requires renewed
+approval.
+
+The standard router may be enough. A recurring ritual can instead receive a
+companion skill with explicit inputs, authority, durable outputs, idempotence,
+failure behavior, and verification. These skills are inert instructions. They
+do not create a plugin runtime, execute vault metadata, inherit ambient account
+access, or couple application code to the KB. An exact repeat is a no-op;
+divergence, path escape, symbolic links, partial writes, and unapproved
+external surfaces stop the workflow.
+
+The repository's fake-capability suite exercises those transitions. It is a
+tested contract example, not proof that every agent or host integration
+complies.
+
+This workflow builds on Frank Chen's public notes about [designing a personal
+knowledge base with an
+agent](https://gist.github.com/fxchen/773397095d7a6bffda621e4237da0da9)
+and [extending it with
+skills](https://gist.github.com/fxchen/09cb410b22c9c5256d80243ee925b57e).
+
+KB ships no `kb_role` metadata, lifecycle resolver or API, lifecycle CLI,
+compatibility diagnostic, or metadata migration. A frozen Phase 0 value gate
+must show that those surfaces improve deterministic agent decisions before they
+are introduced. Current and historical plan routing remains derived from
+existing type, path, and status conventions.
+
 ### Adopt the smallest useful split
 
 Start with a short inherited `AGENTS.md` path for rules whose omission would make an edit wrong. A small knowledge base may need only Markdown, Git, an index page, and ordinary file search. Add source capture when evidence keeps disappearing. Add repository scopes when agents need to recover current memory from code paths. Add metadata or hybrid search when file search stops answering the repository's questions. Add links and graph views only when the relationships themselves help people make decisions.
@@ -219,9 +260,9 @@ Treat the knowledge base as repository-adjacent durable memory. Authored Markdow
 Copy this prompt into Codex, Claude Code, or another coding agent:
 
 ```text
-Install the `kb` Agent Skill from `hraness/kb#v0.18.1` with the standard skills
+Install the `kb` Agent Skill from `hraness/kb#v0.19.0` with the standard skills
 CLI. Use the skill's runtime instructions to install the exact
-`@hraness/kb@0.18.1` registry release only when the command is missing. Verify it
+`@hraness/kb@0.19.0` registry release only when the command is missing. Verify it
 with `kb doctor` and `kb --help`, but do not initialize or modify a vault until
 I ask.
 ```
@@ -229,25 +270,25 @@ I ask.
 Install the single public skill with either runner:
 
 ```sh
-npx skills add hraness/kb#v0.18.1
-bunx skills add hraness/kb#v0.18.1
+npx skills add hraness/kb#v0.19.0
+bunx skills add hraness/kb#v0.19.0
 ```
 
 Both commands discover the same `kb` skill and install it into the selected
 agent runner. Skill installation is inert: it does not initialize a vault,
 refresh a catalog, or edit Markdown. When invoked, the skill uses an existing
 `kb` command or, when the command is missing, checks for Bun and installs the
-CLI from the immutable `@hraness/kb@0.18.1` npm version.
+CLI from the immutable `@hraness/kb@0.19.0` npm version.
 
 The public skills CLI reads `skills/kb/` from the repository. The immutable
-`0.18.1` npm package includes the same tree under
+`0.19.0` npm package includes the same tree under
 `node_modules/@hraness/kb/skills/kb/`, and the package check verifies that the
 installed skill is byte-identical to the repository source.
 
 Install the two global commands with Bun:
 
 ```sh
-bun add --global @hraness/kb@0.18.1
+bun add --global @hraness/kb@0.19.0
 kb --help
 kb-evaluation-builder --help
 ```
@@ -255,7 +296,7 @@ kb-evaluation-builder --help
 The same registry package can be installed with npm:
 
 ```sh
-npm install --global --ignore-scripts @hraness/kb@0.18.1
+npm install --global --ignore-scripts @hraness/kb@0.19.0
 kb --help
 ```
 
@@ -268,7 +309,7 @@ reviewed and enabled; run `kb doctor` to inspect the resulting capabilities.
 For programmatic use, add the exact npm version to a Bun project:
 
 ```sh
-bun add --exact @hraness/kb@0.18.1
+bun add --exact @hraness/kb@0.19.0
 ```
 
 The resulting dependency should remain exact:
@@ -276,12 +317,12 @@ The resulting dependency should remain exact:
 ```json
 {
   "dependencies": {
-    "@hraness/kb": "0.18.1"
+    "@hraness/kb": "0.19.0"
   }
 }
 ```
 
-Version 0.18.1 retains three public GitHub dependencies: `@hraness/oh` at
+Version 0.19.0 retains three public GitHub dependencies: `@hraness/oh` at
 immutable release `v0.2.0` for closure verification,
 `@steipete/sweet-cookie` at Hraness release `v0.4.2` for the cookie-scope safety
 fork, and `@tobilu/qmd` at commit
@@ -467,7 +508,12 @@ Predicates use lower-kebab-case. Local targets use exact vault-root IDs without
 `.md`; cross-vault targets use canonical stable `kb://` URIs. `kb graph`, `kb backlinks`, `kb relation list`, and `kb links` derive
 inverse edges and bounded paths without injecting reciprocal or inferred facts into notes.
 `kb percolate` proposes reusable concepts and missing connections with explicit
-support; an agent reviews the cited prose before authoring anything.
+support; an agent reviews the cited prose before authoring anything. In its V2
+result, a missing relationship is an unordered endpoint pair with a required
+predicate, never an executable directed assertion or an automatic
+`related-to`. Common reviewed claims use `synthesizes`, `evidenced-by`,
+`informed-by`, `supersedes`, or `contradicts`; other canonical custom predicates
+remain valid when their meaning is supported.
 
 Within a portfolio, a note can target a stable cross-vault identity such as
 `kb://hraness/sleepyland/sound-wellness-expansion`. The target vault must be
@@ -540,25 +586,37 @@ diffs, and the explicit local job ledger are available from
 The repository ships one reusable `kb` Agent Skill under `skills/kb/`. Its
 intent router loads focused references only when a task needs them: querying
 repository context and agent memory, capturing URLs or PDFs, writing durable
-plans, promoting concepts and typed relationships, or refreshing and checking
-a vault. The package smoke test keeps future tagged packages byte-identical to
+plans, promoting concepts and typed relationships, refreshing and checking a
+vault, or designing a setup through an interview and approved proposal. An
+approved setup may scaffold a bounded companion skill for a distinct recurring
+ritual. The package smoke test keeps future tagged packages byte-identical to
 that source tree.
 
 ```sh
-npx skills add hraness/kb#v0.18.1
+npx skills add hraness/kb#v0.19.0
 # or
-bunx skills add hraness/kb#v0.18.1
+bunx skills add hraness/kb#v0.19.0
 ```
 
 The skill invokes the installed `kb` command without depending on a repository
-checkout. Its runtime setup installs the pinned CLI only when the command is
-missing, and it never initializes or mutates a vault as an installation side
-effect. The repository's phase-orchestration skill remains available to local
-repository agents but is marked internal, so public skill discovery omits it.
+checkout. It routes setup and evolution before runtime preparation. For
+execution workflows, runtime setup installs the pinned CLI only when the
+command is missing, and it never initializes or mutates a vault as an
+installation side effect. The repository's phase-orchestration skill remains
+available to local repository agents but is marked internal, so public skill
+discovery omits it.
 
 See [Design](docs/design.md), [Portfolio federation](docs/portfolio.md), [Agent workflow](docs/agent-workflow.md), [PDF capture](docs/pdf.md), and [Contributing](CONTRIBUTING.md) for the durable contracts and development gate. hraness/kb is available under the [MIT License](LICENSE).
 
 ## Release notes
+
+### Upgrade to v0.19.0
+
+Version 0.19.0 adds interview-first setup and evolution guidance, a bounded
+filesystem-only companion-skill scaffold contract, and Percolation Result V2.
+V2 requires an explicit predicate and leaves relationship ownership and
+direction to review. The release does not add lifecycle metadata, a resolver,
+a lifecycle CLI, inferred edges, or automatic account and network actions.
 
 ### Upgrade to v0.18.1
 

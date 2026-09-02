@@ -7,6 +7,7 @@ import {
   inspectPackageArtifact,
   type PackageArtifactInventory,
 } from "./package-artifact.js";
+import { requiresOhAdoptionPreparerExport } from "./npm-package-identity.js";
 
 const packageName = "@hraness/kb";
 const maximumPackageFiles = 210;
@@ -59,7 +60,7 @@ const importSpecifiers = [
   "@hraness/kb/workflows/explain-change",
   "@hraness/kb/workflows/plan-radar",
 ];
-const requiredNamedExports = {
+const baselineRequiredNamedExports = {
   "@hraness/kb/clip/bundle-reader": ["readCaptureBundle", "verifyCaptureBundle"],
   "@hraness/kb/clip/jobs": ["createCaptureJob", "openCaptureJobStore", "updateCaptureJob"],
   "@hraness/kb/clip/refresh": ["diffCaptureBundle"],
@@ -540,6 +541,13 @@ try {
   if (sourceManifest.name !== packageName || typeof sourceManifest.version !== "string") {
     throw new Error("source package identity is invalid");
   }
+  const requiresOhAdoptionPreparer = requiresOhAdoptionPreparerExport(sourceManifest.version);
+  const requiredNamedExports = requiresOhAdoptionPreparer
+    ? {
+        "@hraness/kb": ["createOhAdoptionPreparerV1"],
+        ...baselineRequiredNamedExports,
+      }
+    : baselineRequiredNamedExports;
   const inventory = await inspectPackageArtifact(archive);
   if (packageInput.packJson !== undefined) {
     await verifyExactNpmPackMetadata(
@@ -625,6 +633,9 @@ for (const specifier of ${JSON.stringify(importSpecifiers)}) {
   const consumerSource = `${importSpecifiers.map((specifier, index) =>
     `import * as surface${String(index)} from ${JSON.stringify(specifier)};`
   ).join("\n")}
+${requiresOhAdoptionPreparer
+  ? 'import { createOhAdoptionPreparerV1 } from "@hraness/kb";'
+  : ""}
 import { readCaptureBundle, verifyCaptureBundle } from "@hraness/kb/clip/bundle-reader";
 import { createCaptureJob, openCaptureJobStore, updateCaptureJob } from "@hraness/kb/clip/jobs";
 import { diffCaptureBundle } from "@hraness/kb/clip/refresh";
@@ -644,6 +655,7 @@ const registry = parsePortfolioRegistry({
 const identity = parseQualifiedDocumentUri("kb://hraness/kb/note-id");
 const projected = projectUntrustedJson([{ title: "stored source" }]);
 void [
+  ${requiresOhAdoptionPreparer ? "createOhAdoptionPreparerV1," : ""}
   readCaptureBundle, verifyCaptureBundle,
   createCaptureJob, openCaptureJobStore, updateCaptureJob,
   diffCaptureBundle, openKnowledgePortfolio, prioritizeSearchHits,

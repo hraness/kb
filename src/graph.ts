@@ -327,6 +327,13 @@ type ParsedMetadata = {
 const relationPredicatePattern = /^[a-z][a-z0-9]*(?:-[a-z0-9]+)*$/u;
 const maxNoteIdLength = 2_048;
 
+/** Whether a value is the exact lower-kebab predicate accepted by the graph. */
+export function isCanonicalRelationPredicate(value: string): boolean {
+  return value !== ""
+    && value === value.normalize("NFC")
+    && relationPredicatePattern.test(value);
+}
+
 /**
  * Whether a value is the exact, extensionless vault-root ID used on disk.
  *
@@ -476,7 +483,7 @@ function parsedRelations(
     }
 
     const predicate = pair.key.value.normalize("NFC");
-    if (!relationPredicatePattern.test(predicate)) {
+    if (!isCanonicalRelationPredicate(predicate)) {
       relationIssues.push(malformedRelation(
         source,
         predicateLine,

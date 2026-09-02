@@ -2,9 +2,17 @@ import { describe, expect, test } from "bun:test";
 
 import {
   MAX_PERCOLATION_EVIDENCE_PER_CANDIDATE,
+  PERCOLATION_RESULT_SCHEMA_VERSION,
+  parsePercolationCliOutput,
+  parsePercolationCliOutputV1,
+  parsePercolationResult,
+  parsePercolationResultV1,
   percolateVault,
   type MissingConceptCandidate,
   type MissingRelationCandidate,
+  type PercolationCliOutputV1,
+  type PercolationCliOutputV2,
+  type PercolationResultV1,
 } from "./percolate.js";
 import {
   analyzeVault,
@@ -99,9 +107,139 @@ describe("read-only graph percolation", () => {
     );
     expect(shared).toBeDefined();
     expect(shared?.support).toBe(4);
+    expect(shared?.predicate).toEqual({ kind: "required" });
     expect(new Set(shared?.evidence.map((evidence) => evidence.kind))).toEqual(
       new Set(["shared-concept", "shared-tag"]),
     );
+    expect(result.schemaVersion).toBe(PERCOLATION_RESULT_SCHEMA_VERSION);
+    expect(Object.isFrozen(result)).toBe(true);
+    expect(Object.isFrozen(result.candidates)).toBe(true);
+    expect(Object.isFrozen(shared)).toBe(true);
+    expect(Object.isFrozen(shared?.evidence)).toBe(true);
+  });
+
+  test("parses V2 and historical V1 as distinct immutable contracts", () => {
+    const v2 = percolateVault(discoveryFixture(), analyzeVault(discoveryFixture()));
+    expect(parsePercolationResult(v2)).toEqual(v2);
+    expect(() => parsePercolationResultV1(v2)).toThrow("exactly");
+
+    const v1: PercolationResultV1 = {
+      candidates: v2.candidates.map((candidate) =>
+        candidate.kind === "missing-relation"
+          ? {
+              kind: candidate.kind,
+              source: candidate.source,
+              target: candidate.target,
+              suggestedPredicate: "related-to" as const,
+              support: candidate.support,
+              evidenceTruncated: candidate.evidenceTruncated,
+              evidence: candidate.evidence,
+            }
+          : candidate),
+      truncated: v2.truncated,
+    };
+    const parsedV1 = parsePercolationResultV1(v1);
+    expect(parsedV1).toEqual(v1);
+    expect(Object.isFrozen(parsedV1)).toBe(true);
+    expect(Object.isFrozen(parsedV1.candidates)).toBe(true);
+    expect(() => parsePercolationResult(v1)).toThrow("exactly");
+
+    const cliV1: PercolationCliOutputV1 = {
+      root: "/vault",
+      note: "Alpha lookup",
+      minSupport: 2,
+      candidates: parsedV1.candidates,
+      truncated: parsedV1.truncated,
+    };
+    const cliV2: PercolationCliOutputV2 = {
+      root: "/vault",
+      note: "Alpha lookup",
+      minSupport: 2,
+      limit: 25,
+      schemaVersion: 2,
+      candidates: v2.candidates,
+      truncated: v2.truncated,
+    };
+    expect(parsePercolationCliOutputV1(cliV1)).toEqual(cliV1);
+    expect(parsePercolationCliOutput(cliV2)).toEqual(cliV2);
+    expect(() => parsePercolationCliOutputV1({
+      ...cliV1,
+      minSupport: 1,
+    })).toThrow("from 2 through 1000");
+    expect(() => parsePercolationCliOutput({
+      ...cliV2,
+      minSupport: 1,
+    })).toThrow("from 2 through 1000");
+    expect(() => parsePercolationCliOutput(cliV1)).toThrow("exactly");
+    expect(() => parsePercolationCliOutputV1(cliV2)).toThrow("exactly");
+    expect(() => parsePercolationResult(cliV2)).toThrow("exactly");
+  });
+
+  test("rejects structural capabilities, ambiguity, and inconsistent evidence", () => {
+    const notes = discoveryFixture();
+    const valid = percolateVault(notes, analyzeVault(notes));
+    const relation = valid.candidates.find((candidate) =>
+      candidate.kind === "missing-relation");
+    expect(relation).toBeDefined();
+    if (relation === undefined) throw new Error("missing fixture relation");
+
+    expect(parsePercolationResult({
+      ...valid,
+      candidates: valid.candidates.map((candidate) =>
+        candidate === relation
+          ? { ...candidate, predicate: { kind: "suggested", value: "custom-predicate-2" } }
+          : candidate),
+    }).candidates).toContainEqual(expect.objectContaining({
+      kind: "missing-relation",
+      predicate: { kind: "suggested", value: "custom-predicate-2" },
+    }));
+
+    for (const [source, target] of [
+      [relation.target, relation.source],
+      [relation.source, relation.source],
+    ] as const) {
+      expect(() => parsePercolationResult({
+        ...valid,
+        candidates: valid.candidates.map((candidate) =>
+          candidate === relation ? { ...candidate, source, target } : candidate),
+      })).toThrow("ordered, distinct pair");
+    }
+
+    expect(() => parsePercolationResult({ ...valid, extra: true })).toThrow("exactly");
+    expect(() => parsePercolationResult(Object.assign(
+      Object.create({ inherited: true }) as object,
+      valid,
+    ))).toThrow("plain data object");
+    const accessor = { ...valid } as Record<string, unknown>;
+    Object.defineProperty(accessor, "truncated", {
+      enumerable: true,
+      get: () => false,
+    });
+    expect(() => parsePercolationResult(accessor)).toThrow("data property");
+    expect(() => parsePercolationResult({
+      ...valid,
+      candidates: [
+        ...valid.candidates,
+        ...Array.from({ length: 1_001 - valid.candidates.length }, () => relation),
+      ],
+    })).toThrow("1,000-entry limit");
+    expect(() => parsePercolationResult({
+      ...valid,
+      candidates: valid.candidates.map((candidate) =>
+        candidate === relation
+          ? {
+              ...candidate,
+              evidence: candidate.evidence.map((evidence, index) =>
+                index === 0 && "note" in evidence
+                  ? { ...evidence, note: "notes/not-an-endpoint", path: "notes/not-an-endpoint.md" }
+                  : evidence),
+            }
+          : candidate),
+    })).toThrow("unordered endpoints");
+    expect(() => parsePercolationResult({
+      ...valid,
+      candidates: valid.candidates.toReversed(),
+    })).toThrow("canonical percolation ordering");
   });
 
   test("turns graph mentions into sourced candidates and respects explicit edges", () => {
@@ -144,7 +282,7 @@ describe("read-only graph percolation", () => {
         "relations:",
         "  self-check: [notes/a]",
         "  mirrors: [notes/b]",
-        "  broken: [notes/missing]",
+        "  broken: [notes/missing, notes/missing]",
         "  Malformed: [notes/b]",
         "---",
         "# Alpha",
@@ -166,6 +304,8 @@ describe("read-only graph percolation", () => {
     expect(problems).toContain("reciprocal-relation");
     expect(problems).toContain("broken-relation");
     expect(problems).toContain("malformed-relation");
+    expect(problems.filter((problem) => problem === "broken-relation"))
+      .toHaveLength(1);
     expect(result.candidates
       .filter((candidate) => candidate.kind === "relation-hygiene")
       .every((candidate) => candidate.evidence.length > 0)).toBe(true);
