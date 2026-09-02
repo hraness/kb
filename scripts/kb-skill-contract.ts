@@ -154,8 +154,19 @@ function confinedTarget(root: string, target: string): string | null {
   return absolutePath;
 }
 
+/**
+ * Build a deterministic caseless filesystem identity with JavaScript's
+ * locale-independent Unicode casing tables. NFKC joins canonically and
+ * compatibly equivalent spellings, lowercasing exposes multi-code-point
+ * expansions such as capital sharp S, and the final uppercase pass joins
+ * context-sensitive forms such as Greek final sigma.
+ */
 function portableTargetIdentity(absolutePath: string): string {
-  return absolutePath.normalize("NFC").toLocaleLowerCase("en-US");
+  return absolutePath
+    .normalize("NFKC")
+    .toLowerCase()
+    .toUpperCase()
+    .normalize("NFC");
 }
 
 function validateProposalShape(proposal: CustomizationProposal): string | null {

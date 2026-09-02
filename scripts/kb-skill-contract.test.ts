@@ -461,6 +461,8 @@ test("portable path aliases fail before inspection or mutation", async () => {
   for (const [firstTarget, secondTarget] of [
     ["Save-Decision-KB/SKILL.md", "save-decision-kb/skill.md"],
     ["caf\u00e9/SKILL.md", "cafe\u0301/SKILL.md"],
+    ["\u03a3/SKILL.md", "\u03c2/skill.md"],
+    ["Stra\u00dfe/SKILL.md", "STRASSE/skill.md"],
   ] as const) {
     const requested = proposal({
       writes: [

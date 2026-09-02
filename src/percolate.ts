@@ -90,9 +90,7 @@ export type MissingConceptCandidate = {
   readonly evidence: readonly MissingConceptEvidence[];
 };
 
-export type PredicateDisposition =
-  | { readonly kind: "required" }
-  | { readonly kind: "suggested"; readonly value: string };
+export type PredicateDisposition = { readonly kind: "required" };
 
 /** @deprecated Archival V1 shape; retained through the 0.19.x compatibility cycle. */
 export type MissingRelationCandidateV1 = {
@@ -406,19 +404,27 @@ function naturalConceptId(tag: string): string {
 function suggestedConceptId(
   tag: string,
   occupiedIds: ReadonlyMap<string, string>,
+  reservedIds: Set<string>,
 ): { readonly id: string; readonly collidesWith: string | null } {
   const natural = naturalConceptId(tag);
   const foldedNatural = natural.toLocaleLowerCase("en-US");
   const collidesWith = occupiedIds.get(foldedNatural) ?? null;
-  if (collidesWith === null) return { id: natural, collidesWith: null };
+  if (collidesWith === null && !reservedIds.has(foldedNatural)) {
+    reservedIds.add(foldedNatural);
+    return { id: natural, collidesWith: null };
+  }
 
   const suffixed = `${natural}-concept`;
-  if (!occupiedIds.has(suffixed.toLocaleLowerCase("en-US"))) {
+  const foldedSuffixed = suffixed.toLocaleLowerCase("en-US");
+  if (!occupiedIds.has(foldedSuffixed) && !reservedIds.has(foldedSuffixed)) {
+    reservedIds.add(foldedSuffixed);
     return { id: suffixed, collidesWith };
   }
-  for (let suffix = 2; suffix <= MAX_PERCOLATION_NOTES + 2; suffix += 1) {
+  for (let suffix = 2; suffix <= MAX_PERCOLATION_EVIDENCE + 2; suffix += 1) {
     const candidate = `${suffixed}-${suffix}`;
-    if (!occupiedIds.has(candidate.toLocaleLowerCase("en-US"))) {
+    const foldedCandidate = candidate.toLocaleLowerCase("en-US");
+    if (!occupiedIds.has(foldedCandidate) && !reservedIds.has(foldedCandidate)) {
+      reservedIds.add(foldedCandidate);
       return { id: candidate, collidesWith };
     }
   }
@@ -481,6 +487,23 @@ function candidateIdentity(candidate: AnyPercolationCandidate): string {
   }
 }
 
+function historicalCandidateIdentity(candidate: PercolationCandidateV1): string {
+  switch (candidate.kind) {
+    case "missing-concept":
+      return candidate.tag;
+    case "missing-relation":
+    case "unlinked-mention":
+      return `${candidate.source}\u0000${candidate.target}`;
+    case "relation-hygiene":
+      return [
+        candidate.problem,
+        candidate.source,
+        candidate.predicate ?? "",
+        candidate.target ?? "",
+      ].join("\u0000");
+  }
+}
+
 const candidateKindRank: Readonly<Record<AnyPercolationCandidate["kind"], number>> = {
   "relation-hygiene": 0,
   "unlinked-mention": 1,
@@ -495,6 +518,18 @@ function compareCandidates(
   return right.support - left.support
     || candidateKindRank[left.kind] - candidateKindRank[right.kind]
     || compareText(candidateIdentity(left), candidateIdentity(right));
+}
+
+function compareHistoricalCandidates(
+  left: PercolationCandidateV1,
+  right: PercolationCandidateV1,
+): number {
+  return right.support - left.support
+    || candidateKindRank[left.kind] - candidateKindRank[right.kind]
+    || compareText(
+      historicalCandidateIdentity(left),
+      historicalCandidateIdentity(right),
+    );
 }
 
 function relationEvidence(relation: AuthoredRelationLike): RelationEvidence {
@@ -594,6 +629,7 @@ export function percolateVault(
     note.id.toLocaleLowerCase("en-US"),
     note.id,
   ]));
+  const reservedConceptIds = new Set<string>();
   const nonConceptNotes = indexed.notes.filter((note) => !conceptIds.has(note.id));
   const conceptLabelKeys = new Set(
     indexed.notes
@@ -637,7 +673,11 @@ export function percolateVault(
       && !conceptLabelKeys.has(conceptKey(tag))
       && (noteFilter === null || matchingNotes.some((note) => note.id === noteFilter))
     ) {
-      const suggestion = suggestedConceptId(tag, occupiedIds);
+      const suggestion = suggestedConceptId(
+        tag,
+        occupiedIds,
+        reservedConceptIds,
+      );
       candidates.push({
         kind: "missing-concept",
         tag,
@@ -1202,14 +1242,7 @@ function predicateDisposition(
     exactKeys(record, ["kind"], label);
     return Object.freeze({ kind: "required" });
   }
-  if (kind === "suggested") {
-    exactKeys(record, ["kind", "value"], label);
-    return Object.freeze({
-      kind: "suggested",
-      value: canonicalPredicate(record.value, `${label}.value`, budget),
-    });
-  }
-  throw new TypeError(`${label}.kind must be required or suggested.`);
+  throw new TypeError(`${label}.kind must be required.`);
 }
 
 function parsedMissingConceptEvidence(
@@ -1738,13 +1771,38 @@ function parsedCandidates<V extends 1 | 2>(
   const input = dataArray(value, label, MAX_PERCOLATION_LIMIT, budget);
   const output = input.map((entry, index) =>
     parseCandidate(entry, `${label}[${index}]`, budget, version));
+  if (version === 1) {
+    const historical = output as readonly PercolationCandidateV1[];
+    for (let index = 1; index < historical.length; index += 1) {
+      const previous = historical[index - 1];
+      const candidate = historical[index];
+      if (
+        previous !== undefined
+        && candidate !== undefined
+        && compareHistoricalCandidates(previous, candidate) > 0
+      ) {
+        throw new TypeError(`${label} must use historical percolation ordering.`);
+      }
+    }
+    return Object.freeze([...historical]) as readonly (
+      V extends 1 ? PercolationCandidateV1 : PercolationCandidateV2
+    )[];
+  }
+
   const identities = new Set<string>();
+  const suggestedConceptIds = new Set<string>();
   for (let index = 0; index < output.length; index += 1) {
     const candidate = output[index];
     if (candidate === undefined) continue;
     const identity = `${candidate.kind}\u0000${candidateIdentity(candidate)}`;
     if (identities.has(identity)) throw new TypeError(`${label} must be unique.`);
     identities.add(identity);
+    if (candidate.kind === "missing-concept") {
+      if (suggestedConceptIds.has(candidate.suggestedId)) {
+        throw new TypeError(`${label} must use unique suggested concept IDs.`);
+      }
+      suggestedConceptIds.add(candidate.suggestedId);
+    }
     const previous = output[index - 1];
     if (previous !== undefined && compareCandidates(previous, candidate) > 0) {
       throw new TypeError(`${label} must use canonical percolation ordering.`);

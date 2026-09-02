@@ -21,6 +21,58 @@ import {
   type VaultAnalysis,
 } from "./graph.js";
 
+const frozenV018MalformedFixture = Object.freeze({
+  candidates: Object.freeze([
+    Object.freeze({
+      kind: "relation-hygiene" as const,
+      problem: "malformed-relation" as const,
+      source: "notes/legacy-source",
+      target: "../legacy-target",
+      predicate: "Bad Predicate",
+      message: "Legacy malformed relationship at line 4.",
+      support: 1,
+      evidenceTruncated: false,
+      evidence: Object.freeze([
+        Object.freeze({
+          kind: "relation-issue" as const,
+          issue: "malformed" as const,
+          source: "notes/legacy-source",
+          line: 4,
+          predicate: "Bad Predicate",
+          target: "../legacy-target",
+          candidates: Object.freeze([]),
+          candidatesTruncated: false,
+          message: "Legacy malformed relationship at line 4.",
+        }),
+      ]),
+    }),
+    Object.freeze({
+      kind: "relation-hygiene" as const,
+      problem: "malformed-relation" as const,
+      source: "notes/legacy-source",
+      target: "../legacy-target",
+      predicate: "Bad Predicate",
+      message: "Legacy malformed relationship at line 9.",
+      support: 1,
+      evidenceTruncated: false,
+      evidence: Object.freeze([
+        Object.freeze({
+          kind: "relation-issue" as const,
+          issue: "malformed" as const,
+          source: "notes/legacy-source",
+          line: 9,
+          predicate: "Bad Predicate",
+          target: "../legacy-target",
+          candidates: Object.freeze([]),
+          candidatesTruncated: false,
+          message: "Legacy malformed relationship at line 9.",
+        }),
+      ]),
+    }),
+  ]),
+  truncated: false,
+}) satisfies PercolationResultV1;
+
 function discoveryFixture(): readonly Note[] {
   return [
     parseNote("concepts/retrieval.md", [
@@ -175,6 +227,17 @@ describe("read-only graph percolation", () => {
     expect(() => parsePercolationResult(cliV2)).toThrow("exactly");
   });
 
+  test("round-trips tied duplicate candidates from a frozen 0.18 result", () => {
+    expect(Object.isFrozen(frozenV018MalformedFixture)).toBe(true);
+    expect(Object.isFrozen(frozenV018MalformedFixture.candidates)).toBe(true);
+    const serialized = JSON.stringify(frozenV018MalformedFixture);
+    const parsed = parsePercolationResultV1(JSON.parse(serialized));
+
+    expect(parsed.candidates).toHaveLength(2);
+    expect(parsed).toEqual(frozenV018MalformedFixture);
+    expect(JSON.stringify(parsed)).toBe(serialized);
+  });
+
   test("rejects structural capabilities, ambiguity, and inconsistent evidence", () => {
     const notes = discoveryFixture();
     const valid = percolateVault(notes, analyzeVault(notes));
@@ -183,16 +246,13 @@ describe("read-only graph percolation", () => {
     expect(relation).toBeDefined();
     if (relation === undefined) throw new Error("missing fixture relation");
 
-    expect(parsePercolationResult({
+    expect(() => parsePercolationResult({
       ...valid,
       candidates: valid.candidates.map((candidate) =>
         candidate === relation
           ? { ...candidate, predicate: { kind: "suggested", value: "custom-predicate-2" } }
           : candidate),
-    }).candidates).toContainEqual(expect.objectContaining({
-      kind: "missing-relation",
-      predicate: { kind: "suggested", value: "custom-predicate-2" },
-    }));
+    })).toThrow("predicate.kind must be required");
 
     for (const [source, target] of [
       [relation.target, relation.source],
@@ -420,6 +480,35 @@ describe("read-only graph percolation", () => {
       suggestedId: "notes/foo-concept",
       collidesWith: "notes/foo",
     });
+  });
+
+  test("reserves normalized concept IDs across distinct recurring tags", () => {
+    const notes = [
+      parseNote("notes/a.md", "---\ntags: [\"foo bar\", foo-bar]\n---\n# Alpha\n"),
+      parseNote("notes/b.md", "---\ntags: [\"foo bar\", foo-bar]\n---\n# Beta\n"),
+    ];
+    const concepts = percolateVault(notes, analyzeVault(notes)).candidates
+      .filter((candidate): candidate is MissingConceptCandidate =>
+        candidate.kind === "missing-concept")
+      .map(({ tag, suggestedId, collidesWith }) => ({
+        tag,
+        suggestedId,
+        collidesWith,
+      }));
+
+    expect(concepts).toEqual([
+      {
+        tag: "foo bar",
+        suggestedId: "notes/foo-bar",
+        collidesWith: null,
+      },
+      {
+        tag: "foo-bar",
+        suggestedId: "notes/foo-bar-concept",
+        collidesWith: null,
+      },
+    ]);
+    expect(new Set(concepts.map(({ suggestedId }) => suggestedId)).size).toBe(2);
   });
 
   test("keeps suggestions compact for unusually long authored tags", () => {

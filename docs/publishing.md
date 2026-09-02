@@ -131,7 +131,7 @@ keep the tag and npm version immutable. After the recovery workflow is on
 current `main`, dispatch it with the existing tag:
 
 ```sh
-gh workflow run release.yml --ref main -f tag=v0.18.1
+gh workflow run release.yml --ref main -f tag=v0.19.0
 ```
 
 The recovery path accepts only the newest stable repository tag. It freshly
