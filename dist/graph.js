@@ -9,6 +9,7 @@ import {
   catalogEnd,
   catalogStart,
   isCanonicalNoteId,
+  isCanonicalRelationPredicate,
   lookupNote,
   metadataValueFromUnknown,
   normalizeVaultPath,
@@ -17,7 +18,7 @@ import {
   replaceCatalog,
   searchableMarkdown,
   wikiLinks
-} from "./index-cxfrakt7.js";
+} from "./index-ekpwvbra.js";
 export {
   wikiLinks,
   searchableMarkdown,
@@ -27,6 +28,7 @@ export {
   normalizeVaultPath,
   metadataValueFromUnknown,
   lookupNote,
+  isCanonicalRelationPredicate,
   isCanonicalNoteId,
   catalogStart,
   catalogEnd,

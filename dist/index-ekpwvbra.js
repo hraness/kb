@@ -207,6 +207,9 @@ function emptyMetadata() {
 }
 var relationPredicatePattern = /^[a-z][a-z0-9]*(?:-[a-z0-9]+)*$/u;
 var maxNoteIdLength = 2048;
+function isCanonicalRelationPredicate(value) {
+  return value !== "" && value === value.normalize("NFC") && relationPredicatePattern.test(value);
+}
 function isCanonicalNoteId(value) {
   if (value === "" || value.length > maxNoteIdLength || value !== value.trim() || value !== value.normalize("NFC") || value.includes("\\") || value.includes("\x00") || value.includes(`
 `) || value.includes("\r") || value.startsWith("/") || value.endsWith("/") || value.toLocaleLowerCase("en-US").endsWith(".md")) {
@@ -275,7 +278,7 @@ function parsedRelations(contents, source, lineCounter) {
       continue;
     }
     const predicate = pair.key.value.normalize("NFC");
-    if (!relationPredicatePattern.test(predicate)) {
+    if (!isCanonicalRelationPredicate(predicate)) {
       relationIssues.push(malformedRelation(source, predicateLine, `Invalid relation predicate "${predicate}"; use strict lower kebab-case.`, { predicate }));
       continue;
     }
@@ -1064,4 +1067,4 @@ function replaceCatalog(indexContent, catalog) {
   return indexContent.slice(0, start) + catalog + indexContent.slice(end + catalogEnd.length);
 }
 
-export { MAX_PORTFOLIO_NAME_BYTES, MAX_DOCUMENT_ID_BYTES, portfolioVaultIdentity, parseVaultKey, parseDocumentId, documentIdState, formatQualifiedDocumentUri, parseQualifiedDocumentUri, portfolioDocumentIdentity, catalogStart, catalogEnd, MAX_ANALYZED_NOTES, MAX_CONNECTION_OBSERVATIONS, MAX_MENTION_PAIRS, MAX_MENTIONS, VaultAnalysisBudgetError, metadataValueFromUnknown, isCanonicalNoteId, normalizeVaultPath, searchableMarkdown, wikiLinks, parseNote, lookupNote, analyzeVault, renderCatalog, replaceCatalog };
+export { MAX_PORTFOLIO_NAME_BYTES, MAX_DOCUMENT_ID_BYTES, portfolioVaultIdentity, parseVaultKey, parseDocumentId, documentIdState, formatQualifiedDocumentUri, parseQualifiedDocumentUri, portfolioDocumentIdentity, catalogStart, catalogEnd, MAX_ANALYZED_NOTES, MAX_CONNECTION_OBSERVATIONS, MAX_MENTION_PAIRS, MAX_MENTIONS, VaultAnalysisBudgetError, metadataValueFromUnknown, isCanonicalRelationPredicate, isCanonicalNoteId, normalizeVaultPath, searchableMarkdown, wikiLinks, parseNote, lookupNote, analyzeVault, renderCatalog, replaceCatalog };

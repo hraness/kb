@@ -5,6 +5,27 @@ maintaining a vault. Markdown is the durable record. Tool output, catalogs,
 backlinks, traversed paths, semantic indexes, and percolation candidates are
 views over that record.
 
+## Customize before preparing a runtime
+
+When the request is to set up or evolve a KB, design the boundary before
+discovering or installing the CLI. Inspect the explicitly proposed repository
+and vault location without mutation. A new location does not need an existing
+`index.md`. Interview the user about the recurring questions the KB should
+answer, then present the exact read and write targets in a proposal.
+
+The approved proposal may choose the standard Markdown layout, no change, or
+zero to three companion skills for recurring rituals. A companion skill must
+name its inputs, surfaces, authority, approval boundary, durable outputs,
+idempotence, failure behavior, and verification. Skill discovery and ambient
+application or account sessions grant no authority. A changed target,
+repository, skill, account, or integration requires renewed approval.
+
+After approval, scaffold only the allowlisted paths. Matching existing bytes
+are a no-op. Stop on divergent content, path escape, a symbolic link, partial
+failure, or an unapproved external surface. Prepare the runtime only when the
+approved operation needs it. Installation never authorizes initialization,
+indexing, QMD state, account access, or vault mutation.
+
 ## Orient before editing
 
 1. For a repository-path question, run `kb context`, read the returned
@@ -306,9 +327,12 @@ kb relation add notes/write-path supports notes/durable-agent-memory
 ```
 
 Predicates use lower-kebab-case and targets use exact vault-root IDs without
-`.md`. Explain the assertion in prose or evidence. Do not author reciprocal
-edges, inferred transitive paths, or relationships derived only from an
-embedding score.
+`.md`. Recommended predicates for common KB claims are `synthesizes`,
+`evidenced-by`, `informed-by`, `supersedes`, and `contradicts`. The list is
+advisory; a vault may use another canonical predicate whose meaning its prose
+establishes. Explain the assertion in prose or evidence. Do not author inverse,
+reciprocal, transitive, or similarity-derived edges. External or unclassified
+material does not gain a relationship automatically.
 
 ## Capture a source
 
@@ -376,6 +400,12 @@ the write and open a new session after the final check.
 
 Open the evidence cited by each percolation candidate. Promote only concepts
 likely to be reused and relationships established by the source material.
+In Percolation Result V2, a missing relationship is an unordered endpoint pair
+with a required predicate. It does not choose a source, direction, or
+`related-to` fallback. Read both endpoints and author the directed assertion
+only when their prose and evidence establish it. Parse historical unversioned
+V1 results explicitly; do not silently transform their suggested predicate
+into a V2 claim.
 Review broken and ambiguous links, typed relationships, local attachments, and
 repository-scope advisories first. Then inspect orphans and high-confidence
 title or alias mentions in context. Add a suggested link only when it improves

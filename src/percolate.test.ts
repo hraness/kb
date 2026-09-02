@@ -2,9 +2,17 @@ import { describe, expect, test } from "bun:test";
 
 import {
   MAX_PERCOLATION_EVIDENCE_PER_CANDIDATE,
+  PERCOLATION_RESULT_SCHEMA_VERSION,
+  parsePercolationCliOutput,
+  parsePercolationCliOutputV1,
+  parsePercolationResult,
+  parsePercolationResultV1,
   percolateVault,
   type MissingConceptCandidate,
   type MissingRelationCandidate,
+  type PercolationCliOutputV1,
+  type PercolationCliOutputV2,
+  type PercolationResultV1,
 } from "./percolate.js";
 import {
   analyzeVault,
@@ -12,6 +20,61 @@ import {
   type Note,
   type VaultAnalysis,
 } from "./graph.js";
+
+const frozenV018DuplicateCandidate = Object.freeze({
+  kind: "relation-hygiene" as const,
+  problem: "malformed-relation" as const,
+  source: "notes/legacy-source",
+  target: "../legacy-target",
+  predicate: "Bad Predicate",
+  message: "Legacy malformed relationship at line 4.",
+  support: 1,
+  evidenceTruncated: false,
+  evidence: Object.freeze([
+    Object.freeze({
+      kind: "relation-issue" as const,
+      issue: "malformed" as const,
+      source: "notes/legacy-source",
+      line: 4,
+      predicate: "Bad Predicate",
+      target: "../legacy-target",
+      candidates: Object.freeze([]),
+      candidatesTruncated: false,
+      message: "Legacy malformed relationship at line 4.",
+    }),
+  ]),
+});
+
+const frozenV018MalformedFixture = Object.freeze({
+  candidates: Object.freeze([
+    frozenV018DuplicateCandidate,
+    Object.freeze({
+      kind: "relation-hygiene" as const,
+      problem: "malformed-relation" as const,
+      source: "notes/legacy-source",
+      target: "../legacy-target",
+      predicate: "Bad Predicate",
+      message: "Legacy malformed relationship at line 9.",
+      support: 1,
+      evidenceTruncated: false,
+      evidence: Object.freeze([
+        Object.freeze({
+          kind: "relation-issue" as const,
+          issue: "malformed" as const,
+          source: "notes/legacy-source",
+          line: 9,
+          predicate: "Bad Predicate",
+          target: "../legacy-target",
+          candidates: Object.freeze([]),
+          candidatesTruncated: false,
+          message: "Legacy malformed relationship at line 9.",
+        }),
+      ]),
+    }),
+    frozenV018DuplicateCandidate,
+  ]),
+  truncated: false,
+}) satisfies PercolationResultV1;
 
 function discoveryFixture(): readonly Note[] {
   return [
@@ -99,9 +162,148 @@ describe("read-only graph percolation", () => {
     );
     expect(shared).toBeDefined();
     expect(shared?.support).toBe(4);
+    expect(shared?.predicate).toEqual({ kind: "required" });
     expect(new Set(shared?.evidence.map((evidence) => evidence.kind))).toEqual(
       new Set(["shared-concept", "shared-tag"]),
     );
+    expect(result.schemaVersion).toBe(PERCOLATION_RESULT_SCHEMA_VERSION);
+    expect(Object.isFrozen(result)).toBe(true);
+    expect(Object.isFrozen(result.candidates)).toBe(true);
+    expect(Object.isFrozen(shared)).toBe(true);
+    expect(Object.isFrozen(shared?.evidence)).toBe(true);
+  });
+
+  test("parses V2 and historical V1 as distinct immutable contracts", () => {
+    const v2 = percolateVault(discoveryFixture(), analyzeVault(discoveryFixture()));
+    expect(parsePercolationResult(v2)).toEqual(v2);
+    expect(() => parsePercolationResultV1(v2)).toThrow("exactly");
+
+    const v1: PercolationResultV1 = {
+      candidates: v2.candidates.map((candidate) =>
+        candidate.kind === "missing-relation"
+          ? {
+              kind: candidate.kind,
+              source: candidate.source,
+              target: candidate.target,
+              suggestedPredicate: "related-to" as const,
+              support: candidate.support,
+              evidenceTruncated: candidate.evidenceTruncated,
+              evidence: candidate.evidence,
+            }
+          : candidate),
+      truncated: v2.truncated,
+    };
+    const parsedV1 = parsePercolationResultV1(v1);
+    expect(parsedV1).toEqual(v1);
+    expect(Object.isFrozen(parsedV1)).toBe(true);
+    expect(Object.isFrozen(parsedV1.candidates)).toBe(true);
+    expect(() => parsePercolationResult(v1)).toThrow("exactly");
+
+    const cliV1: PercolationCliOutputV1 = {
+      root: "/vault",
+      note: "Alpha lookup",
+      minSupport: 2,
+      candidates: parsedV1.candidates,
+      truncated: parsedV1.truncated,
+    };
+    const cliV2: PercolationCliOutputV2 = {
+      root: "/vault",
+      note: "Alpha lookup",
+      minSupport: 2,
+      limit: 25,
+      schemaVersion: 2,
+      candidates: v2.candidates,
+      truncated: v2.truncated,
+    };
+    expect(parsePercolationCliOutputV1(cliV1)).toEqual(cliV1);
+    expect(parsePercolationCliOutput(cliV2)).toEqual(cliV2);
+    expect(() => parsePercolationCliOutputV1({
+      ...cliV1,
+      minSupport: 1,
+    })).toThrow("from 2 through 1000");
+    expect(() => parsePercolationCliOutput({
+      ...cliV2,
+      minSupport: 1,
+    })).toThrow("from 2 through 1000");
+    expect(() => parsePercolationCliOutput(cliV1)).toThrow("exactly");
+    expect(() => parsePercolationCliOutputV1(cliV2)).toThrow("exactly");
+    expect(() => parsePercolationResult(cliV2)).toThrow("exactly");
+  });
+
+  test("round-trips tied duplicate candidates from a frozen 0.18 result", () => {
+    expect(Object.isFrozen(frozenV018MalformedFixture)).toBe(true);
+    expect(Object.isFrozen(frozenV018MalformedFixture.candidates)).toBe(true);
+    const serialized = JSON.stringify(frozenV018MalformedFixture);
+    const parsed = parsePercolationResultV1(JSON.parse(serialized));
+
+    expect(parsed.candidates).toHaveLength(3);
+    expect(parsed.candidates[0]).toEqual(parsed.candidates[2]);
+    expect(parsed).toEqual(frozenV018MalformedFixture);
+    expect(JSON.stringify(parsed)).toBe(serialized);
+  });
+
+  test("rejects structural capabilities, ambiguity, and inconsistent evidence", () => {
+    const notes = discoveryFixture();
+    const valid = percolateVault(notes, analyzeVault(notes));
+    const relation = valid.candidates.find((candidate) =>
+      candidate.kind === "missing-relation");
+    expect(relation).toBeDefined();
+    if (relation === undefined) throw new Error("missing fixture relation");
+
+    expect(() => parsePercolationResult({
+      ...valid,
+      candidates: valid.candidates.map((candidate) =>
+        candidate === relation
+          ? { ...candidate, predicate: { kind: "suggested", value: "custom-predicate-2" } }
+          : candidate),
+    })).toThrow("predicate.kind must be required");
+
+    for (const [source, target] of [
+      [relation.target, relation.source],
+      [relation.source, relation.source],
+    ] as const) {
+      expect(() => parsePercolationResult({
+        ...valid,
+        candidates: valid.candidates.map((candidate) =>
+          candidate === relation ? { ...candidate, source, target } : candidate),
+      })).toThrow("ordered, distinct pair");
+    }
+
+    expect(() => parsePercolationResult({ ...valid, extra: true })).toThrow("exactly");
+    expect(() => parsePercolationResult(Object.assign(
+      Object.create({ inherited: true }) as object,
+      valid,
+    ))).toThrow("plain data object");
+    const accessor = { ...valid } as Record<string, unknown>;
+    Object.defineProperty(accessor, "truncated", {
+      enumerable: true,
+      get: () => false,
+    });
+    expect(() => parsePercolationResult(accessor)).toThrow("data property");
+    expect(() => parsePercolationResult({
+      ...valid,
+      candidates: [
+        ...valid.candidates,
+        ...Array.from({ length: 1_001 - valid.candidates.length }, () => relation),
+      ],
+    })).toThrow("1,000-entry limit");
+    expect(() => parsePercolationResult({
+      ...valid,
+      candidates: valid.candidates.map((candidate) =>
+        candidate === relation
+          ? {
+              ...candidate,
+              evidence: candidate.evidence.map((evidence, index) =>
+                index === 0 && "note" in evidence
+                  ? { ...evidence, note: "notes/not-an-endpoint", path: "notes/not-an-endpoint.md" }
+                  : evidence),
+            }
+          : candidate),
+    })).toThrow("unordered endpoints");
+    expect(() => parsePercolationResult({
+      ...valid,
+      candidates: valid.candidates.toReversed(),
+    })).toThrow("canonical percolation ordering");
   });
 
   test("turns graph mentions into sourced candidates and respects explicit edges", () => {
@@ -144,7 +346,7 @@ describe("read-only graph percolation", () => {
         "relations:",
         "  self-check: [notes/a]",
         "  mirrors: [notes/b]",
-        "  broken: [notes/missing]",
+        "  broken: [notes/missing, notes/missing]",
         "  Malformed: [notes/b]",
         "---",
         "# Alpha",
@@ -166,6 +368,8 @@ describe("read-only graph percolation", () => {
     expect(problems).toContain("reciprocal-relation");
     expect(problems).toContain("broken-relation");
     expect(problems).toContain("malformed-relation");
+    expect(problems.filter((problem) => problem === "broken-relation"))
+      .toHaveLength(1);
     expect(result.candidates
       .filter((candidate) => candidate.kind === "relation-hygiene")
       .every((candidate) => candidate.evidence.length > 0)).toBe(true);
@@ -280,6 +484,75 @@ describe("read-only graph percolation", () => {
       suggestedId: "notes/foo-concept",
       collidesWith: "notes/foo",
     });
+  });
+
+  test("reserves normalized concept IDs across distinct recurring tags", () => {
+    const notes = [
+      parseNote("notes/a.md", "---\ntags: [\"foo bar\", foo-bar]\n---\n# Alpha\n"),
+      parseNote("notes/b.md", "---\ntags: [\"foo bar\", foo-bar]\n---\n# Beta\n"),
+    ];
+    const concepts = percolateVault(notes, analyzeVault(notes)).candidates
+      .filter((candidate): candidate is MissingConceptCandidate =>
+        candidate.kind === "missing-concept")
+      .map(({ tag, suggestedId, collidesWith }) => ({
+        tag,
+        suggestedId,
+        collidesWith,
+      }));
+
+    expect(concepts).toEqual([
+      {
+        tag: "foo bar",
+        suggestedId: "notes/foo-bar",
+        collidesWith: null,
+      },
+      {
+        tag: "foo-bar",
+        suggestedId: "notes/foo-bar-concept",
+        collidesWith: null,
+      },
+    ]);
+    expect(new Set(concepts.map(({ suggestedId }) => suggestedId)).size).toBe(2);
+  });
+
+  test("allocates dense colliding concept IDs with bounded work", () => {
+    const separators = ["!", "@", "$", "%", "&", "*", "+", "?"] as const;
+    const tags = Array.from({ length: 16_384 }, (_, index) => {
+      let cursor = index;
+      let separator = "";
+      for (let digit = 0; digit < 5; digit += 1) {
+        separator += separators[cursor % separators.length];
+        cursor = Math.floor(cursor / separators.length);
+      }
+      return `dense${separator}collision`;
+    });
+    const notes: readonly Note[] = ["a", "b"].map((name) => ({
+      path: `notes/${name}.md`,
+      id: `notes/${name}`,
+      title: name.toUpperCase(),
+      aliases: [],
+      tags,
+      properties: {},
+      metadata: {},
+      content: "",
+      summary: "",
+      searchableText: name,
+      links: name === "a"
+        ? [{ target: "notes/b", line: 1, embedded: false }]
+        : [],
+      relationDeclarations: [],
+      relationIssues: [],
+    }));
+    const analysis = analyzeVault(notes);
+    const startedAt = performance.now();
+    const result = percolateVault(notes, analysis, { limit: 1_000 });
+
+    expect(performance.now() - startedAt).toBeLessThan(5_000);
+    expect(result.candidates).toHaveLength(1_000);
+    expect(result.truncated).toBe(true);
+    expect(new Set(result.candidates.map((candidate) =>
+      candidate.kind === "missing-concept" ? candidate.suggestedId : "",
+    )).size).toBe(1_000);
   });
 
   test("keeps suggestions compact for unusually long authored tags", () => {

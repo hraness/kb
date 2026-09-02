@@ -29,15 +29,25 @@ import {
   MAX_PERCOLATION_MENTIONS,
   MAX_PERCOLATION_MENTION_PAIRS,
   MAX_PERCOLATION_NOTES,
+  MAX_PERCOLATION_RESULT_NODES,
+  MAX_PERCOLATION_RESULT_UTF8_BYTES,
+  MAX_PERCOLATION_TEXT_UTF8_BYTES,
   MAX_SCOPED_PERCOLATION_MENTION_PAIRS,
+  PERCOLATION_RESULT_SCHEMA_VERSION,
+  parsePercolationCliOutput,
+  parsePercolationCliOutputV1,
+  parsePercolationCliOutputV2,
+  parsePercolationResult,
+  parsePercolationResultV1,
+  parsePercolationResultV2,
   percolateVault
-} from "./index-dyqwejk5.js";
+} from "./index-nd6nynv2.js";
 import {
   FrozenEvaluationSnapshotError,
   knowledgeBaseEvaluationRetrieverIds,
   openKnowledgeBaseEvaluation,
   verifyFrozenEvaluationSnapshot
-} from "./index-n5dd7r0v.js";
+} from "./index-xw9ac71d.js";
 import {
   DEFAULT_SEARCH_RESULTS,
   MAX_SEARCH_CANDIDATES,
@@ -49,7 +59,7 @@ import {
   packSearchContext,
   packUntrustedSearchContext,
   validateKnowledgeBaseSearchHistory
-} from "./index-zzhgcwyt.js";
+} from "./index-vxmf14m1.js";
 import"./index-adx6khj5.js";
 import {
   MAX_EMBEDDING_MODEL_BYTES,
@@ -75,7 +85,7 @@ import {
   searchSemanticVault,
   semanticDatabasePath,
   sha256EmbeddingModelFile
-} from "./index-zxdy5pby.js";
+} from "./index-5m2ydj5q.js";
 import"./index-4j3tt0c3.js";
 import {
   GitHistoryError,
@@ -144,14 +154,14 @@ import {
   normalizeRelationPredicate,
   noteRevision,
   removeNoteRelation
-} from "./index-01jj6rbv.js";
+} from "./index-gxr0fctd.js";
 import"./index-3rm7cz6h.js";
 import {
   createRepresentativeRetrievalFixture,
   createSyntheticRankFusionFixture,
   evaluateRanking,
   evaluateRetrievalBenchmark
-} from "./index-s2gw5aw9.js";
+} from "./index-qwgsmtsz.js";
 import {
   MAX_SEARCH_QUERY_BYTES,
   MAX_SEARCH_QUERY_TERMS,
@@ -159,7 +169,7 @@ import {
   fuseRankedCandidates,
   searchExactVault,
   validateSearchQuery
-} from "./index-cv6fh7z5.js";
+} from "./index-gm9t95d9.js";
 import {
   MAX_NAVIGATION_INDEXED_CONNECTIONS,
   MAX_NAVIGATION_RETURNED_CONNECTIONS,
@@ -235,6 +245,7 @@ import {
   catalogEnd,
   catalogStart,
   isCanonicalNoteId,
+  isCanonicalRelationPredicate,
   lookupNote,
   metadataValueFromUnknown,
   normalizeVaultPath,
@@ -243,7 +254,7 @@ import {
   replaceCatalog,
   searchableMarkdown,
   wikiLinks
-} from "./index-cxfrakt7.js";
+} from "./index-ekpwvbra.js";
 import"./index-1xxnjn0d.js";
 // src/oh-adoption.ts
 import { createHash } from "crypto";
@@ -593,6 +604,12 @@ export {
   planStatuses,
   percolateVault,
   parseRetrievalEvaluationCorpus,
+  parsePercolationResultV2,
+  parsePercolationResultV1,
+  parsePercolationResult,
+  parsePercolationCliOutputV2,
+  parsePercolationCliOutputV1,
+  parsePercolationCliOutput,
   parseNote,
   parseLocalAttachmentReferences,
   parseGitHistoryOutput,
@@ -618,6 +635,7 @@ export {
   knowledgeBaseEvaluationRetrieverIds,
   isTerminalPlanStatus,
   isPlanStatus,
+  isCanonicalRelationPredicate,
   isCanonicalNoteId,
   isActivePlanStatus,
   inspectRepositoryScopeState,
@@ -677,6 +695,7 @@ export {
   RepositoryScopeError,
   RETRIEVAL_EVALUATION_SCHEMA_VERSION,
   RETRIEVAL_EVALUATION_REPORT_VERSION,
+  PERCOLATION_RESULT_SCHEMA_VERSION,
   NoteRevisionConflictError,
   NoteRecoveryRequiredError,
   NoteAlreadyExistsError,
@@ -714,6 +733,9 @@ export {
   MAX_QUERY_METADATA_PATH_SEGMENTS,
   MAX_QUERY_FILTER_VALUES,
   MAX_QUERY_FILTERS,
+  MAX_PERCOLATION_TEXT_UTF8_BYTES,
+  MAX_PERCOLATION_RESULT_UTF8_BYTES,
+  MAX_PERCOLATION_RESULT_NODES,
   MAX_PERCOLATION_NOTES,
   MAX_PERCOLATION_MENTION_PAIRS,
   MAX_PERCOLATION_MENTIONS,
