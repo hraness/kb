@@ -112,6 +112,16 @@ Do not add an npm publishing token to GitHub. Preserve
    exact verified source SHA, and the explicit true input. A collaborator
    rerun, a missing or false input, a push, another branch, or a stale commit
    cannot reach npm.
+   Before mutation, the job also reads the bounded completed-run history for
+   this exact workflow. Every successful staging job carries its stable
+   version in the provider-owned job record. If any such version is newer than
+   public `dist-tags.latest`, the new run stops, so workflow concurrency cannot
+   leave two independently approvable stable candidates after the first run
+   ends. The same final boundary re-reads `latest` and requires this candidate
+   to be strictly newer. The sole successful pre-versioned stage record is
+   sealed to run `33269920554`, attempt `1`, source
+   `e12d3fd05ffaa722ac1c43a8ecaa7d21fece679a`, and version `0.17.3`; every
+   later successful stage must carry its version in the Actions job name.
 4. Batch the unavoidable human gate into an intentional stable release, then
    inspect and approve the staged package through npm with two-factor
    authentication.
@@ -127,7 +137,18 @@ Do not add an npm publishing token to GitHub. Preserve
    canonical npm publish and SLSA provenance attestations for that tarball and
    source commit. It also requires `dist-tags.latest` to equal the release
    version and reads `latest` again immediately before any GitHub Release
-   mutation.
+   mutation. A newly created or recovery Release must have the exact title and
+   run/source receipt written by this workflow and immutable creator
+   `github-actions[bot]` ID `41898282`; a collaborator-created release cannot
+   be accepted as successful delivery.
+
+If npm rejects a candidate, reject that exact staged version through npm first
+(npm requires two-factor authentication for rejection). Then dispatch the
+replacement from current `main` with `publish_to_npm=true` and
+`resolved_stage_version=<rejected version>`. This owner-authorized exceptional
+input releases only that matching Actions-history lock; leave it empty for all
+normal releases. Approval needs no override because the promoted version
+becomes public `latest` and releases the lock automatically.
 
 If candidate generation is missing or fails, dispatch **Stage npm package** from
 current `main` without the opt-in. That recovery remains build-only. Use
@@ -149,10 +170,15 @@ source and runs no repository code. It rebinds
 identity, filename, inventory, count, modes, sizes, SHA-1,
 SHA-512, and the independent SHA-256 manifest before mutation. Immediately
 before staging,
-it fetches current `main` into a new bare Git directory, then rehashes all
-three files and invokes only `npm stage publish` against
-`https://registry.npmjs.org`, with the destination channel explicitly fixed by
-`--tag latest`.
+it independently parses the packed manifest, rejects npm's top-level `tag`
+override, rejects an unresolved prior successful stage from the durable
+Actions run history, fetches current `main` into a new bare Git directory,
+then rehashes all three files and invokes only `npm stage publish` against
+`https://registry.npmjs.org`. It rejects ambient tag configuration, runs from
+an empty directory with empty user/global npm config, and proves pinned npm's
+clean default `latest` before invocation. Leaving the tag implicit preserves
+npm's own higher-version guard; the independently validated packed manifest
+cannot override it.
 
 ## Protect release tags without a sudo prompt
 

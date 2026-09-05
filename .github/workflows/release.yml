@@ -610,21 +610,41 @@ jobs:
             exit 1
           fi
 
-          if ! gh release view "$VERIFIED_TAG" >/dev/null 2>&1; then
-            gh release create "$VERIFIED_TAG" \
-              --verify-tag \
-              --generate-notes \
-              --latest \
-              --title "KB $VERIFIED_TAG"
+          printf -v expected_release_body \
+            'Automated immutable release for @hraness/kb@%s.\n\nSource commit: %s\nWorkflow run: %s' \
+            "$verified_version" "$VERIFIED_SOURCE_SHA" "$GITHUB_RUN_ID"
+          release_json="$(mktemp "$RUNNER_TEMP/kb-release.XXXXXX")"
+          if ! gh release create "$VERIFIED_TAG" \
+            --verify-tag \
+            --latest \
+            --title "KB $VERIFIED_TAG" \
+            --notes "$expected_release_body"; then
+            echo "::notice::Release creation did not complete; validating exact idempotent state"
           fi
-          release_state="$(gh release view "$VERIFIED_TAG" \
-            --json assets,isDraft,isImmutable,isPrerelease,tagName \
-            --jq '[.tagName, .isDraft, .isPrerelease, .isImmutable, (.assets | length)] | @tsv')"
-          expected_state="$VERIFIED_TAG"$'\tfalse\tfalse\ttrue\t0'
-          if [[ "$release_state" != "$expected_state" ]]; then
-            echo "::error::Release $VERIFIED_TAG is not published and immutable"
-            exit 1
-          fi
+          gh api "/repos/$GITHUB_REPOSITORY/releases/tags/$VERIFIED_TAG" \
+            > "$release_json"
+          RELEASE_JSON="$release_json" \
+            EXPECTED_ACTIONS_BOT_ID="41898282" \
+            EXPECTED_BODY="$expected_release_body" \
+            EXPECTED_NAME="KB $VERIFIED_TAG" node <<'NODE'
+          const { readFileSync } = require("node:fs");
+          const release = JSON.parse(readFileSync(process.env.RELEASE_JSON, "utf8"));
+          if (
+            !release
+            || typeof release !== "object"
+            || release.tag_name !== process.env.VERIFIED_TAG
+            || release.name !== process.env.EXPECTED_NAME
+            || release.body !== process.env.EXPECTED_BODY
+            || release.draft !== false
+            || release.prerelease !== false
+            || release.immutable !== true
+            || !Array.isArray(release.assets)
+            || release.assets.length !== 0
+            || release.author?.id !== Number(process.env.EXPECTED_ACTIONS_BOT_ID)
+            || release.author?.login !== "github-actions[bot]"
+            || release.author?.type !== "Bot"
+          ) throw new Error("GitHub Release is not the exact immutable artifact created by this authorized Actions run");
+          NODE
           latest_tag="$(gh api "/repos/$GITHUB_REPOSITORY/releases/latest" --jq '.tag_name')"
           if [[ "$latest_tag" != "$VERIFIED_TAG" ]]; then
             echo "::error::Latest release is $latest_tag, expected $VERIFIED_TAG"

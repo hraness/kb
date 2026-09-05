@@ -45,6 +45,102 @@ function integrity(bytes: Uint8Array): string {
   return `sha512-${createHash("sha512").update(bytes).digest("base64")}`;
 }
 
+function sha256(bytes: Uint8Array): string {
+  return createHash("sha256").update(bytes).digest("hex");
+}
+
+async function injectPackedTopLevelTag(
+  artifactDirectory: string,
+  tarballName: string,
+): Promise<void> {
+  const tarballPath = join(artifactDirectory, tarballName);
+  const metadataPath = join(artifactDirectory, "npm-pack.json");
+  const digestPath = join(artifactDirectory, "npm-package.sha256");
+  const tar = gunzipSync(await readFile(tarballPath));
+  let offset = 0;
+  let replaced = false;
+  while (offset + 512 <= tar.length) {
+    const header = tar.subarray(offset, offset + 512);
+    offset += 512;
+    if (header.every((byte) => byte === 0)) break;
+    const readText = (start: number, length: number): string => {
+      const field = header.subarray(start, start + length);
+      const zero = field.indexOf(0);
+      return (zero < 0 ? field : field.subarray(0, zero)).toString("ascii");
+    };
+    const name = readText(0, 100);
+    const prefix = readText(345, 155);
+    const path = prefix === "" ? name : `${prefix}/${name}`;
+    const sizeText = readText(124, 12).trim();
+    if (!/^[0-7]+$/u.test(sizeText)) throw new Error("Test tar entry size is invalid");
+    const size = Number.parseInt(sizeText, 8);
+    if (path === "package/package.json") {
+      const source = tar.subarray(offset, offset + size).toString("utf8");
+      const original = '"type": "module",';
+      const hostile = '"tag": "beta",   ';
+      if (original.length !== hostile.length || !source.includes(original)) {
+        throw new Error("Packed manifest lacks the fixed-width mutation target");
+      }
+      Buffer.from(source.replace(original, hostile), "utf8").copy(tar, offset);
+      replaced = true;
+    }
+    offset += Math.ceil(size / 512) * 512;
+  }
+  if (!replaced) throw new Error("Packed manifest was not mutated");
+
+  const archive = gzipSync(tar);
+  const metadata = JSON.parse(await readFile(metadataPath, "utf8")) as Array<Record<string, unknown>>;
+  if (metadata.length !== 1 || metadata[0] === undefined) {
+    throw new Error("Test npm-pack.json is invalid");
+  }
+  metadata[0].size = archive.byteLength;
+  metadata[0].integrity = integrity(archive);
+  metadata[0].shasum = sha1(archive);
+  const metadataBytes = Buffer.from(`${JSON.stringify(metadata)}\n`, "utf8");
+  await Promise.all([
+    writeFile(tarballPath, archive),
+    writeFile(metadataPath, metadataBytes),
+    writeFile(
+      digestPath,
+      `${sha256(archive)}  ${tarballName}\n${sha256(metadataBytes)}  npm-pack.json\n`,
+    ),
+  ]);
+}
+
+async function corruptPackedUstarVersion(
+  artifactDirectory: string,
+  tarballName: string,
+): Promise<void> {
+  const tarballPath = join(artifactDirectory, tarballName);
+  const metadataPath = join(artifactDirectory, "npm-pack.json");
+  const digestPath = join(artifactDirectory, "npm-package.sha256");
+  const tar = gunzipSync(await readFile(tarballPath));
+  const signature = Buffer.from([0x75, 0x73, 0x74, 0x61, 0x72, 0x00, 0x30, 0x30]);
+  if (!tar.subarray(257, 265).equals(signature)) {
+    throw new Error("Test archive lacks an exact USTAR magic/version header");
+  }
+  tar[263] = 0x78;
+  tar[264] = 0x78;
+  writeHeaderChecksum(tar, 0);
+  const archive = gzipSync(tar);
+  const metadata = JSON.parse(await readFile(metadataPath, "utf8")) as Array<Record<string, unknown>>;
+  if (metadata.length !== 1 || metadata[0] === undefined) {
+    throw new Error("Test npm-pack.json is invalid");
+  }
+  metadata[0].size = archive.byteLength;
+  metadata[0].integrity = integrity(archive);
+  metadata[0].shasum = sha1(archive);
+  const metadataBytes = Buffer.from(`${JSON.stringify(metadata)}\n`, "utf8");
+  await Promise.all([
+    writeFile(tarballPath, archive),
+    writeFile(metadataPath, metadataBytes),
+    writeFile(
+      digestPath,
+      `${sha256(archive)}  ${tarballName}\n${sha256(metadataBytes)}  npm-pack.json\n`,
+    ),
+  ]);
+}
+
 function requireOwnerReleaseAuthorization(workflow: string): void {
   const start = workflow.indexOf("  authorize:\n");
   const end = workflow.indexOf("\n  verify:\n");
@@ -269,6 +365,7 @@ describe("npm release workflows", () => {
 
     for (const required of [
       "publish_to_npm:",
+      "resolved_stage_version:",
       "required: false",
       "default: false",
       "type: boolean",
@@ -296,6 +393,7 @@ describe("npm release workflows", () => {
     expect(verifyJob).not.toContain("npm stage publish");
 
     for (const required of [
+      "name: Stage exact package v${{ needs.verify.outputs.package_version }}",
       "if: inputs.publish_to_npm == true",
       "environment: npm-stage",
       "permissions:\n      actions: read\n      id-token: write",
@@ -304,6 +402,10 @@ describe("npm release workflows", () => {
       'PUBLISH_TO_NPM: ${{ inputs.publish_to_npm }}',
       'REF_PROTECTED: ${{ github.ref_protected }}',
       "attempt.triggering_actor?.id !== actorId",
+      "Reject another pending stable stage",
+      "Completed npm-stage history exceeds the reviewed 100-run bound",
+      "already staged pending",
+      "RESOLVED_STAGE_VERSION: ${{ inputs.resolved_stage_version }}",
       "actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c",
       "Downloaded npm artifact must contain exactly the tarball, npm-pack.json, and npm-package.sha256",
       'expected_tarball_name="hraness-kb-$EXPECTED_VERSION.tgz"',
@@ -315,6 +417,10 @@ describe("npm release workflows", () => {
       'createHash("sha1")',
       'createHash("sha512")',
       'createHash("sha256")',
+      'gunzipSync(archiveBytes',
+      'header.subarray(257, 265).equals(ustarSignature)',
+      'Object.hasOwn(manifest, "tag")',
+      'JSON.stringify(Object.keys(publishConfig).sort()) !== JSON.stringify(["access", "registry"])',
       'git init --quiet --bare "$current_main"',
       '"https://github.com/$GITHUB_REPOSITORY.git"',
       'EXPECTED_VERSION: ${{ needs.verify.outputs.package_version }}',
@@ -330,7 +436,10 @@ describe("npm release workflows", () => {
       'npm stage publish "$TARBALL"',
       "--ignore-scripts",
       "--provenance",
-      "--tag latest",
+      "npm config get tag",
+      "Pinned npm's clean default publication tag is not latest",
+      '--globalconfig="$clean_global_config"',
+      '--userconfig="$clean_user_config"',
       `--registry=${npmRegistry}`,
     ] as const) expect(stageJob).toContain(required);
     expect(workflow.match(/id-token: write/gu) ?? []).toHaveLength(1);
@@ -340,14 +449,18 @@ describe("npm release workflows", () => {
     expect(stageJob).not.toMatch(/\bbun\b/u);
     expect(stageJob).not.toContain("./scripts/");
     expect(stageJob.match(/npm stage publish/gu) ?? []).toHaveLength(1);
+    expect(stageJob).not.toContain("--tag latest");
     const authorizationIndex = stageJob.indexOf("Reauthorize current npm staging attempt");
     const setupIndex = stageJob.indexOf("actions/setup-node@");
+    const pendingStageIndex = stageJob.indexOf("Reject another pending stable stage");
     const fetchIndex = stageJob.lastIndexOf('git --git-dir="$current_main" fetch');
     const tagLookupIndex = stageJob.lastIndexOf("git ls-remote --exit-code --refs");
     const rehashIndex = stageJob.lastIndexOf('current_archive_sha256="$(sha256sum "$TARBALL"');
     const stageIndex = stageJob.indexOf('npm stage publish "$TARBALL"');
     expect(authorizationIndex).toBeGreaterThan(-1);
     expect(authorizationIndex).toBeLessThan(setupIndex);
+    expect(pendingStageIndex).toBeGreaterThan(setupIndex);
+    expect(pendingStageIndex).toBeLessThan(stageIndex);
     expect(fetchIndex).toBeGreaterThan(-1);
     expect(fetchIndex).toBeLessThan(tagLookupIndex);
     expect(tagLookupIndex).toBeLessThan(rehashIndex);
@@ -532,6 +645,195 @@ describe("npm release workflows", () => {
     }
   });
 
+  test("a completed stage remains a durable lock until that version is public latest", async () => {
+    const workflow = await readFile(stageWorkflowUrl, "utf8");
+    const script = workflowStepScript(workflow, "Reject another pending stable stage");
+    const directory = await mkdtemp(join(tmpdir(), "kb-stage-history-"));
+    const binaryDirectory = join(directory, "bin");
+    const runsPath = join(directory, "runs.json");
+    const jobsPath = join(directory, "jobs.json");
+    try {
+      await mkdir(binaryDirectory, { recursive: true });
+      await writeFile(
+        join(binaryDirectory, "npm"),
+        [
+          "#!/bin/bash",
+          "set -euo pipefail",
+          "printf '\"%s\"\\n' \"$MOCK_NPM_LATEST\"",
+        ].join("\n"),
+      );
+      await writeFile(
+        join(binaryDirectory, "gh"),
+        [
+          "#!/bin/bash",
+          "set -euo pipefail",
+          'case "$*" in',
+          '  *"/actions/workflows/344070109/runs?"*) cat "$MOCK_RUNS_JSON" ;;',
+          '  *"/actions/runs/12345/jobs?"*|*"/actions/runs/33269920554/jobs?"*) cat "$MOCK_JOBS_JSON" ;;',
+          '  *) echo "unexpected gh request: $*" >&2; exit 2 ;;',
+          "esac",
+        ].join("\n"),
+      );
+      await Promise.all([
+        chmod(join(binaryDirectory, "npm"), 0o755),
+        chmod(join(binaryDirectory, "gh"), 0o755),
+        writeFile(runsPath, JSON.stringify({
+          total_count: 1,
+          workflow_runs: [{
+            id: 12345,
+            workflow_id: 344070109,
+            event: "workflow_dispatch",
+            head_branch: "main",
+            status: "completed",
+          }],
+        })),
+      ]);
+      const environment = {
+        PATH: `${binaryDirectory}:${process.env.PATH ?? ""}`,
+        EXPECTED_VERSION: "0.19.2",
+        EXPECTED_WORKFLOW_ID: "344070109",
+        GITHUB_REPOSITORY: "hraness/kb",
+        GITHUB_RUN_ID: "67890",
+        MOCK_NPM_LATEST: "0.19.0",
+        MOCK_RUNS_JSON: runsPath,
+        MOCK_JOBS_JSON: jobsPath,
+        RESOLVED_STAGE_VERSION: "",
+      };
+
+      await writeFile(jobsPath, JSON.stringify({
+        total_count: 1,
+        jobs: [{ name: "Stage exact package v0.19.0", conclusion: "success" }],
+      }));
+      const released = await runWorkflowScript(script, environment);
+      expect(released.exitCode).toBe(0);
+
+      await writeFile(jobsPath, JSON.stringify({
+        total_count: 1,
+        jobs: [{ name: "Stage exact package v0.19.1", conclusion: "success" }],
+      }));
+      const pending = await runWorkflowScript(script, environment);
+      expect(pending.exitCode).not.toBe(0);
+      expect(pending.stderr).toContain(
+        "run 12345 already staged pending 0.19.1",
+      );
+
+      const rejectedInNpm = await runWorkflowScript(script, {
+        ...environment,
+        RESOLVED_STAGE_VERSION: "0.19.1",
+      });
+      expect(rejectedInNpm.exitCode).toBe(0);
+
+      await writeFile(jobsPath, JSON.stringify({
+        total_count: 1,
+        jobs: [{ name: "Stage exact package", conclusion: "success" }],
+      }));
+      const unboundHistory = await runWorkflowScript(script, environment);
+      expect(unboundHistory.exitCode).not.toBe(0);
+      expect(unboundHistory.stderr).toContain("lacks a version-bound stage job");
+
+      await Promise.all([
+        writeFile(runsPath, JSON.stringify({
+          total_count: 1,
+          workflow_runs: [{
+            id: 33269920554,
+            workflow_id: 344070109,
+            event: "workflow_dispatch",
+            head_branch: "main",
+            status: "completed",
+          }],
+        })),
+        writeFile(jobsPath, JSON.stringify({
+          total_count: 1,
+          jobs: [{
+            name: "Stage exact package",
+            conclusion: "success",
+            head_sha: "e12d3fd05ffaa722ac1c43a8ecaa7d21fece679a",
+            run_attempt: 1,
+          }],
+        })),
+      ]);
+      const sealedLegacyStage = await runWorkflowScript(script, environment);
+      expect(sealedLegacyStage.exitCode).toBe(0);
+    } finally {
+      await rm(directory, { recursive: true, force: true });
+    }
+  });
+
+  test("the source-free staging boundary rejects npm's packed top-level tag override", async () => {
+    const workflow = await readFile(stageWorkflowUrl, "utf8");
+    const script = workflowStepScript(workflow, "Rebind downloaded package");
+    const manifest = JSON.parse(await readFile(manifestUrl, "utf8")) as { readonly version: string };
+    const root = await mkdtemp(join(tmpdir(), "kb-stage-packed-manifest-"));
+    const artifactDirectory = join(root, "kb-npm-stage");
+    const tarballName = `hraness-kb-${manifest.version}.tgz`;
+    const githubOutput = join(root, "github-output.txt");
+    try {
+      await run([
+        process.execPath,
+        "run",
+        "./scripts/prepare-npm-package.ts",
+        artifactDirectory,
+      ], repository);
+      const [archiveBytes, metadataBytes] = await Promise.all([
+        readFile(join(artifactDirectory, tarballName)),
+        readFile(join(artifactDirectory, "npm-pack.json")),
+      ]);
+      await writeFile(
+        join(artifactDirectory, "npm-package.sha256"),
+        `${sha256(archiveBytes)}  ${tarballName}\n${sha256(metadataBytes)}  npm-pack.json\n`,
+      );
+      const environment = {
+        EXPECTED_SOURCE_SHA: "a".repeat(40),
+        EXPECTED_TARBALL_NAME: tarballName,
+        EXPECTED_VERSION: manifest.version,
+        GITHUB_OUTPUT: githubOutput,
+        RUNNER_TEMP: root,
+      };
+      const accepted = await runWorkflowScript(script, environment);
+      if (accepted.exitCode !== 0) {
+        throw new Error(`Canonical packed manifest was rejected:\n${accepted.stderr}${accepted.stdout}`);
+      }
+
+      await injectPackedTopLevelTag(artifactDirectory, tarballName);
+      const rejected = await runWorkflowScript(script, environment);
+      expect(rejected.exitCode).not.toBe(0);
+      expect(rejected.stderr).toContain(
+        "Packed KB can publish only with the canonical npm registry and dist-tag policy",
+      );
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
+  });
+
+  test("the source-free staging boundary rejects a USTAR version/path differential", async () => {
+    const workflow = await readFile(stageWorkflowUrl, "utf8");
+    const script = workflowStepScript(workflow, "Rebind downloaded package");
+    const manifest = JSON.parse(await readFile(manifestUrl, "utf8")) as { readonly version: string };
+    const root = await mkdtemp(join(tmpdir(), "kb-stage-ustar-version-"));
+    const artifactDirectory = join(root, "kb-npm-stage");
+    const tarballName = `hraness-kb-${manifest.version}.tgz`;
+    try {
+      await run([
+        process.execPath,
+        "run",
+        "./scripts/prepare-npm-package.ts",
+        artifactDirectory,
+      ], repository);
+      await corruptPackedUstarVersion(artifactDirectory, tarballName);
+      const rejected = await runWorkflowScript(script, {
+        EXPECTED_SOURCE_SHA: "a".repeat(40),
+        EXPECTED_TARBALL_NAME: tarballName,
+        EXPECTED_VERSION: manifest.version,
+        GITHUB_OUTPUT: join(root, "github-output.txt"),
+        RUNNER_TEMP: root,
+      });
+      expect(rejected.exitCode).not.toBe(0);
+      expect(rejected.stderr).toContain("Packed package.json tar header is invalid");
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
+  });
+
   test("hostile actor or sender drift cannot reach the protected release workflow", async () => {
     const workflow = await readFile(releaseWorkflowUrl, "utf8");
     expect(() => requireOwnerReleaseAuthorization(workflow)).not.toThrow();
@@ -575,6 +877,9 @@ describe("npm release workflows", () => {
     expect(publishJob).toContain("attempt.triggering_actor?.id !== actorId");
     expect(publishJob).toContain('attempt.triggering_actor?.type !== "User"');
     expect(publishJob).toContain('repository.visibility !== "public"');
+    expect(publishJob).toContain('EXPECTED_ACTIONS_BOT_ID="41898282"');
+    expect(publishJob).toContain("Automated immutable release for @hraness/kb@");
+    expect(publishJob).toContain("GitHub Release is not the exact immutable artifact created by this authorized Actions run");
 
     const script = workflowStepScript(workflow, "Reauthorize current release attempt");
     const directory = await mkdtemp(join(tmpdir(), "kb-release-attempt-"));
@@ -760,6 +1065,89 @@ describe("npm release workflows", () => {
     }
   });
 
+  test("a pre-existing GitHub Release must carry this Actions run's exact identity", async () => {
+    const workflow = await readFile(releaseWorkflowUrl, "utf8");
+    const script = workflowStepScript(workflow, "Publish verified GitHub Release");
+    const directory = await mkdtemp(join(tmpdir(), "kb-release-identity-"));
+    const binaryDirectory = join(directory, "bin");
+    const releasePath = join(directory, "release.json");
+    const sourceSha = "b".repeat(40);
+    const expectedBody = [
+      "Automated immutable release for @hraness/kb@0.20.0.",
+      "",
+      `Source commit: ${sourceSha}`,
+      "Workflow run: 67890",
+    ].join("\n");
+    try {
+      await mkdir(binaryDirectory, { recursive: true });
+      await writeFile(
+        join(binaryDirectory, "npm"),
+        ["#!/bin/bash", "set -euo pipefail", "printf '\"0.20.0\"\\n'"].join("\n"),
+      );
+      await writeFile(
+        join(binaryDirectory, "gh"),
+        [
+          "#!/bin/bash",
+          "set -euo pipefail",
+          'case "$*" in',
+          '  *"/commits/v0.20.0"*) printf \'%s\\n\' "$MOCK_SOURCE_SHA" ;;',
+          '  *"/commits/main"*) printf \'%s\\n\' "$MOCK_SOURCE_SHA" ;;',
+          '  *"/compare/"*) printf \'ahead\\n\' ;;',
+          '  *"/tags?per_page=100"*) printf \'v0.20.0\\n\' ;;',
+          '  *"/releases?per_page=100"*) printf \'\\n\' ;;',
+          '  *"/releases/tags/v0.20.0"*) cat "$MOCK_RELEASE_JSON" ;;',
+          '  *"/releases/latest"*) printf \'v0.20.0\\n\' ;;',
+          '  *) echo "unexpected gh invocation: $*" >&2; exit 2 ;;',
+          "esac",
+        ].join("\n"),
+      );
+      await Promise.all([
+        chmod(join(binaryDirectory, "npm"), 0o755),
+        chmod(join(binaryDirectory, "gh"), 0o755),
+      ]);
+      const environment = {
+        PATH: `${binaryDirectory}:${process.env.PATH ?? ""}`,
+        DEFAULT_BRANCH: "main",
+        GITHUB_EVENT_NAME: "push",
+        GITHUB_REF: "refs/tags/v0.20.0",
+        GITHUB_REPOSITORY: "hraness/kb",
+        GITHUB_RUN_ID: "67890",
+        GITHUB_SHA: sourceSha,
+        MOCK_RELEASE_JSON: releasePath,
+        MOCK_SOURCE_SHA: sourceSha,
+        RUNNER_TEMP: directory,
+        VERIFIED_SOURCE_SHA: sourceSha,
+        VERIFIED_TAG: "v0.20.0",
+        WORKFLOW_SHA: sourceSha,
+      };
+      const release = {
+        tag_name: "v0.20.0",
+        name: "KB v0.20.0",
+        body: expectedBody,
+        draft: false,
+        prerelease: false,
+        immutable: true,
+        assets: [],
+        author: { id: 123456, login: "collaborator", type: "User" },
+      };
+      await writeFile(releasePath, JSON.stringify(release));
+      const frontRun = await runWorkflowScript(script, environment);
+      expect(frontRun.exitCode).not.toBe(0);
+      expect(frontRun.stderr).toContain(
+        "GitHub Release is not the exact immutable artifact created by this authorized Actions run",
+      );
+
+      await writeFile(releasePath, JSON.stringify({
+        ...release,
+        author: { id: 41898282, login: "github-actions[bot]", type: "Bot" },
+      }));
+      const authorizedRecovery = await runWorkflowScript(script, environment);
+      expect(authorizedRecovery.exitCode).toBe(0);
+    } finally {
+      await rm(directory, { recursive: true, force: true });
+    }
+  });
+
   test("gates immutable releases on an owner-created protected stable tag and exact npm delivery", async () => {
     const [workflow, artifact, identity] = await Promise.all([
       readFile(releaseWorkflowUrl, "utf8"),
@@ -800,6 +1188,8 @@ describe("npm release workflows", () => {
       'npm view "@hraness/kb" dist-tags.latest',
       'current_tag_sha="$(gh api',
       'compare/$VERIFIED_SOURCE_SHA...$current_default_sha',
+      'EXPECTED_ACTIONS_BOT_ID="41898282"',
+      "Automated immutable release for @hraness/kb@",
     ] as const) expect(workflow).toContain(required);
     const auditIndex = workflow.indexOf("npm audit signatures");
     const attestationIndex = workflow.indexOf('bun --no-env-file --config=/dev/null run "$current_attestation"');
@@ -866,7 +1256,8 @@ describe("npm release workflows", () => {
       "`npm audit signatures --json",
       "`dist-tags.latest`",
       "owner ID `307125679`",
-      "`--tag latest`",
+      "clean default `latest`",
+      "top-level `tag`",
       "rebinds the release helpers to their reviewed Git blobs",
       "invokes those files by absolute path",
       "`npm pack --ignore-scripts`",
@@ -889,7 +1280,7 @@ describe("npm release workflows", () => {
     expect(agents).toContain("public promotion remains human-gated by two-factor authentication");
     expect(agents).toContain("boolean `publish_to_npm=true`");
     expect(agents).toContain("`actions: read` plus `id-token: write`");
-    expect(agents).toContain("explicit `--tag latest`");
+    expect(agents).toContain("clean default `latest`");
     expect(agents).toContain("pinned npm `11.19.0`");
     expect(agents).toContain("sole main source commit");
     expect(agents).toContain("The protected tag workflow must bind the actor and event sender");
@@ -899,8 +1290,10 @@ describe("npm release workflows", () => {
   test("pins publication to the canonical npm registry", async () => {
     const manifest = JSON.parse(await readFile(manifestUrl, "utf8")) as {
       readonly publishConfig?: unknown;
+      readonly tag?: unknown;
     };
     expect(manifest.publishConfig).toEqual({ access: "public", registry: npmRegistry });
+    expect(Object.hasOwn(manifest, "tag")).toBe(false);
   });
 });
 

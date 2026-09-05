@@ -46,8 +46,12 @@ export function validateNpmStageWorkflow(source: string, label: string): void {
     dispatchInputs.publish_to_npm,
     `${label} publish_to_npm input`,
   );
+  const resolvedStageInput = record(
+    dispatchInputs.resolved_stage_version,
+    `${label} resolved_stage_version input`,
+  );
   if (
-    Object.keys(dispatchInputs).length !== 1
+    Object.keys(dispatchInputs).length !== 2
     || publishInput.default !== false
     || publishInput.required !== false
     || publishInput.type !== "boolean"
@@ -55,6 +59,15 @@ export function validateNpmStageWorkflow(source: string, label: string): void {
     || publishInput.description.length === 0
   ) {
     throw new Error(`${label} must expose one fail-closed boolean publish_to_npm input`);
+  }
+  if (
+    resolvedStageInput.default !== ""
+    || resolvedStageInput.required !== false
+    || resolvedStageInput.type !== "string"
+    || typeof resolvedStageInput.description !== "string"
+    || resolvedStageInput.description.length === 0
+  ) {
+    throw new Error(`${label} must expose one empty-by-default resolved_stage_version recovery input`);
   }
   const push = record(triggers.push, `${label} push trigger`);
   if (
@@ -71,6 +84,9 @@ export function validateNpmStageWorkflow(source: string, label: string): void {
   const select = record(jobs.select, `${label} select job`);
   const verify = record(jobs.verify, `${label} verify job`);
   const stage = record(jobs.stage, `${label} stage job`);
+  if (stage.name !== "Stage exact package v${{ needs.verify.outputs.package_version }}") {
+    throw new Error(`${label} staging job name must bind the exact package version`);
+  }
   const selectPermissions = record(select.permissions, `${label} select permissions`);
   if (
     selectPermissions.contents !== "read"
@@ -206,6 +222,37 @@ export function validateNpmStageWorkflow(source: string, label: string): void {
       throw new Error(`${label} ${stepName} must reject unsafe stable-version components`);
     }
   }
+  const pendingStageStep = steps.find((step) => step.name === "Reject another pending stable stage");
+  if (pendingStageStep === undefined || typeof pendingStageStep.run !== "string") {
+    throw new Error(`${label} must reject another unresolved successful stage`);
+  }
+  if (!pendingStageStep.run.includes("BigInt(Number.MAX_SAFE_INTEGER)")) {
+    throw new Error(`${label} pending-stage guard must reject unsafe stable-version components`);
+  }
+  const pendingStageEnvironment = record(
+    pendingStageStep.env,
+    `${label} pending-stage environment`,
+  );
+  if (
+    pendingStageEnvironment.EXPECTED_VERSION !== "${{ needs.verify.outputs.package_version }}"
+    || pendingStageEnvironment.EXPECTED_WORKFLOW_ID !== "344070109"
+    || pendingStageEnvironment.GH_TOKEN !== "${{ github.token }}"
+    || pendingStageEnvironment.RESOLVED_STAGE_VERSION !== "${{ inputs.resolved_stage_version }}"
+  ) {
+    throw new Error(`${label} pending-stage guard must bind exact workflow history and recovery input`);
+  }
+  for (const required of [
+    "Completed npm-stage history exceeds the reviewed 100-run bound",
+    "Stage exact package v",
+    "already staged pending",
+    "does not identify a blocking stage",
+    'execute("npm", [',
+    "dist-tags.latest",
+  ]) {
+    if (!pendingStageStep.run.includes(required)) {
+      throw new Error(`${label} pending-stage guard is missing ${required}`);
+    }
+  }
   if (steps.some((step) =>
     typeof step.uses === "string"
     && (step.uses.startsWith("actions/checkout@") || step.uses.startsWith("oven-sh/setup-bun@")))) {
@@ -228,6 +275,7 @@ export function validateNpmStageWorkflow(source: string, label: string): void {
     "EXPECTED_DIGEST_SHA256",
     "EXPECTED_METADATA_SHA256",
     "EXPECTED_SOURCE_SHA",
+    "EXPECTED_VERSION",
     "METADATA",
     "TARBALL",
   ]) {
@@ -239,12 +287,12 @@ export function validateNpmStageWorkflow(source: string, label: string): void {
     'git init --quiet --bare "$current_main"',
     'git --git-dir="$current_main" fetch',
     'current_default_sha="$(git --git-dir="$current_main" rev-parse FETCH_HEAD)"',
+    'npm view "@hraness/kb" dist-tags.latest',
     'current_archive_sha256="$(sha256sum "$TARBALL"',
     'current_metadata_sha256="$(sha256sum "$METADATA"',
     'current_digest_sha256="$(sha256sum "$DIGEST"',
+    "npm config get tag",
     'npm stage publish "$TARBALL"',
-    "--tag latest",
-    "--registry=https://registry.npmjs.org",
   ];
   let previousIndex = -1;
   for (const command of guardCommands) {
@@ -253,6 +301,13 @@ export function validateNpmStageWorkflow(source: string, label: string): void {
       throw new Error(`${label} must recheck current default-branch HEAD immediately before staged publication`);
     }
     previousIndex = index;
+  }
+  const publishIndex = publicationStep.run.indexOf('npm stage publish "$TARBALL"');
+  if (!publicationStep.run.slice(publishIndex).includes("--registry=https://registry.npmjs.org")) {
+    throw new Error(`${label} staged publication must bind the canonical npm registry`);
+  }
+  if (/--tag(?:=|\s)/u.test(publicationStep.run)) {
+    throw new Error(`${label} must preserve pinned npm's default-tag monotonicity guard`);
   }
   const stageSource = JSON.stringify(stage);
   if (/\bbun\b/u.test(stageSource) || stageSource.includes("./scripts/")) {

@@ -63,6 +63,7 @@ jobs:
       'paths:\n      - "package.json"',
       "workflow_dispatch:",
       "publish_to_npm:",
+      "resolved_stage_version:",
       "required: false",
       "default: false",
       "type: boolean",
@@ -79,6 +80,7 @@ jobs:
       "actions: read",
       "id-token: write",
       "Reauthorize current npm staging attempt",
+      "Reject another pending stable stage",
       "Verified package version components exceed Number.MAX_SAFE_INTEGER",
       'EXPECTED_WORKFLOW_ID: "344070109"',
       "attempt.triggering_actor?.id !== actorId",
@@ -96,7 +98,8 @@ jobs:
       "actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c",
       "git init --quiet --bare \"$current_main\"",
       "npm stage publish \"$TARBALL\"",
-      "--tag latest",
+      "npm config get tag",
+      "Pinned npm's clean default publication tag is not latest",
       "--registry=https://registry.npmjs.org",
     ] as const) {
       expect(source).toContain(required);
@@ -105,6 +108,7 @@ jobs:
     expect(source).not.toContain("secrets.NPM_TOKEN");
     expect(source).not.toContain("NODE_AUTH_TOKEN");
     expect(source).not.toMatch(/\bnpm publish\b/u);
+    expect(source).not.toContain("--tag latest");
     expect(source.match(/id-token: write/gu) ?? []).toHaveLength(1);
     expect(source.match(/Verified package version components exceed Number\.MAX_SAFE_INTEGER/gu) ?? [])
       .toHaveLength(3);
@@ -133,6 +137,10 @@ jobs:
       "npm-stage.yml",
     )).toThrow("fail-closed boolean publish_to_npm input");
     expect(() => validateNpmStageWorkflow(
+      source.replace('default: ""', 'default: "0.19.0"'),
+      "npm-stage.yml",
+    )).toThrow("empty-by-default resolved_stage_version");
+    expect(() => validateNpmStageWorkflow(
       source.replace(
         "if: inputs.publish_to_npm == true",
         "if: always()",
@@ -151,7 +159,7 @@ jobs:
       "npm-stage.yml",
     )).toThrow("staging attempt authorization is missing");
     expect(() => validateNpmStageWorkflow(
-      source.replace("            --tag latest \\\n", ""),
+      source.replace("npm config get tag", "npm config get fund"),
       "npm-stage.yml",
     )).toThrow("must recheck current default-branch HEAD");
     expect(() => validateNpmStageWorkflow(

@@ -110,6 +110,11 @@ function verifyPublicManifest(manifest: Record<string, unknown>): string {
     access: "public",
     registry: npmRegistry,
   }, "package.json");
+  if (Object.hasOwn(manifest, "tag")) {
+    throw new Error(
+      "package.json must not contain a top-level tag because npm lets it override the requested dist-tag",
+    );
+  }
   if (manifest.private === true) throw new Error("package.json cannot be private");
   if (!Array.isArray(manifest.files) || manifest.files.length === 0) {
     throw new Error("package.json.files must be a non-empty allowlist");

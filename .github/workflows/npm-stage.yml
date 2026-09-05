@@ -12,6 +12,11 @@ on:
         required: false
         default: false
         type: boolean
+      resolved_stage_version:
+        description: Exact prior stage version already rejected in npm; leave empty normally
+        required: false
+        default: ""
+        type: string
 
 permissions:
   contents: read
@@ -240,7 +245,7 @@ jobs:
           retention-days: 30
 
   stage:
-    name: Stage exact package
+    name: Stage exact package v${{ needs.verify.outputs.package_version }}
     needs: verify
     if: inputs.publish_to_npm == true
     environment: npm-stage
@@ -358,6 +363,159 @@ jobs:
             --registry=https://registry.npmjs.org
           test "$(npm --version)" = "11.19.0"
           [[ "$(node --version)" == v24.* ]]
+      - name: Reject another pending stable stage
+        env:
+          EXPECTED_VERSION: ${{ needs.verify.outputs.package_version }}
+          EXPECTED_WORKFLOW_ID: "344070109"
+          GH_TOKEN: ${{ github.token }}
+          RESOLVED_STAGE_VERSION: ${{ inputs.resolved_stage_version }}
+        run: |
+          set -euo pipefail
+          node <<'NODE'
+          const { spawnSync } = require("node:child_process");
+          const expectedName = "@hraness/kb";
+          const expectedVersion = process.env.EXPECTED_VERSION ?? "";
+          const workflowId = process.env.EXPECTED_WORKFLOW_ID ?? "";
+          const repository = process.env.GITHUB_REPOSITORY ?? "";
+          const currentRunId = process.env.GITHUB_RUN_ID ?? "";
+          const resolvedStageVersion = process.env.RESOLVED_STAGE_VERSION ?? "";
+          const legacyStages = new Map([
+            ["33269920554", Object.freeze({
+              headSha: "e12d3fd05ffaa722ac1c43a8ecaa7d21fece679a",
+              runAttempt: 1,
+              version: "0.17.3",
+            })],
+          ]);
+          const maximum = BigInt(Number.MAX_SAFE_INTEGER);
+          const versionPattern = /^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)$/u;
+          const parseVersion = (value, label) => {
+            const match = versionPattern.exec(value);
+            if (match === null) throw new Error(`${label} is not a stable semantic version`);
+            const parts = match.slice(1).map(BigInt);
+            if (parts.some((part) => part > maximum)) {
+              throw new Error(`${label} exceeds Number.MAX_SAFE_INTEGER`);
+            }
+            return parts;
+          };
+          const compare = (left, right) => {
+            for (let index = 0; index < 3; index += 1) {
+              if (left[index] !== right[index]) return left[index] > right[index] ? 1 : -1;
+            }
+            return 0;
+          };
+          const execute = (command, args, label) => {
+            const result = spawnSync(command, args, {
+              encoding: "utf8",
+              maxBuffer: 10 * 1024 * 1024,
+            });
+            if (result.status !== 0 || result.error) {
+              throw new Error(`Could not read ${label}`);
+            }
+            return result.stdout;
+          };
+          if (
+            !/^[1-9][0-9]*$/u.test(workflowId)
+            || !/^[1-9][0-9]*$/u.test(currentRunId)
+            || repository !== "hraness/kb"
+          ) throw new Error("Stable-stage history identity is invalid");
+          const current = parseVersion(expectedVersion, "Candidate version");
+          const resolved = resolvedStageVersion === ""
+            ? null
+            : parseVersion(resolvedStageVersion, "Resolved prior stage version");
+          const latestValue = JSON.parse(execute("npm", [
+            "view",
+            expectedName,
+            "dist-tags.latest",
+            "--json",
+            "--registry=https://registry.npmjs.org",
+          ], "npm latest"));
+          if (typeof latestValue !== "string") throw new Error("npm latest is not a version string");
+          const latest = parseVersion(latestValue, "npm latest");
+          if (compare(current, latest) <= 0) {
+            throw new Error(`Candidate ${expectedVersion} is not newer than npm latest ${latestValue}`);
+          }
+          const runsPayload = JSON.parse(execute("gh", [
+            "api",
+            "--method", "GET",
+            `/repos/${repository}/actions/workflows/${workflowId}/runs?event=workflow_dispatch&status=completed&branch=main&per_page=100`,
+          ], "completed npm-stage workflow runs"));
+          if (
+            !runsPayload
+            || typeof runsPayload !== "object"
+            || !Number.isSafeInteger(runsPayload.total_count)
+            || runsPayload.total_count < 0
+            || runsPayload.total_count > 100
+            || !Array.isArray(runsPayload.workflow_runs)
+            || runsPayload.workflow_runs.length !== runsPayload.total_count
+          ) throw new Error("Completed npm-stage history exceeds the reviewed 100-run bound");
+          let resolvedStageSeen = false;
+          for (const run of runsPayload.workflow_runs) {
+            if (
+              !run
+              || typeof run !== "object"
+              || !Number.isSafeInteger(run.id)
+              || run.id <= 0
+              || String(run.id) === currentRunId
+              || run.workflow_id !== Number(workflowId)
+              || run.event !== "workflow_dispatch"
+              || run.head_branch !== "main"
+              || run.status !== "completed"
+            ) throw new Error("Completed npm-stage history contains an invalid run");
+            const jobsPayload = JSON.parse(execute("gh", [
+              "api",
+              "--method", "GET",
+              `/repos/${repository}/actions/runs/${run.id}/jobs?filter=all&per_page=100`,
+            ], `jobs for npm-stage run ${run.id}`));
+            if (
+              !jobsPayload
+              || typeof jobsPayload !== "object"
+              || !Number.isSafeInteger(jobsPayload.total_count)
+              || jobsPayload.total_count < 0
+              || jobsPayload.total_count > 100
+              || !Array.isArray(jobsPayload.jobs)
+              || jobsPayload.jobs.length !== jobsPayload.total_count
+            ) throw new Error(`npm-stage run ${run.id} exceeds the reviewed 100-job bound`);
+            for (const job of jobsPayload.jobs) {
+              if (!job || typeof job !== "object" || typeof job.name !== "string") {
+                throw new Error(`npm-stage run ${run.id} contains an invalid job`);
+              }
+              if (job.conclusion !== "success" || !job.name.startsWith("Stage exact package")) continue;
+              const match = /^Stage exact package v((?:0|[1-9]\d*)\.(?:0|[1-9]\d*)\.(?:0|[1-9]\d*))$/u.exec(job.name);
+              let stagedVersion;
+              if (match !== null) {
+                stagedVersion = match[1];
+              } else {
+                const legacy = legacyStages.get(String(run.id));
+                if (
+                  job.name !== "Stage exact package"
+                  || legacy === undefined
+                  || job.head_sha !== legacy.headSha
+                  || job.run_attempt !== legacy.runAttempt
+                ) {
+                  throw new Error(`Successful npm-stage run ${run.id} lacks a version-bound stage job`);
+                }
+                stagedVersion = legacy.version;
+              }
+              const staged = parseVersion(stagedVersion, `Staged version from run ${run.id}`);
+              if (compare(staged, latest) > 0) {
+                if (
+                  resolved !== null
+                  && stagedVersion === resolvedStageVersion
+                  && compare(staged, current) <= 0
+                ) {
+                  resolvedStageSeen = true;
+                  continue;
+                }
+                throw new Error(
+                  `Refusing to stage ${expectedVersion}: run ${run.id} already staged pending ${stagedVersion}`,
+                );
+              }
+            }
+          }
+          if (resolved !== null && !resolvedStageSeen) {
+            throw new Error(`Resolved prior stage ${resolvedStageVersion} does not identify a blocking stage`);
+          }
+          NODE
       - name: Bind artifact reference
         env:
           ARTIFACT_NAME: ${{ needs.verify.outputs.artifact_name }}
@@ -447,6 +605,7 @@ jobs:
             TARBALL="$tarball" node > "$rebound_output" <<'NODE'
           const { createHash } = require("node:crypto");
           const { readFileSync, statSync } = require("node:fs");
+          const { gunzipSync } = require("node:zlib");
           const minimumFiles = 190;
           const maximumFiles = 210;
           const minimumPackedBytes = 950_000;
@@ -592,6 +751,134 @@ jobs:
           if (packageRecord.integrity !== integrity || packageRecord.shasum !== shasum) {
             throw new Error("Downloaded tarball differs from npm-pack.json SHA-1 or SHA-512");
           }
+          const tar = gunzipSync(archiveBytes, {
+            maxOutputLength: maximumUnpackedBytes + maximumFiles * 1_024 + 1_024,
+          });
+          const tarText = (header, start, length) => {
+            const field = header.subarray(start, start + length);
+            const zero = field.indexOf(0);
+            const selected = zero < 0 ? field : field.subarray(0, zero);
+            if (selected.some(byte => byte > 0x7f)) {
+              throw new Error("Packed package.json tar header is not ASCII");
+            }
+            return selected.toString("ascii");
+          };
+          const tarOctal = (header, start, length, label) => {
+            const text = tarText(header, start, length).trim();
+            if (!/^[0-7]+$/u.test(text)) {
+              throw new Error(`Packed package.json has an invalid ${label}`);
+            }
+            const value = Number.parseInt(text, 8);
+            if (!Number.isSafeInteger(value) || value < 0) {
+              throw new Error(`Packed package.json has an unsafe ${label}`);
+            }
+            return value;
+          };
+          let offset = 0;
+          let zeroBlocks = 0;
+          let entries = 0;
+          let manifestBytes;
+          const ustarSignature = Buffer.from([0x75, 0x73, 0x74, 0x61, 0x72, 0x00, 0x30, 0x30]);
+          while (offset < tar.length) {
+            if (tar.length - offset < 512) {
+              throw new Error("Packed package.json tar header is truncated");
+            }
+            const header = tar.subarray(offset, offset + 512);
+            offset += 512;
+            if (header.every(byte => byte === 0)) {
+              zeroBlocks += 1;
+              if (zeroBlocks === 2) {
+                if (tar.subarray(offset).some(byte => byte !== 0)) {
+                  throw new Error("Packed package.json tar has trailing data");
+                }
+                break;
+              }
+              continue;
+            }
+            if (zeroBlocks !== 0) {
+              throw new Error("Packed package.json tar terminator is invalid");
+            }
+            const expectedChecksum = tarOctal(header, 148, 8, "checksum");
+            let checksum = 0;
+            for (let index = 0; index < header.length; index += 1) {
+              checksum += index >= 148 && index < 156 ? 0x20 : header[index];
+            }
+            if (
+              checksum !== expectedChecksum
+              || !header.subarray(257, 265).equals(ustarSignature)
+            ) {
+              throw new Error("Packed package.json tar header is invalid");
+            }
+            const name = tarText(header, 0, 100);
+            const prefix = tarText(header, 345, 155);
+            const path = prefix === "" ? name : `${prefix}/${name}`;
+            if (
+              path.startsWith("/")
+              || path.includes("\\")
+              || path.split("/").some(part => part === "" || part === "." || part === "..")
+            ) {
+              throw new Error("Packed package.json tar path is unsafe");
+            }
+            const size = tarOctal(header, 124, 12, "size");
+            const type = header[156];
+            if (type !== 0 && type !== 0x30 && type !== 0x35) {
+              throw new Error("Packed package.json tar contains a non-regular entry");
+            }
+            if (type === 0x35 && size !== 0) {
+              throw new Error("Packed package.json tar directory has data");
+            }
+            if (size > tar.length - offset) {
+              throw new Error("Packed package.json tar entry is truncated");
+            }
+            const padded = Math.ceil(size / 512) * 512;
+            if (
+              padded > tar.length - offset
+              || tar.subarray(offset + size, offset + padded).some(byte => byte !== 0)
+            ) {
+              throw new Error("Packed package.json tar padding is invalid");
+            }
+            if (path === "package/package.json") {
+              if (
+                (type !== 0 && type !== 0x30)
+                || manifestBytes !== undefined
+                || size < 1
+                || size > 256 * 1024
+              ) {
+                throw new Error("Packed package.json is missing, duplicated, or unsafe");
+              }
+              manifestBytes = Buffer.from(tar.subarray(offset, offset + size));
+            }
+            offset += padded;
+            entries += 1;
+            if (entries > maximumFiles * 2) {
+              throw new Error("Packed package.json tar contains too many entries");
+            }
+          }
+          if (zeroBlocks !== 2 || manifestBytes === undefined) {
+            throw new Error("Packed package.json is missing");
+          }
+          const manifest = JSON.parse(
+            new TextDecoder("utf-8", { fatal: true }).decode(manifestBytes),
+          );
+          const publishConfig = manifest?.publishConfig;
+          if (
+            manifest === null
+            || typeof manifest !== "object"
+            || Array.isArray(manifest)
+            || manifest.name !== expectedName
+            || manifest.version !== expectedVersion
+            || manifest.private === true
+            || manifest.contentPolicy?.class !== "dual-use"
+            || Object.hasOwn(manifest, "tag")
+            || publishConfig === null
+            || typeof publishConfig !== "object"
+            || Array.isArray(publishConfig)
+            || JSON.stringify(Object.keys(publishConfig).sort()) !== JSON.stringify(["access", "registry"])
+            || publishConfig.access !== "public"
+            || publishConfig.registry !== "https://registry.npmjs.org"
+          ) {
+            throw new Error("Packed KB can publish only with the canonical npm registry and dist-tag policy");
+          }
           process.stdout.write(`${archiveSha256} ${metadataSha256} ${digestSha256}\n`);
           NODE
           read -r rebound_archive_sha256 rebound_metadata_sha256 rebound_digest_sha256 < "$rebound_output"
@@ -662,6 +949,35 @@ jobs:
               exit 1
             fi
           fi
+          current_latest="$(npm view "@hraness/kb" dist-tags.latest \
+            --json \
+            --registry=https://registry.npmjs.org)"
+          CURRENT_LATEST="$current_latest" node -e '
+            const pattern = /^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)$/u;
+            const maximum = BigInt(Number.MAX_SAFE_INTEGER);
+            const parse = (value, label) => {
+              const match = pattern.exec(value);
+              if (match === null) throw new Error(`${label} is not a stable semantic version`);
+              const parts = match.slice(1).map(BigInt);
+              if (parts.some((part) => part > maximum)) {
+                throw new Error(`${label} exceeds Number.MAX_SAFE_INTEGER`);
+              }
+              return parts;
+            };
+            const compare = (left, right) => {
+              for (let index = 0; index < 3; index += 1) {
+                if (left[index] !== right[index]) return left[index] > right[index] ? 1 : -1;
+              }
+              return 0;
+            };
+            const candidate = parse(process.env.EXPECTED_VERSION ?? "", "Candidate version");
+            const latestValue = JSON.parse(process.env.CURRENT_LATEST ?? "null");
+            if (typeof latestValue !== "string") throw new Error("npm latest is not a version string");
+            const latest = parse(latestValue, "npm latest");
+            if (compare(candidate, latest) <= 0) {
+              throw new Error(`Candidate ${process.env.EXPECTED_VERSION} is not newer than npm latest ${latestValue}`);
+            }
+          '
           current_archive_sha256="$(sha256sum "$TARBALL" | cut -d ' ' -f 1)"
           current_metadata_sha256="$(sha256sum "$METADATA" | cut -d ' ' -f 1)"
           current_digest_sha256="$(sha256sum "$DIGEST" | cut -d ' ' -f 1)"
@@ -671,9 +987,32 @@ jobs:
             echo "::error::Downloaded package changed after current-main verification"
             exit 1
           fi
+          node -e '
+            const conflicting = Object.keys(process.env)
+              .filter((name) => name.toLowerCase() === "npm_config_tag");
+            if (conflicting.length !== 0) {
+              throw new Error(`Ambient npm tag configuration is forbidden: ${conflicting.join(", ")}`);
+            }
+          '
+          clean_npm_directory="$RUNNER_TEMP/kb-npm-stage-clean"
+          clean_user_config="$RUNNER_TEMP/kb-npm-stage-user.npmrc"
+          clean_global_config="$RUNNER_TEMP/kb-npm-stage-global.npmrc"
+          mkdir "$clean_npm_directory"
+          : > "$clean_user_config"
+          : > "$clean_global_config"
+          chmod 700 "$clean_npm_directory"
+          chmod 600 "$clean_user_config" "$clean_global_config"
+          if [[ "$(cd "$clean_npm_directory" && npm config get tag \
+                --userconfig="$clean_user_config" \
+                --globalconfig="$clean_global_config")" != latest ]]; then
+            echo "::error::Pinned npm's clean default publication tag is not latest"
+            exit 1
+          fi
+          cd "$clean_npm_directory"
           npm stage publish "$TARBALL" \
             --access public \
+            --globalconfig="$clean_global_config" \
             --ignore-scripts \
             --provenance \
-            --tag latest \
-            --registry=https://registry.npmjs.org
+            --registry=https://registry.npmjs.org \
+            --userconfig="$clean_user_config"
