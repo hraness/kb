@@ -53,6 +53,23 @@ jobs:
     )).toThrow("must recheck current default-branch HEAD");
   });
 
+  test("inspects terminal npm mutations before trusting a stage-job display name", async () => {
+    const path = resolve(import.meta.dir, "../.github/workflows/npm-stage.yml");
+    const source = await readFile(path, "utf8");
+    const delayed = source
+      .replace("const terminalWrites =", "const delayedTerminalWrites =")
+      .replace(
+        "              const match = /^Stage exact package v",
+        "              const terminalWrites = delayedTerminalWrites;\n" +
+          "              const match = /^Stage exact package v",
+      );
+    expect(delayed).not.toBe(source);
+    expect(() => validateNpmStageWorkflow(source, "npm-stage.yml")).not.toThrow();
+    expect(() => validateNpmStageWorkflow(delayed, "npm-stage.yml")).toThrow(
+      "must inspect terminal writes before trusting a job display name",
+    );
+  });
+
   test("keeps npm staging version-selected, environment-bound, tokenless, artifact-bound, and stage-only", async () => {
     const path = resolve(import.meta.dir, "../.github/workflows/npm-stage.yml");
     const source = await readFile(path, "utf8");

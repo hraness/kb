@@ -181,8 +181,14 @@ SHA-512, and the independent SHA-256 manifest before mutation. Immediately
 before staging,
 it independently parses the packed manifest, rejects npm's top-level `tag`
 override, rejects an unresolved prior mutation intent from durable all-attempt
-Actions history, fetches current `main` into a new bare Git directory,
-then rehashes all three files and invokes only `npm stage publish` against
+Actions history, and inspects every recognized attempted terminal mutation
+before it trusts a job display name. A terminal mutation is bound only when its
+single successful durable intent has the immediately preceding safe positive
+Actions step number. The job fetches current `main` into a new bare
+Git directory, then parses the archive with the same exact eight-byte USTAR
+magic/version signature and byte-475 130/155-byte prefix discriminator used by
+the current source/release archive verifier. It rehashes all three files and
+invokes only `npm stage publish` against
 `https://registry.npmjs.org`. It rejects ambient tag configuration, runs from
 an empty directory with empty user/global npm config, and proves pinned npm's
 clean default `latest` before invocation. Leaving the tag implicit preserves
@@ -211,14 +217,19 @@ resolves that tag from GitHub, requires its commit to remain reachable from
 current `main`, reads the name and version from the tagged `package.json`, and
 checks and builds the tagged source in a detached worktree. That explicit
 tagged `bun run check` is the only historical build boundary. Afterward, the
-workflow rebinds the release helpers to their reviewed Git blobs in the current
-workflow checkout and invokes those files by absolute path while retaining the
-tagged tree as the package working directory. Bun loads no tag-owned config or
-environment file. The package step uses `npm pack --ignore-scripts`, so it does
-not run the tag's `prepack` or another historical lifecycle script. The current
-helpers import their current core-only archive inspector. They do not import a
-script from the tagged tree. They compare the rebuilt package with the public
-npm package by canonical content and registry metadata. The pinned signature
+workflow checks out exact current `main`, requires the tag-triggered Release
+workflow and staging workflow to be byte-identical there, rebinds the release
+helpers to reviewed current-main Git blobs, and invokes those files by absolute
+path while retaining the tagged tree only as the package working directory.
+Bun loads no tag-owned config or environment file. The package step uses
+`npm pack --ignore-scripts`, so it does not run the tag's `prepack` or another
+historical lifecycle script. The current helpers import their current core-only
+archive inspector. They do not import a script from the tagged tree. They
+compare the rebuilt package with the public npm package by canonical content
+and registry metadata. Immediately before GitHub Release creation, the write
+job imports authenticated current `main` twice, requires it not to move, repeats
+the tag-to-main workflow closure, and proves every verifier helper is unchanged
+from the exact main commit used by the read-only job. The pinned signature
 audit must cryptographically validate both registry and Sigstore evidence. The
 decoded attestations must bind the downloaded tarball SHA-512 to the exact npm
 publish predicate and to SLSA provenance for

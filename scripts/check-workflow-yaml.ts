@@ -249,12 +249,29 @@ export function validateNpmStageWorkflow(source: string, label: string): void {
     "Record exclusive stable-stage intent",
     "Record cleared stable-stage intent",
     "jobs?filter=all&per_page=100",
+    "has a terminal write without one immediately preceding durable intent",
+    "has an unsealed generic stage job",
+    "jobId: 99146963354",
+    "Number.isSafeInteger(step?.number)",
+    "intents[0].number !== terminalWrites[0].number - 1",
+    "contains staging controls outside a version-bound stage job",
     'execute("npm", [',
     "dist-tags.latest",
   ]) {
     if (!pendingStageStep.run.includes(required)) {
       throw new Error(`${label} pending-stage guard is missing ${required}`);
     }
+  }
+  const terminalInspectionIndex = pendingStageStep.run.indexOf("const terminalWrites =");
+  const jobDisplayNameFilterIndex = pendingStageStep.run.indexOf(
+    'if (!job.name.startsWith("Stage exact package"))',
+  );
+  if (
+    terminalInspectionIndex < 0
+    || jobDisplayNameFilterIndex < 0
+    || terminalInspectionIndex >= jobDisplayNameFilterIndex
+  ) {
+    throw new Error(`${label} must inspect terminal writes before trusting a job display name`);
   }
   if (steps.some((step) =>
     typeof step.uses === "string"

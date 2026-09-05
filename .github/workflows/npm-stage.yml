@@ -379,9 +379,12 @@ jobs:
           const repository = process.env.GITHUB_REPOSITORY ?? "";
           const currentRunId = process.env.GITHUB_RUN_ID ?? "";
           const resolvedStageVersion = process.env.RESOLVED_STAGE_VERSION ?? "";
-          const legacyStages = new Map([
+          const legacyStageJobs = new Map([
             ["33269920554", Object.freeze({
               headSha: "e12d3fd05ffaa722ac1c43a8ecaa7d21fece679a",
+              jobConclusion: "success",
+              jobId: 99146963354,
+              mutationConclusion: "success",
               runAttempt: 1,
               version: "0.17.3",
             })],
@@ -472,7 +475,11 @@ jobs:
               ) {
                 throw new Error(`npm-stage run ${runId} contains an invalid job`);
               }
-              if (!job.name.startsWith("Stage exact package")) continue;
+              const terminalWrites = job.steps.filter((step) => (
+                step?.name === "Revalidate current main and stage exact package"
+                && step?.conclusion !== null
+                && step?.conclusion !== "skipped"
+              ));
               const intents = job.steps.filter((step) => (
                 step?.name === "Record exclusive stable-stage intent"
                 && step?.conclusion === "success"
@@ -482,35 +489,54 @@ jobs:
                 && step.name.startsWith("Record cleared stable-stage intent")
                 && step?.conclusion === "success"
               ));
+              const hasSafePositiveStepNumber = (step) => (
+                Number.isSafeInteger(step?.number) && step.number > 0
+              );
               if (intents.length > 1 || resolutions.length > 1) {
                 throw new Error(`npm-stage run ${runId} has ambiguous intent history`);
               }
-              const match = /^Stage exact package v((?:0|[1-9]\d*)\.(?:0|[1-9]\d*)\.(?:0|[1-9]\d*))$/u.exec(job.name);
-              if (intents.length === 0 && resolutions.length === 0) {
-                const legacy = legacyStages.get(String(runId));
-                if (
-                  job.conclusion === "success"
-                  && job.name === "Stage exact package"
-                ) {
-                  if (
-                    legacy === undefined
-                    || job.head_sha !== legacy.headSha
-                    || job.run_attempt !== legacy.runAttempt
-                  ) {
-                    throw new Error(`Successful npm-stage run ${runId} lacks a version-bound intent`);
-                  }
-                  reserve(legacy.version, runId);
-                  continue;
-                }
-                const legacyMutation = job.steps.filter((step) => (
+              if (job.name === "Stage exact package") {
+                const legacy = legacyStageJobs.get(String(runId));
+                const legacyMutations = job.steps.filter((step) => (
                   step?.name === "Revalidate current main and stage exact package"
-                  && (step?.conclusion === "success" || step?.conclusion === "failure")
                 ));
-                if (match !== null && legacyMutation.length === 1) {
-                  reserve(match[1], runId);
+                if (
+                  legacy === undefined
+                  || job.id !== legacy.jobId
+                  || job.head_sha !== legacy.headSha
+                  || job.run_attempt !== legacy.runAttempt
+                  || job.status !== "completed"
+                  || job.conclusion !== legacy.jobConclusion
+                  || legacyMutations.length !== 1
+                  || legacyMutations[0]?.conclusion !== legacy.mutationConclusion
+                  || intents.length !== 0
+                  || resolutions.length !== 0
+                ) {
+                  throw new Error(`npm-stage run ${runId} has an unsealed generic stage job`);
+                }
+                reserve(legacy.version, runId);
+                continue;
+              }
+              if (
+                terminalWrites.length > 1
+                || (terminalWrites.length === 1 && (
+                  intents.length !== 1
+                  || !hasSafePositiveStepNumber(terminalWrites[0])
+                  || !hasSafePositiveStepNumber(intents[0])
+                  || intents[0].number !== terminalWrites[0].number - 1
+                ))
+              ) {
+                throw new Error(
+                  `npm-stage run ${runId} has a terminal write without one immediately preceding durable intent`,
+                );
+              }
+              if (!job.name.startsWith("Stage exact package")) {
+                if (terminalWrites.length > 0 || intents.length > 0 || resolutions.length > 0) {
+                  throw new Error(`npm-stage run ${runId} contains staging controls outside a version-bound stage job`);
                 }
                 continue;
               }
+              const match = /^Stage exact package v((?:0|[1-9]\d*)\.(?:0|[1-9]\d*)\.(?:0|[1-9]\d*))$/u.exec(job.name);
               if (match === null) {
                 throw new Error(`npm-stage run ${runId} lacks a version-bound stage job`);
               }
@@ -887,7 +913,7 @@ jobs:
               throw new Error("Packed package.json tar header is invalid");
             }
             const name = tarText(header, 0, 100);
-            const prefix = tarText(header, 345, 155);
+            const prefix = tarText(header, 345, header[475] === 0 ? 130 : 155);
             const path = prefix === "" ? name : `${prefix}/${name}`;
             if (
               path.startsWith("/")
