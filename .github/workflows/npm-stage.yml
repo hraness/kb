@@ -251,6 +251,7 @@ jobs:
     environment: npm-stage
     permissions:
       actions: read
+      contents: read
       id-token: write
     runs-on: ubuntu-latest
     timeout-minutes: 10
@@ -440,6 +441,65 @@ jobs:
           const latest = parseVersion(latestValue, "npm latest");
           if (compare(current, latest) <= 0) {
             throw new Error(`Candidate ${expectedVersion} is not newer than npm latest ${latestValue}`);
+          }
+          const priorTag = `v${latestValue}`;
+          const remoteTagLines = execute("git", [
+            "ls-remote",
+            "--tags",
+            `https://github.com/${repository}.git`,
+            `refs/tags/${priorTag}`,
+            `refs/tags/${priorTag}^{}`,
+          ], `annotated tag ${priorTag}`).trim().split("\n");
+          if (remoteTagLines.length !== 2) {
+            throw new Error(`npm latest ${latestValue} lacks one annotated Git tag`);
+          }
+          const tagIdentity = new Map();
+          for (const line of remoteTagLines) {
+            const match = /^([0-9a-f]{40})\t(refs\/tags\/v[^\s^]+)(\^\{\})?$/u.exec(line);
+            if (match === null || match[2] !== `refs/tags/${priorTag}`) {
+              throw new Error(`npm latest ${latestValue} has a malformed Git tag identity`);
+            }
+            const field = match[3] === undefined ? "object" : "source";
+            if (tagIdentity.has(field)) throw new Error(`npm latest ${latestValue} repeats its Git tag identity`);
+            tagIdentity.set(field, match[1]);
+          }
+          if (
+            tagIdentity.get("object") === tagIdentity.get("source")
+            || typeof tagIdentity.get("source") !== "string"
+          ) {
+            throw new Error(`npm latest ${latestValue} is not bound by an annotated Git tag`);
+          }
+          const release = JSON.parse(execute("gh", [
+            "api",
+            `repos/${repository}/releases/tags/${priorTag}`,
+          ], `immutable release ${priorTag}`));
+          const latestRelease = JSON.parse(execute("gh", [
+            "api",
+            `repos/${repository}/releases/latest`,
+          ], "latest immutable release"));
+          if (
+            release?.tag_name !== priorTag
+            || release?.name !== `KB ${priorTag}`
+            || release?.draft !== false
+            || release?.prerelease !== false
+            || release?.immutable !== true
+            || release?.author?.id !== 41898282
+            || release?.author?.login !== "github-actions[bot]"
+            || release?.author?.type !== "Bot"
+            || !Array.isArray(release?.assets)
+            || release.assets.length !== 0
+            || latestRelease?.id !== release.id
+            || latestRelease?.tag_name !== priorTag
+            || latestRelease?.immutable !== true
+          ) {
+            throw new Error(`npm latest ${latestValue} lacks its exact immutable GitHub Release`);
+          }
+          const comparison = JSON.parse(execute("gh", [
+            "api",
+            `repos/${repository}/compare/${tagIdentity.get("source")}...main`,
+          ], `main ancestry for ${priorTag}`));
+          if (comparison?.status !== "ahead" && comparison?.status !== "identical") {
+            throw new Error(`npm latest ${latestValue} is not reachable from current main`);
           }
           const intentRuns = new Map();
           const resolutionCounts = new Map();
@@ -1020,6 +1080,7 @@ jobs:
           EXPECTED_METADATA_SHA256: ${{ steps.artifact.outputs.metadata_sha256 }}
           EXPECTED_SOURCE_SHA: ${{ needs.verify.outputs.source_sha }}
           EXPECTED_VERSION: ${{ needs.verify.outputs.package_version }}
+          GH_TOKEN: ${{ github.token }}
           METADATA: ${{ steps.artifact.outputs.metadata }}
           TARBALL: ${{ steps.artifact.outputs.tarball }}
         run: |
@@ -1050,19 +1111,6 @@ jobs:
                 "$GITHUB_SHA" != "$current_default_sha" ]]; then
             echo "::error::$DEFAULT_BRANCH advanced to $current_default_sha after artifact verification"
             exit 1
-          fi
-          tag_lookup_output="$RUNNER_TEMP/kb-stage-tag-lookup.txt"
-          if git ls-remote --exit-code --refs \
-            "https://github.com/$GITHUB_REPOSITORY.git" \
-            "refs/tags/$release_tag" > "$tag_lookup_output"; then
-            echo "::error::Tag $release_tag was created after package verification"
-            exit 1
-          else
-            tag_lookup_status=$?
-            if [[ "$tag_lookup_status" -ne 2 || -s "$tag_lookup_output" ]]; then
-              echo "::error::Could not prove that tag $release_tag is still absent from origin"
-              exit 1
-            fi
           fi
           current_latest="$(npm view "@hraness/kb" dist-tags.latest \
             --json \
@@ -1123,6 +1171,157 @@ jobs:
             echo "::error::Pinned npm's clean default publication tag is not latest"
             exit 1
           fi
+          git --git-dir="$current_main" fetch --quiet --no-tags --depth=1 \
+            "https://github.com/$GITHUB_REPOSITORY.git" \
+            "refs/heads/$DEFAULT_BRANCH"
+          final_default_sha="$(git --git-dir="$current_main" rev-parse FETCH_HEAD)"
+          final_latest="$(npm view "@hraness/kb" dist-tags.latest \
+            --json \
+            --registry=https://registry.npmjs.org)"
+          CURRENT_LATEST="$current_latest" FINAL_LATEST="$final_latest" node -e '
+            const current = JSON.parse(process.env.CURRENT_LATEST ?? "null");
+            const final = JSON.parse(process.env.FINAL_LATEST ?? "null");
+            if (typeof current !== "string" || final !== current) {
+              throw new Error("Public npm latest changed immediately before staged publication");
+            }
+          '
+          if [[ "$final_default_sha" != "$current_default_sha" || \
+                "$final_default_sha" != "$EXPECTED_SOURCE_SHA" ]]; then
+            echo "::error::$DEFAULT_BRANCH changed immediately before staged publication"
+            exit 1
+          fi
+          prior_version="$(FINAL_LATEST="$final_latest" node -p '
+            const value = JSON.parse(process.env.FINAL_LATEST ?? "null");
+            if (typeof value !== "string") process.exit(1);
+            value;
+          ')"
+          prior_tag="v$prior_version"
+          prior_tag_identity="$RUNNER_TEMP/kb-final-prior-release-tag.txt"
+          prior_release_json="$RUNNER_TEMP/kb-final-prior-release.json"
+          latest_release_json="$RUNNER_TEMP/kb-final-latest-release.json"
+          prior_comparison_json="$RUNNER_TEMP/kb-final-prior-release-comparison.json"
+          git ls-remote --tags "https://github.com/$GITHUB_REPOSITORY.git" \
+            "refs/tags/$prior_tag" "refs/tags/$prior_tag^{}" > "$prior_tag_identity"
+          gh api "repos/$GITHUB_REPOSITORY/releases/tags/$prior_tag" > "$prior_release_json"
+          gh api "repos/$GITHUB_REPOSITORY/releases/latest" > "$latest_release_json"
+          prior_source="$(PRIOR_TAG="$prior_tag" TAG_IDENTITY="$prior_tag_identity" node <<'NODE'
+          const { readFileSync } = require("node:fs");
+          const priorTag = process.env.PRIOR_TAG ?? "";
+          const lines = readFileSync(process.env.TAG_IDENTITY, "utf8").trim().split("\n");
+          if (lines.length !== 2) throw new Error(`npm latest ${priorTag.slice(1)} lacks one annotated Git tag`);
+          const identity = new Map();
+          for (const line of lines) {
+            const match = /^([0-9a-f]{40})\t(refs\/tags\/v[^\s^]+)(\^\{\})?$/u.exec(line);
+            if (match === null || match[2] !== `refs/tags/${priorTag}`) {
+              throw new Error(`npm latest ${priorTag.slice(1)} has a malformed Git tag identity`);
+            }
+            const field = match[3] === undefined ? "object" : "source";
+            if (identity.has(field)) throw new Error(`npm latest ${priorTag.slice(1)} repeats its Git tag identity`);
+            identity.set(field, match[1]);
+          }
+          if (identity.get("object") === identity.get("source") || typeof identity.get("source") !== "string") {
+            throw new Error(`npm latest ${priorTag.slice(1)} is not bound by an annotated Git tag`);
+          }
+          process.stdout.write(identity.get("source"));
+          NODE
+          )"
+          gh api "repos/$GITHUB_REPOSITORY/compare/$prior_source...$DEFAULT_BRANCH" > "$prior_comparison_json"
+          PRIOR_TAG="$prior_tag" \
+            PRIOR_RELEASE_JSON="$prior_release_json" \
+            LATEST_RELEASE_JSON="$latest_release_json" \
+            PRIOR_COMPARISON_JSON="$prior_comparison_json" node <<'NODE'
+          const { readFileSync } = require("node:fs");
+          const priorTag = process.env.PRIOR_TAG ?? "";
+          const read = (name) => JSON.parse(readFileSync(process.env[name], "utf8"));
+          const release = read("PRIOR_RELEASE_JSON");
+          const latestRelease = read("LATEST_RELEASE_JSON");
+          const comparison = read("PRIOR_COMPARISON_JSON");
+          if (
+            release?.tag_name !== priorTag
+            || release?.name !== `KB ${priorTag}`
+            || release?.draft !== false
+            || release?.prerelease !== false
+            || release?.immutable !== true
+            || release?.author?.id !== 41898282
+            || release?.author?.login !== "github-actions[bot]"
+            || release?.author?.type !== "Bot"
+            || !Array.isArray(release?.assets)
+            || release.assets.length !== 0
+            || latestRelease?.id !== release.id
+            || latestRelease?.tag_name !== priorTag
+            || latestRelease?.immutable !== true
+          ) throw new Error(`npm latest ${priorTag.slice(1)} lacks its exact immutable GitHub Release`);
+          if (comparison?.status !== "ahead" && comparison?.status !== "identical") {
+            throw new Error(`npm latest ${priorTag.slice(1)} is not reachable from current main`);
+          }
+          NODE
+          terminal_latest="$(npm view "@hraness/kb" dist-tags.latest \
+            --json \
+            --registry=https://registry.npmjs.org)"
+          FINAL_LATEST="$final_latest" TERMINAL_LATEST="$terminal_latest" node -e '
+            const final = JSON.parse(process.env.FINAL_LATEST ?? "null");
+            const terminal = JSON.parse(process.env.TERMINAL_LATEST ?? "null");
+            if (typeof final !== "string" || terminal !== final) {
+              throw new Error("Public npm latest changed during final release-closure verification");
+            }
+          '
+          terminal_refs_output="$RUNNER_TEMP/kb-final-stage-refs.txt"
+          git ls-remote --exit-code \
+            "https://github.com/$GITHUB_REPOSITORY.git" \
+            "refs/heads/$DEFAULT_BRANCH" \
+            "refs/tags/$release_tag" \
+            "refs/tags/$prior_tag" \
+            "refs/tags/$prior_tag^{}" > "$terminal_refs_output"
+          DEFAULT_BRANCH="$DEFAULT_BRANCH" \
+            EXPECTED_SOURCE_SHA="$EXPECTED_SOURCE_SHA" \
+            PRIOR_TAG="$prior_tag" \
+            PRIOR_TAG_IDENTITY="$prior_tag_identity" \
+            RELEASE_TAG="$release_tag" \
+            TERMINAL_REFS_OUTPUT="$terminal_refs_output" node <<'NODE'
+          const { readFileSync } = require("node:fs");
+          const expectedHeadRef = `refs/heads/${process.env.DEFAULT_BRANCH ?? ""}`;
+          const expectedTagRef = `refs/tags/${process.env.RELEASE_TAG ?? ""}`;
+          const priorTagRef = `refs/tags/${process.env.PRIOR_TAG ?? ""}`;
+          const expectedSourceSha = process.env.EXPECTED_SOURCE_SHA ?? "";
+          const parse = (path) => readFileSync(path, "utf8").trim().split("\n").map((line) => {
+            const match = /^([0-9a-f]{40})\t(refs\/(?:heads|tags)\/[^\s^]+)(\^\{\})?$/u.exec(line);
+            if (match === null) throw new Error("Final remote snapshot has malformed identity data");
+            return { peeled: match[3] !== undefined, ref: match[2], sha: match[1] };
+          });
+          const priorEntries = parse(process.env.PRIOR_TAG_IDENTITY);
+          const entries = parse(process.env.TERMINAL_REFS_OUTPUT);
+          if (entries.some((entry) => entry.ref === expectedTagRef)) {
+            throw new Error(`Tag ${process.env.RELEASE_TAG} was created after package verification`);
+          }
+          const priorIdentity = (values) => {
+            const identity = new Map();
+            for (const entry of values) {
+              if (entry.ref !== priorTagRef) continue;
+              const field = entry.peeled ? "source" : "object";
+              if (identity.has(field)) throw new Error("Final remote snapshot repeats prior tag identity");
+              identity.set(field, entry.sha);
+            }
+            return identity;
+          };
+          const initialPriorIdentity = priorIdentity(priorEntries);
+          const terminalPriorIdentity = priorIdentity(entries);
+          if (
+            initialPriorIdentity.size !== 2
+            || terminalPriorIdentity.size !== 2
+            || terminalPriorIdentity.get("object") !== initialPriorIdentity.get("object")
+            || terminalPriorIdentity.get("source") !== initialPriorIdentity.get("source")
+          ) {
+            throw new Error(`Prior tag ${process.env.PRIOR_TAG} changed during final release-closure verification`);
+          }
+          const headEntries = entries.filter((entry) => entry.ref === expectedHeadRef && !entry.peeled);
+          if (
+            entries.length !== 3
+            || headEntries.length !== 1
+            || headEntries[0]?.sha !== expectedSourceSha
+          ) {
+            throw new Error(`Could not prove exact ${process.env.DEFAULT_BRANCH}, unchanged ${process.env.PRIOR_TAG}, and absent ${process.env.RELEASE_TAG} in one remote snapshot`);
+          }
+          NODE
           cd "$clean_npm_directory"
           npm stage publish "$TARBALL" \
             --access public \

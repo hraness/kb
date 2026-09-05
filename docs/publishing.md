@@ -120,7 +120,12 @@ Do not add an npm publishing token to GitHub. Preserve
    the runner disappeared during an ambiguous provider write. Workflow
    concurrency therefore cannot leave two independently approvable stable
    candidates after the first run ends. The same final boundary re-reads
-   `latest` and requires this candidate to be strictly newer. The sole
+   `latest` and requires this candidate to be strictly newer. Public promotion
+   clears its retained Actions intent, while the next stage
+   remains locked until that public `latest` has one matching annotated tag,
+   the exact bot-created immutable zero-asset Latest Release, and a source
+   commit reachable from current `main`. The initial history scan and final
+   mutation boundary both prove this completed-release closure. The sole
    successful pre-versioned stage record is
    sealed to run `33269920554`, attempt `1`, source
    `e12d3fd05ffaa722ac1c43a8ecaa7d21fece679a`, and version `0.17.3`; every
@@ -154,10 +159,12 @@ input records a durable resolution and releases only that matching
 Actions-history intent; leave it empty for all normal releases. The short-lived
 trusted-publishing assertion cannot run `npm stage list`, so first resolve the
 provider state through the authenticated npm stage UI/CLI and treat every
-failed or interrupted mutation as ambiguous. Approval needs no override because
-the promoted version becomes public `latest` and releases the lock
-automatically. This serializes the canonical workflow authority; it is not a
-claim that npm exposes or prevents an out-of-band concurrent stage.
+failed or interrupted mutation as ambiguous. Approval needs no recovery input
+because the promoted version becomes public `latest` and clears its matching
+Actions intent. The next stage remains locked until the protected tag and
+immutable Latest Release complete that version's release closure. This
+serializes the canonical workflow authority; it is not a claim that npm exposes
+or prevents an out-of-band concurrent stage.
 
 If candidate generation is missing or fails, dispatch **Stage npm package** from
 current `main` without the opt-in. That recovery remains build-only. Use
@@ -171,8 +178,9 @@ and release ordering all fail closed beyond that boundary.
 The verification job checks out source, installs dependencies without
 lifecycle scripts, runs the complete gate, creates the three-file artifact,
 and smokes the exact tarball. Its dependent staging job is the only job with
-OIDC authority. That job has only `actions: read` and `id-token: write`. The
-exact `npm-stage` environment restricts deployments to `main` and has no
+OIDC authority. That job has only `actions: read`, `contents: read`, and
+`id-token: write`. The exact `npm-stage` environment restricts deployments to
+`main` and has no
 required reviewers, so an explicitly opted-in staging job
 starts after verification without another GitHub approval. It checks out no
 source and runs no repository code. It rebinds

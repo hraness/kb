@@ -468,7 +468,7 @@ describe("npm release workflows", () => {
       "name: Stage exact package v${{ needs.verify.outputs.package_version }}",
       "if: inputs.publish_to_npm == true",
       "environment: npm-stage",
-      "permissions:\n      actions: read\n      id-token: write",
+      "permissions:\n      actions: read\n      contents: read\n      id-token: write",
       "Reauthorize current npm staging attempt",
       'EXPECTED_WORKFLOW_ID: "344070109"',
       'PUBLISH_TO_NPM: ${{ inputs.publish_to_npm }}',
@@ -507,11 +507,17 @@ describe("npm release workflows", () => {
       '"https://github.com/$GITHUB_REPOSITORY.git"',
       'EXPECTED_VERSION: ${{ needs.verify.outputs.package_version }}',
       'release_tag="v$EXPECTED_VERSION"',
-      "git ls-remote --exit-code --refs",
-      '"refs/tags/$release_tag" > "$tag_lookup_output"',
-      'tag_lookup_status=$?',
-      '[[ "$tag_lookup_status" -ne 2 || -s "$tag_lookup_output" ]]',
-      "Could not prove that tag $release_tag is still absent from origin",
+      "git ls-remote --exit-code",
+      '"refs/heads/$DEFAULT_BRANCH"',
+      '"refs/tags/$release_tag"',
+      '"refs/tags/$prior_tag"',
+      '"refs/tags/$prior_tag^{}" > "$terminal_refs_output"',
+      "Final remote snapshot has malformed identity data",
+      "changed during final release-closure verification",
+      "Could not prove exact",
+      "lacks one annotated Git tag",
+      "lacks its exact immutable GitHub Release",
+      "is not reachable from current main",
       'current_archive_sha256="$(sha256sum "$TARBALL"',
       'current_metadata_sha256="$(sha256sum "$METADATA"',
       'current_digest_sha256="$(sha256sum "$DIGEST"',
@@ -525,29 +531,47 @@ describe("npm release workflows", () => {
       `--registry=${npmRegistry}`,
     ] as const) expect(stageJob).toContain(required);
     expect(workflow.match(/id-token: write/gu) ?? []).toHaveLength(1);
-    expect(stageJob).not.toContain("contents: read");
     expect(stageJob).not.toContain("actions/checkout@");
     expect(stageJob).not.toContain("setup-bun@");
     expect(stageJob).not.toMatch(/\bbun\b/u);
     expect(stageJob).not.toContain("./scripts/");
     expect(stageJob.match(/npm stage publish/gu) ?? []).toHaveLength(1);
+    expect(stageJob.match(/lacks one annotated Git tag/gu) ?? []).toHaveLength(2);
+    expect(stageJob.match(/lacks its exact immutable GitHub Release/gu) ?? []).toHaveLength(2);
+    expect(stageJob.match(/is not reachable from current main/gu) ?? []).toHaveLength(2);
     expect(stageJob).not.toContain("--tag latest");
     const authorizationIndex = stageJob.indexOf("Reauthorize current npm staging attempt");
     const setupIndex = stageJob.indexOf("actions/setup-node@");
     const pendingStageIndex = stageJob.indexOf("Reject unresolved stable-stage intent");
     const intentIndex = stageJob.lastIndexOf("Record exclusive stable-stage intent");
-    const fetchIndex = stageJob.lastIndexOf('git --git-dir="$current_main" fetch');
-    const tagLookupIndex = stageJob.lastIndexOf("git ls-remote --exit-code --refs");
+    const fetchIndex = stageJob.indexOf('git --git-dir="$current_main" fetch');
+    const tagLookupIndex = stageJob.lastIndexOf("git ls-remote --exit-code");
+    const priorTagLookupIndex = stageJob.lastIndexOf("git ls-remote --tags");
+    const priorReleaseIndex = stageJob.lastIndexOf("releases/tags/$prior_tag");
+    const priorComparisonIndex = stageJob.lastIndexOf("compare/$prior_source...$DEFAULT_BRANCH");
     const rehashIndex = stageJob.lastIndexOf('current_archive_sha256="$(sha256sum "$TARBALL"');
+    const finalFetchIndex = stageJob.lastIndexOf('git --git-dir="$current_main" fetch');
+    const latestLookup = 'npm view "@hraness/kb" dist-tags.latest';
+    const firstLatestIndex = stageJob.indexOf(latestLookup);
+    const finalLatestIndex = stageJob.indexOf(latestLookup, firstLatestIndex + 1);
+    const terminalLatestIndex = stageJob.lastIndexOf(latestLookup);
     const stageIndex = stageJob.indexOf('npm stage publish "$TARBALL"');
     expect(authorizationIndex).toBeGreaterThan(-1);
     expect(authorizationIndex).toBeLessThan(setupIndex);
     expect(pendingStageIndex).toBeGreaterThan(setupIndex);
     expect(pendingStageIndex).toBeLessThan(stageIndex);
     expect(fetchIndex).toBeGreaterThan(-1);
-    expect(fetchIndex).toBeLessThan(tagLookupIndex);
-    expect(tagLookupIndex).toBeLessThan(rehashIndex);
+    expect(fetchIndex).toBeLessThan(rehashIndex);
     expect(rehashIndex).toBeLessThan(stageIndex);
+    expect(finalFetchIndex).toBeGreaterThan(rehashIndex);
+    expect(finalFetchIndex).toBeLessThan(finalLatestIndex);
+    expect(finalLatestIndex).toBeLessThan(priorTagLookupIndex);
+    expect(priorTagLookupIndex).toBeLessThan(priorReleaseIndex);
+    expect(priorReleaseIndex).toBeLessThan(priorComparisonIndex);
+    expect(priorComparisonIndex).toBeLessThan(terminalLatestIndex);
+    expect(terminalLatestIndex).toBeLessThan(tagLookupIndex);
+    expect(tagLookupIndex).toBeLessThan(stageIndex);
+    expect(finalLatestIndex).toBeLessThan(terminalLatestIndex);
     expect(intentIndex).toBeGreaterThan(pendingStageIndex);
     expect(intentIndex).toBeLessThan(stageIndex);
     expect(workflow).not.toContain("secrets.NPM_TOKEN");
@@ -564,7 +588,9 @@ describe("npm release workflows", () => {
     const authorizationIndex = stageJob.indexOf("Reauthorize current npm staging attempt");
     const setupIndex = stageJob.indexOf("actions/setup-node@");
     const mutationIndex = stageJob.indexOf('npm stage publish "$TARBALL"');
-    expect(stageJob).toContain("permissions:\n      actions: read\n      id-token: write");
+    expect(stageJob).toContain(
+      "permissions:\n      actions: read\n      contents: read\n      id-token: write",
+    );
     expect(authorizationIndex).toBeGreaterThan(-1);
     expect(authorizationIndex).toBeLessThan(setupIndex);
     expect(setupIndex).toBeLessThan(mutationIndex);
@@ -738,6 +764,20 @@ describe("npm release workflows", () => {
     const currentJobsPath = join(directory, "current-jobs.json");
     const runsPath = join(directory, "runs.json");
     const jobsPath = join(directory, "jobs.json");
+    const tagIdentityPath = join(directory, "tag-identity.txt");
+    const releasePath = join(directory, "release.json");
+    const latestReleasePath = join(directory, "latest-release.json");
+    const comparisonPath = join(directory, "comparison.json");
+    const completeRelease = {
+      assets: [],
+      author: { id: 41898282, login: "github-actions[bot]", type: "Bot" },
+      draft: false,
+      id: 190,
+      immutable: true,
+      name: "KB v0.19.0",
+      prerelease: false,
+      tag_name: "v0.19.0",
+    } as const;
     try {
       await mkdir(binaryDirectory, { recursive: true });
       await writeFile(
@@ -749,11 +789,23 @@ describe("npm release workflows", () => {
         ].join("\n"),
       );
       await writeFile(
+        join(binaryDirectory, "git"),
+        [
+          "#!/bin/bash",
+          "set -euo pipefail",
+          '[[ "$*" == ls-remote\\ --tags* ]] || { echo "unexpected git request: $*" >&2; exit 2; }',
+          'cat "$MOCK_TAG_IDENTITY"',
+        ].join("\n"),
+      );
+      await writeFile(
         join(binaryDirectory, "gh"),
         [
           "#!/bin/bash",
           "set -euo pipefail",
           'case "$*" in',
+          '  *"repos/hraness/kb/releases/tags/v0.19.0"*) cat "$MOCK_RELEASE_JSON" ;;',
+          '  *"repos/hraness/kb/releases/latest"*) cat "$MOCK_LATEST_RELEASE_JSON" ;;',
+          '  *"repos/hraness/kb/compare/2222222222222222222222222222222222222222...main"*) cat "$MOCK_COMPARISON_JSON" ;;',
           '  *"/actions/workflows/344070109/runs?"*) cat "$MOCK_RUNS_JSON" ;;',
           '  *"/actions/runs/67890/jobs?"*) cat "$MOCK_CURRENT_JOBS_JSON" ;;',
           '  *"/actions/runs/12345/jobs?"*|*"/actions/runs/33269920554/jobs?"*) cat "$MOCK_JOBS_JSON" ;;',
@@ -763,7 +815,16 @@ describe("npm release workflows", () => {
       );
       await Promise.all([
         chmod(join(binaryDirectory, "npm"), 0o755),
+        chmod(join(binaryDirectory, "git"), 0o755),
         chmod(join(binaryDirectory, "gh"), 0o755),
+        writeFile(
+          tagIdentityPath,
+          "1111111111111111111111111111111111111111\trefs/tags/v0.19.0\n" +
+            "2222222222222222222222222222222222222222\trefs/tags/v0.19.0^{}\n",
+        ),
+        writeFile(releasePath, JSON.stringify(completeRelease)),
+        writeFile(latestReleasePath, JSON.stringify(completeRelease)),
+        writeFile(comparisonPath, JSON.stringify({ status: "ahead" })),
         writeFile(runsPath, JSON.stringify({
           total_count: 1,
           workflow_runs: [{
@@ -790,9 +851,13 @@ describe("npm release workflows", () => {
         GITHUB_REPOSITORY: "hraness/kb",
         GITHUB_RUN_ID: "67890",
         MOCK_CURRENT_JOBS_JSON: currentJobsPath,
+        MOCK_COMPARISON_JSON: comparisonPath,
+        MOCK_LATEST_RELEASE_JSON: latestReleasePath,
         MOCK_NPM_LATEST: "0.19.0",
+        MOCK_RELEASE_JSON: releasePath,
         MOCK_RUNS_JSON: runsPath,
         MOCK_JOBS_JSON: jobsPath,
+        MOCK_TAG_IDENTITY: tagIdentityPath,
         RESOLVED_STAGE_VERSION: "",
       };
 
@@ -810,6 +875,28 @@ describe("npm release workflows", () => {
       }));
       const released = await runWorkflowScript(script, environment);
       expect(released.exitCode).toBe(0);
+
+      await writeFile(tagIdentityPath, "2222222222222222222222222222222222222222\trefs/tags/v0.19.0\n");
+      const lightweightTag = await runWorkflowScript(script, environment);
+      expect(lightweightTag.exitCode).not.toBe(0);
+      expect(lightweightTag.stderr).toContain("lacks one annotated Git tag");
+      await writeFile(
+        tagIdentityPath,
+        "1111111111111111111111111111111111111111\trefs/tags/v0.19.0\n" +
+          "2222222222222222222222222222222222222222\trefs/tags/v0.19.0^{}\n",
+      );
+
+      await writeFile(releasePath, JSON.stringify({ ...completeRelease, immutable: false }));
+      const mutableRelease = await runWorkflowScript(script, environment);
+      expect(mutableRelease.exitCode).not.toBe(0);
+      expect(mutableRelease.stderr).toContain("lacks its exact immutable GitHub Release");
+      await writeFile(releasePath, JSON.stringify(completeRelease));
+
+      await writeFile(comparisonPath, JSON.stringify({ status: "diverged" }));
+      const divergedRelease = await runWorkflowScript(script, environment);
+      expect(divergedRelease.exitCode).not.toBe(0);
+      expect(divergedRelease.stderr).toContain("is not reachable from current main");
+      await writeFile(comparisonPath, JSON.stringify({ status: "ahead" }));
 
       await writeFile(jobsPath, JSON.stringify({
         total_count: 1,
@@ -1013,7 +1100,225 @@ describe("npm release workflows", () => {
     } finally {
       await rm(directory, { recursive: true, force: true });
     }
-  });
+  }, 30_000);
+
+  test("the terminal stage boundary freshly closes npm, Git tag, and GitHub Release state", async () => {
+    const workflow = await readFile(stageWorkflowUrl, "utf8");
+    const script = workflowStepScript(workflow, "Revalidate current main and stage exact package");
+    const directory = await mkdtemp(join(tmpdir(), "kb-final-stage-boundary-"));
+    const binaryDirectory = join(directory, "bin");
+    const expectedSourceSha = "a".repeat(40);
+    const priorSourceSha = "b".repeat(40);
+    const completeRelease = {
+      assets: [],
+      author: { id: 41898282, login: "github-actions[bot]", type: "Bot" },
+      draft: false,
+      id: 190,
+      immutable: true,
+      name: "KB v0.19.0",
+      prerelease: false,
+      tag_name: "v0.19.0",
+    } as const;
+
+    try {
+      await mkdir(binaryDirectory, { recursive: true });
+      await Promise.all([
+        writeFile(
+          join(binaryDirectory, "git"),
+          [
+            "#!/bin/bash",
+            "set -euo pipefail",
+            'printf \'git %s\\n\' "$*" >> "$MOCK_COMMAND_LOG"',
+            'if [[ "$1" == check-ref-format || "$1" == init ]]; then exit 0; fi',
+            'if [[ "$1" == --git-dir=* && "$2" == fetch ]]; then exit 0; fi',
+            'if [[ "$1" == --git-dir=* && "$2" == rev-parse ]]; then printf \'%s\\n\' "$MOCK_SOURCE_SHA"; exit 0; fi',
+            'if [[ "$1" == ls-remote && "$2" == --tags ]]; then cat "$MOCK_TAG_IDENTITY"; exit 0; fi',
+            'if [[ "$1" == ls-remote && "$2" == --exit-code ]]; then',
+            '  printf \'%s\\trefs/heads/main\\n\' "$MOCK_TERMINAL_MAIN_SHA"',
+            '  if [[ "${MOCK_CANDIDATE_TAG_PRESENT:-false}" == true ]]; then',
+            '    printf \'%s\\trefs/tags/v0.19.1\\n\' "$MOCK_SOURCE_SHA"',
+            "  fi",
+            '  if [[ "${MOCK_PRIOR_TAG_DRIFT:-false}" == true ]]; then',
+            '    printf \'%s\\trefs/tags/v0.19.0\\n\' "$MOCK_TERMINAL_PRIOR_OBJECT_SHA"',
+            '    printf \'%s\\trefs/tags/v0.19.0^{}\\n\' "$MOCK_TERMINAL_PRIOR_SOURCE_SHA"',
+            "  else",
+            '    cat "$MOCK_TAG_IDENTITY"',
+            "  fi",
+            "  exit 0",
+            "fi",
+            'echo "unexpected git request: $*" >&2',
+            "exit 3",
+          ].join("\n"),
+        ),
+        writeFile(
+          join(binaryDirectory, "npm"),
+          [
+            "#!/bin/bash",
+            "set -euo pipefail",
+            'printf \'npm %s\\n\' "$*" >> "$MOCK_COMMAND_LOG"',
+            'if [[ "$1" == view ]]; then',
+            '  count="$(cat "$MOCK_NPM_COUNT_FILE")"',
+            '  count=$((count + 1))',
+            '  printf \'%s\\n\' "$count" > "$MOCK_NPM_COUNT_FILE"',
+            '  if [[ "$count" -ge 3 ]]; then printf \'"%s"\\n\' "$MOCK_NPM_TERMINAL"; else printf \'"%s"\\n\' "$MOCK_NPM_LATEST"; fi',
+            "  exit 0",
+            "fi",
+            'if [[ "$1" == config && "$2" == get && "$3" == tag ]]; then printf \'latest\\n\'; exit 0; fi',
+            'if [[ "$1" == stage && "$2" == publish ]]; then exit 0; fi',
+            'echo "unexpected npm request: $*" >&2',
+            "exit 3",
+          ].join("\n"),
+        ),
+        writeFile(
+          join(binaryDirectory, "gh"),
+          [
+            "#!/bin/bash",
+            "set -euo pipefail",
+            'printf \'gh %s\\n\' "$*" >> "$MOCK_COMMAND_LOG"',
+            'case "$2" in',
+            '  repos/hraness/kb/releases/tags/v0.19.0) cat "$MOCK_RELEASE_JSON" ;;',
+            '  repos/hraness/kb/releases/latest) cat "$MOCK_LATEST_RELEASE_JSON" ;;',
+            '  "repos/hraness/kb/compare/${MOCK_PRIOR_SOURCE}...main") cat "$MOCK_COMPARISON_JSON" ;;',
+            '  *) echo "unexpected gh request: $*" >&2; exit 3 ;;',
+            "esac",
+          ].join("\n"),
+        ),
+      ]);
+      await Promise.all([
+        chmod(join(binaryDirectory, "git"), 0o755),
+        chmod(join(binaryDirectory, "npm"), 0o755),
+        chmod(join(binaryDirectory, "gh"), 0o755),
+      ]);
+
+      const runBoundary = async (options: Readonly<{
+        candidateTagPresent?: boolean;
+        comparisonStatus?: string;
+        release?: Readonly<Record<string, unknown>>;
+        terminalLatest?: string;
+        terminalMainSha?: string;
+        terminalPriorTagDrift?: boolean;
+      }> = {}) => {
+        const runDirectory = await mkdtemp(join(directory, "run-"));
+        const archive = Buffer.from("reviewed archive", "utf8");
+        const metadata = Buffer.from("reviewed metadata", "utf8");
+        const digest = Buffer.from("reviewed digest", "utf8");
+        const archivePath = join(runDirectory, "hraness-kb-0.19.1.tgz");
+        const metadataPath = join(runDirectory, "npm-pack.json");
+        const digestPath = join(runDirectory, "npm-package.sha256");
+        const tagIdentityPath = join(runDirectory, "tag-identity.txt");
+        const releasePath = join(runDirectory, "release.json");
+        const latestReleasePath = join(runDirectory, "latest-release.json");
+        const comparisonPath = join(runDirectory, "comparison.json");
+        const commandLog = join(runDirectory, "commands.log");
+        const npmCountPath = join(runDirectory, "npm-count.txt");
+        const release = options.release ?? completeRelease;
+        await Promise.all([
+          writeFile(archivePath, archive),
+          writeFile(metadataPath, metadata),
+          writeFile(digestPath, digest),
+          writeFile(
+            tagIdentityPath,
+            `${"c".repeat(40)}\trefs/tags/v0.19.0\n${priorSourceSha}\trefs/tags/v0.19.0^{}\n`,
+          ),
+          writeFile(releasePath, JSON.stringify(release)),
+          writeFile(latestReleasePath, JSON.stringify(release)),
+          writeFile(
+            comparisonPath,
+            JSON.stringify({ status: options.comparisonStatus ?? "ahead" }),
+          ),
+          writeFile(commandLog, ""),
+          writeFile(npmCountPath, "0\n"),
+        ]);
+        const result = await runWorkflowScript(script, {
+          PATH: `${binaryDirectory}:${process.env.PATH ?? ""}`,
+          DEFAULT_BRANCH: "main",
+          DIGEST: digestPath,
+          EXPECTED_ARCHIVE_SHA256: sha256(archive),
+          EXPECTED_DIGEST_SHA256: sha256(digest),
+          EXPECTED_METADATA_SHA256: sha256(metadata),
+          EXPECTED_SOURCE_SHA: expectedSourceSha,
+          EXPECTED_VERSION: "0.19.1",
+          GH_TOKEN: "test-token",
+          GITHUB_REF: "refs/heads/main",
+          GITHUB_REPOSITORY: "hraness/kb",
+          GITHUB_SHA: expectedSourceSha,
+          METADATA: metadataPath,
+          MOCK_CANDIDATE_TAG_PRESENT: options.candidateTagPresent === true ? "true" : "false",
+          MOCK_COMMAND_LOG: commandLog,
+          MOCK_COMPARISON_JSON: comparisonPath,
+          MOCK_LATEST_RELEASE_JSON: latestReleasePath,
+          MOCK_NPM_LATEST: "0.19.0",
+          MOCK_NPM_COUNT_FILE: npmCountPath,
+          MOCK_NPM_TERMINAL: options.terminalLatest ?? "0.19.0",
+          MOCK_PRIOR_TAG_DRIFT: options.terminalPriorTagDrift === true ? "true" : "false",
+          MOCK_PRIOR_SOURCE: priorSourceSha,
+          MOCK_RELEASE_JSON: releasePath,
+          MOCK_SOURCE_SHA: expectedSourceSha,
+          MOCK_TAG_IDENTITY: tagIdentityPath,
+          MOCK_TERMINAL_PRIOR_OBJECT_SHA: "d".repeat(40),
+          MOCK_TERMINAL_PRIOR_SOURCE_SHA: "e".repeat(40),
+          MOCK_TERMINAL_MAIN_SHA: options.terminalMainSha ?? expectedSourceSha,
+          RUNNER_TEMP: runDirectory,
+          TARBALL: archivePath,
+        });
+        return { commandLog: await readFile(commandLog, "utf8"), result };
+      };
+
+      const accepted = await runBoundary();
+      expect(accepted.result.exitCode).toBe(0);
+      const commands = accepted.commandLog.trim().split("\n");
+      const latestIndices = commands.flatMap((command, index) =>
+        command.startsWith("npm view @hraness/kb dist-tags.latest") ? [index] : []);
+      const releaseIndex = commands.findIndex((command) =>
+        command === "gh api repos/hraness/kb/releases/tags/v0.19.0");
+      const candidateTagIndex = commands.findIndex((command) =>
+        command.startsWith("git ls-remote --exit-code https://github.com/hraness/kb.git"));
+      const mutationIndex = commands.findIndex((command) => command.startsWith("npm stage publish"));
+      expect(latestIndices).toHaveLength(3);
+      expect(releaseIndex).toBeGreaterThan(latestIndices[1]!);
+      expect(latestIndices[2]!).toBeGreaterThan(releaseIndex);
+      expect(candidateTagIndex).toBeGreaterThan(latestIndices[2]!);
+      expect(mutationIndex).toBeGreaterThan(candidateTagIndex);
+
+      const candidateCollision = await runBoundary({ candidateTagPresent: true });
+      expect(candidateCollision.result.exitCode).not.toBe(0);
+      expect(candidateCollision.result.stderr).toContain("was created after package verification");
+      expect(candidateCollision.commandLog).not.toContain("npm stage publish");
+
+      const npmDrift = await runBoundary({ terminalLatest: "0.19.1" });
+      expect(npmDrift.result.exitCode).not.toBe(0);
+      expect(npmDrift.result.stderr).toContain(
+        "Public npm latest changed during final release-closure verification",
+      );
+      expect(npmDrift.commandLog).not.toContain("npm stage publish");
+
+      const mainDrift = await runBoundary({ terminalMainSha: "d".repeat(40) });
+      expect(mainDrift.result.exitCode).not.toBe(0);
+      expect(mainDrift.result.stderr).toContain("Could not prove exact main");
+      expect(mainDrift.commandLog).not.toContain("npm stage publish");
+
+      const priorTagDrift = await runBoundary({ terminalPriorTagDrift: true });
+      expect(priorTagDrift.result.exitCode).not.toBe(0);
+      expect(priorTagDrift.result.stderr).toContain(
+        "Prior tag v0.19.0 changed during final release-closure verification",
+      );
+      expect(priorTagDrift.commandLog).not.toContain("npm stage publish");
+
+      const mutableRelease = await runBoundary({
+        release: { ...completeRelease, immutable: false },
+      });
+      expect(mutableRelease.result.exitCode).not.toBe(0);
+      expect(mutableRelease.result.stderr).toContain("lacks its exact immutable GitHub Release");
+      expect(mutableRelease.commandLog).not.toContain("npm stage publish");
+
+      const divergedRelease = await runBoundary({ comparisonStatus: "diverged" });
+      expect(divergedRelease.result.exitCode).not.toBe(0);
+      expect(divergedRelease.result.stderr).toContain("is not reachable from current main");
+      expect(divergedRelease.commandLog).not.toContain("npm stage publish");
+    } finally {
+      await rm(directory, { recursive: true, force: true });
+    }
+  }, 30_000);
 
   test("the source-free staging boundary rejects npm's packed top-level tag override", async () => {
     const workflow = await readFile(stageWorkflowUrl, "utf8");
@@ -1545,7 +1850,9 @@ describe("npm release workflows", () => {
       "current attempt",
       "including every retained attempt",
       "successful version-bound intent step",
-      "`actions: read` and `id-token: write`",
+      "matching annotated tag",
+      "immutable zero-asset Latest Release",
+      "completed-release closure",
       "`Number.MAX_SAFE_INTEGER`",
       "`npm audit signatures --json",
       "`dist-tags.latest`",
@@ -1563,6 +1870,9 @@ describe("npm release workflows", () => {
     expect(normalizedGuide).toContain(
       "selected branch `main` with type `branch`",
     );
+    expect(normalizedGuide).toContain(
+      "only `actions: read`, `contents: read`, and `id-token: write`",
+    );
     expect(guide).toMatch(/the only job with\s+OIDC authority/u);
     expect(guide).toMatch(/explicitly opted-in staging job\s+starts after verification/u);
     expect(guide).toMatch(/approve the staged package through npm with two-factor\s+authentication/u);
@@ -1571,13 +1881,17 @@ describe("npm release workflows", () => {
     expect(guide).toMatch(/new bare\s+Git directory/u);
     expect(guide).toMatch(/do not import a\s+script from the tagged tree/u);
     expect(guide).toMatch(/trusted-publishing assertion cannot run\s+`npm stage list`/u);
-    expect(guide).toMatch(/not a\s+claim that npm exposes or prevents an out-of-band concurrent stage/u);
+    expect(normalizedGuide).toContain(
+      "not a claim that npm exposes or prevents an out-of-band concurrent stage",
+    );
     expect(agents).toContain("Trust only `.github/workflows/npm-stage.yml` with `npm stage publish` permission");
     expect(agents).toContain("selected default branch `main`");
     expect(agents).toContain("administrator bypass disabled");
     expect(agents).toContain("public promotion remains human-gated by two-factor authentication");
     expect(agents).toContain("boolean `publish_to_npm=true`");
-    expect(agents).toContain("`actions: read` plus `id-token: write`");
+    expect(agents).toContain("`actions: read`, `contents: read`, and `id-token: write`");
+    expect(agents).toContain("the next stage remains locked until public `latest`");
+    expect(agents).toContain("exact immutable bot-created Latest Release");
     expect(agents).toContain("clean default `latest`");
     expect(agents).toContain("pinned npm `11.19.0`");
     expect(agents).toContain("Record a successful intent step immediately before mutation");
