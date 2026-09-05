@@ -363,7 +363,7 @@ jobs:
             --registry=https://registry.npmjs.org
           test "$(npm --version)" = "11.19.0"
           [[ "$(node --version)" == v24.* ]]
-      - name: Reject another pending stable stage
+      - name: Reject unresolved stable-stage intent
         env:
           EXPECTED_VERSION: ${{ needs.verify.outputs.package_version }}
           EXPECTED_WORKFLOW_ID: "344070109"
@@ -413,9 +413,13 @@ jobs:
             }
             return result.stdout;
           };
+          const workflowNumber = Number(workflowId);
+          const currentRunNumber = Number(currentRunId);
           if (
             !/^[1-9][0-9]*$/u.test(workflowId)
             || !/^[1-9][0-9]*$/u.test(currentRunId)
+            || !Number.isSafeInteger(workflowNumber)
+            || !Number.isSafeInteger(currentRunNumber)
             || repository !== "hraness/kb"
           ) throw new Error("Stable-stage history identity is invalid");
           const current = parseVersion(expectedVersion, "Candidate version");
@@ -434,6 +438,96 @@ jobs:
           if (compare(current, latest) <= 0) {
             throw new Error(`Candidate ${expectedVersion} is not newer than npm latest ${latestValue}`);
           }
+          const intentRuns = new Map();
+          const resolutionCounts = new Map();
+          const increment = (map, version) => map.set(version, (map.get(version) ?? 0) + 1);
+          const reserve = (version, runId) => {
+            parseVersion(version, `Reserved version from run ${runId}`);
+            const runs = intentRuns.get(version) ?? [];
+            runs.push(runId);
+            intentRuns.set(version, runs);
+          };
+          const inspectRunJobs = (runId) => {
+            const jobsPayload = JSON.parse(execute("gh", [
+              "api",
+              "--method", "GET",
+              `/repos/${repository}/actions/runs/${runId}/jobs?filter=all&per_page=100`,
+            ], `jobs for npm-stage run ${runId}`));
+            if (
+              !jobsPayload
+              || typeof jobsPayload !== "object"
+              || !Number.isSafeInteger(jobsPayload.total_count)
+              || jobsPayload.total_count < 0
+              || jobsPayload.total_count > 100
+              || !Array.isArray(jobsPayload.jobs)
+              || jobsPayload.jobs.length !== jobsPayload.total_count
+            ) throw new Error(`npm-stage run ${runId} exceeds the reviewed 100-job bound`);
+            for (const job of jobsPayload.jobs) {
+              if (
+                !job
+                || typeof job !== "object"
+                || typeof job.name !== "string"
+                || !Array.isArray(job.steps)
+                || job.steps.length > 100
+              ) {
+                throw new Error(`npm-stage run ${runId} contains an invalid job`);
+              }
+              if (!job.name.startsWith("Stage exact package")) continue;
+              const intents = job.steps.filter((step) => (
+                step?.name === "Record exclusive stable-stage intent"
+                && step?.conclusion === "success"
+              ));
+              const resolutions = job.steps.filter((step) => (
+                typeof step?.name === "string"
+                && step.name.startsWith("Record cleared stable-stage intent")
+                && step?.conclusion === "success"
+              ));
+              if (intents.length > 1 || resolutions.length > 1) {
+                throw new Error(`npm-stage run ${runId} has ambiguous intent history`);
+              }
+              const match = /^Stage exact package v((?:0|[1-9]\d*)\.(?:0|[1-9]\d*)\.(?:0|[1-9]\d*))$/u.exec(job.name);
+              if (intents.length === 0 && resolutions.length === 0) {
+                const legacy = legacyStages.get(String(runId));
+                if (
+                  job.conclusion === "success"
+                  && job.name === "Stage exact package"
+                ) {
+                  if (
+                    legacy === undefined
+                    || job.head_sha !== legacy.headSha
+                    || job.run_attempt !== legacy.runAttempt
+                  ) {
+                    throw new Error(`Successful npm-stage run ${runId} lacks a version-bound intent`);
+                  }
+                  reserve(legacy.version, runId);
+                  continue;
+                }
+                const legacyMutation = job.steps.filter((step) => (
+                  step?.name === "Revalidate current main and stage exact package"
+                  && (step?.conclusion === "success" || step?.conclusion === "failure")
+                ));
+                if (match !== null && legacyMutation.length === 1) {
+                  reserve(match[1], runId);
+                }
+                continue;
+              }
+              if (match === null) {
+                throw new Error(`npm-stage run ${runId} lacks a version-bound stage job`);
+              }
+              if (intents.length === 1) reserve(match[1], runId);
+              if (resolutions.length === 1) {
+                const resolutionMatch = /^Record cleared stable-stage intent v((?:0|[1-9]\d*)\.(?:0|[1-9]\d*)\.(?:0|[1-9]\d*))$/u.exec(resolutions[0].name);
+                if (resolutionMatch === null) {
+                  throw new Error(`npm-stage run ${runId} has an invalid cleared-intent identity`);
+                }
+                parseVersion(resolutionMatch[1], `Cleared version from run ${runId}`);
+                increment(resolutionCounts, resolutionMatch[1]);
+              }
+            }
+          };
+          // A rerun is in progress and therefore absent from the completed-run
+          // query. Inspect all attempts of this run before completed dispatches.
+          inspectRunJobs(currentRunNumber);
           const runsPayload = JSON.parse(execute("gh", [
             "api",
             "--method", "GET",
@@ -448,7 +542,6 @@ jobs:
             || !Array.isArray(runsPayload.workflow_runs)
             || runsPayload.workflow_runs.length !== runsPayload.total_count
           ) throw new Error("Completed npm-stage history exceeds the reviewed 100-run bound");
-          let resolvedStageSeen = false;
           for (const run of runsPayload.workflow_runs) {
             if (
               !run
@@ -456,66 +549,50 @@ jobs:
               || !Number.isSafeInteger(run.id)
               || run.id <= 0
               || String(run.id) === currentRunId
-              || run.workflow_id !== Number(workflowId)
+              || run.workflow_id !== workflowNumber
               || run.event !== "workflow_dispatch"
               || run.head_branch !== "main"
               || run.status !== "completed"
             ) throw new Error("Completed npm-stage history contains an invalid run");
-            const jobsPayload = JSON.parse(execute("gh", [
-              "api",
-              "--method", "GET",
-              `/repos/${repository}/actions/runs/${run.id}/jobs?filter=all&per_page=100`,
-            ], `jobs for npm-stage run ${run.id}`));
-            if (
-              !jobsPayload
-              || typeof jobsPayload !== "object"
-              || !Number.isSafeInteger(jobsPayload.total_count)
-              || jobsPayload.total_count < 0
-              || jobsPayload.total_count > 100
-              || !Array.isArray(jobsPayload.jobs)
-              || jobsPayload.jobs.length !== jobsPayload.total_count
-            ) throw new Error(`npm-stage run ${run.id} exceeds the reviewed 100-job bound`);
-            for (const job of jobsPayload.jobs) {
-              if (!job || typeof job !== "object" || typeof job.name !== "string") {
-                throw new Error(`npm-stage run ${run.id} contains an invalid job`);
-              }
-              if (job.conclusion !== "success" || !job.name.startsWith("Stage exact package")) continue;
-              const match = /^Stage exact package v((?:0|[1-9]\d*)\.(?:0|[1-9]\d*)\.(?:0|[1-9]\d*))$/u.exec(job.name);
-              let stagedVersion;
-              if (match !== null) {
-                stagedVersion = match[1];
-              } else {
-                const legacy = legacyStages.get(String(run.id));
-                if (
-                  job.name !== "Stage exact package"
-                  || legacy === undefined
-                  || job.head_sha !== legacy.headSha
-                  || job.run_attempt !== legacy.runAttempt
-                ) {
-                  throw new Error(`Successful npm-stage run ${run.id} lacks a version-bound stage job`);
-                }
-                stagedVersion = legacy.version;
-              }
-              const staged = parseVersion(stagedVersion, `Staged version from run ${run.id}`);
-              if (compare(staged, latest) > 0) {
-                if (
-                  resolved !== null
-                  && stagedVersion === resolvedStageVersion
-                  && compare(staged, current) <= 0
-                ) {
-                  resolvedStageSeen = true;
-                  continue;
-                }
-                throw new Error(
-                  `Refusing to stage ${expectedVersion}: run ${run.id} already staged pending ${stagedVersion}`,
-                );
-              }
+            inspectRunJobs(run.id);
+          }
+          for (const [version, count] of resolutionCounts) {
+            if (count > (intentRuns.get(version)?.length ?? 0)) {
+              throw new Error(`Retained history has a cleared ${version} intent without its matching reservation`);
             }
           }
-          if (resolved !== null && !resolvedStageSeen) {
-            throw new Error(`Resolved prior stage ${resolvedStageVersion} does not identify a blocking stage`);
+          if (resolved !== null) {
+            const reservations = intentRuns.get(resolvedStageVersion)?.length ?? 0;
+            const resolutions = resolutionCounts.get(resolvedStageVersion) ?? 0;
+            if (
+              reservations <= resolutions
+              || compare(resolved, latest) <= 0
+              || compare(resolved, current) > 0
+            ) {
+              throw new Error(`Resolved prior stage ${resolvedStageVersion} does not identify a blocking intent`);
+            }
+            increment(resolutionCounts, resolvedStageVersion);
+          }
+          for (const [version, runs] of intentRuns) {
+            const outstanding = runs.length - (resolutionCounts.get(version) ?? 0);
+            if (outstanding > 0 && compare(parseVersion(version, "Reserved stage"), latest) > 0) {
+              throw new Error(
+                `Refusing to stage ${expectedVersion}: run ${runs[runs.length - 1]} already reserved stable stage ${version}`,
+              );
+            }
           }
           NODE
+      - name: Record cleared stable-stage intent v${{ inputs.resolved_stage_version }}
+        if: inputs.resolved_stage_version != ''
+        env:
+          RESOLVED_STAGE_VERSION: ${{ inputs.resolved_stage_version }}
+        run: |
+          set -euo pipefail
+          if [[ ! "$RESOLVED_STAGE_VERSION" =~ ^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$ ]]; then
+            echo "::error::Cleared stable-stage intent identity is invalid"
+            exit 1
+          fi
+          echo "Recorded the cleared retained-history intent for @hraness/kb@$RESOLVED_STAGE_VERSION"
       - name: Bind artifact reference
         env:
           ARTIFACT_NAME: ${{ needs.verify.outputs.artifact_name }}
@@ -896,6 +973,18 @@ jobs:
             >> "$GITHUB_OUTPUT"
           printf 'tarball=%s\nmetadata=%s\ndigest=%s\n' \
             "$tarball" "$metadata" "$digest" >> "$GITHUB_OUTPUT"
+      - name: Record exclusive stable-stage intent
+        env:
+          EXPECTED_VERSION: ${{ needs.verify.outputs.package_version }}
+        run: |
+          set -euo pipefail
+          if [[ ! "$EXPECTED_VERSION" =~ ^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$ || \
+                ! "$GITHUB_RUN_ID" =~ ^[1-9][0-9]*$ || \
+                ! "$GITHUB_RUN_ATTEMPT" =~ ^[1-9][0-9]*$ ]]; then
+            echo "::error::Stable-stage intent identity is invalid"
+            exit 1
+          fi
+          echo "Reserved the exclusive retained-history intent for @hraness/kb@$EXPECTED_VERSION"
       - name: Revalidate current main and stage exact package
         env:
           DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}

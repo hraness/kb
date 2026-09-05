@@ -402,10 +402,13 @@ describe("npm release workflows", () => {
       'PUBLISH_TO_NPM: ${{ inputs.publish_to_npm }}',
       'REF_PROTECTED: ${{ github.ref_protected }}',
       "attempt.triggering_actor?.id !== actorId",
-      "Reject another pending stable stage",
+      "Reject unresolved stable-stage intent",
       "Completed npm-stage history exceeds the reviewed 100-run bound",
-      "already staged pending",
+      "already reserved stable stage",
       "RESOLVED_STAGE_VERSION: ${{ inputs.resolved_stage_version }}",
+      "Record cleared stable-stage intent v${{ inputs.resolved_stage_version }}",
+      "Record exclusive stable-stage intent",
+      "jobs?filter=all&per_page=100",
       "actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c",
       "Downloaded npm artifact must contain exactly the tarball, npm-pack.json, and npm-package.sha256",
       'expected_tarball_name="hraness-kb-$EXPECTED_VERSION.tgz"',
@@ -452,7 +455,8 @@ describe("npm release workflows", () => {
     expect(stageJob).not.toContain("--tag latest");
     const authorizationIndex = stageJob.indexOf("Reauthorize current npm staging attempt");
     const setupIndex = stageJob.indexOf("actions/setup-node@");
-    const pendingStageIndex = stageJob.indexOf("Reject another pending stable stage");
+    const pendingStageIndex = stageJob.indexOf("Reject unresolved stable-stage intent");
+    const intentIndex = stageJob.lastIndexOf("Record exclusive stable-stage intent");
     const fetchIndex = stageJob.lastIndexOf('git --git-dir="$current_main" fetch');
     const tagLookupIndex = stageJob.lastIndexOf("git ls-remote --exit-code --refs");
     const rehashIndex = stageJob.lastIndexOf('current_archive_sha256="$(sha256sum "$TARBALL"');
@@ -465,6 +469,8 @@ describe("npm release workflows", () => {
     expect(fetchIndex).toBeLessThan(tagLookupIndex);
     expect(tagLookupIndex).toBeLessThan(rehashIndex);
     expect(rehashIndex).toBeLessThan(stageIndex);
+    expect(intentIndex).toBeGreaterThan(pendingStageIndex);
+    expect(intentIndex).toBeLessThan(stageIndex);
     expect(workflow).not.toContain("secrets.NPM_TOKEN");
     expect(workflow).not.toContain("NODE_AUTH_TOKEN");
     expect(workflow).not.toMatch(/\bnpm publish\b/u);
@@ -645,11 +651,12 @@ describe("npm release workflows", () => {
     }
   });
 
-  test("a completed stage remains a durable lock until that version is public latest", async () => {
+  test("a successful intent remains a durable lock across failed jobs and reruns", async () => {
     const workflow = await readFile(stageWorkflowUrl, "utf8");
-    const script = workflowStepScript(workflow, "Reject another pending stable stage");
+    const script = workflowStepScript(workflow, "Reject unresolved stable-stage intent");
     const directory = await mkdtemp(join(tmpdir(), "kb-stage-history-"));
     const binaryDirectory = join(directory, "bin");
+    const currentJobsPath = join(directory, "current-jobs.json");
     const runsPath = join(directory, "runs.json");
     const jobsPath = join(directory, "jobs.json");
     try {
@@ -669,6 +676,7 @@ describe("npm release workflows", () => {
           "set -euo pipefail",
           'case "$*" in',
           '  *"/actions/workflows/344070109/runs?"*) cat "$MOCK_RUNS_JSON" ;;',
+          '  *"/actions/runs/67890/jobs?"*) cat "$MOCK_CURRENT_JOBS_JSON" ;;',
           '  *"/actions/runs/12345/jobs?"*|*"/actions/runs/33269920554/jobs?"*) cat "$MOCK_JOBS_JSON" ;;',
           '  *) echo "unexpected gh request: $*" >&2; exit 2 ;;',
           "esac",
@@ -687,6 +695,14 @@ describe("npm release workflows", () => {
             status: "completed",
           }],
         })),
+        writeFile(currentJobsPath, JSON.stringify({
+          total_count: 1,
+          jobs: [{
+            conclusion: null,
+            name: "Stage exact package v0.19.2",
+            steps: [],
+          }],
+        })),
       ]);
       const environment = {
         PATH: `${binaryDirectory}:${process.env.PATH ?? ""}`,
@@ -694,6 +710,7 @@ describe("npm release workflows", () => {
         EXPECTED_WORKFLOW_ID: "344070109",
         GITHUB_REPOSITORY: "hraness/kb",
         GITHUB_RUN_ID: "67890",
+        MOCK_CURRENT_JOBS_JSON: currentJobsPath,
         MOCK_NPM_LATEST: "0.19.0",
         MOCK_RUNS_JSON: runsPath,
         MOCK_JOBS_JSON: jobsPath,
@@ -702,19 +719,30 @@ describe("npm release workflows", () => {
 
       await writeFile(jobsPath, JSON.stringify({
         total_count: 1,
-        jobs: [{ name: "Stage exact package v0.19.0", conclusion: "success" }],
+        jobs: [{
+          name: "Stage exact package v0.19.0",
+          conclusion: "success",
+          steps: [{ name: "Record exclusive stable-stage intent", conclusion: "success" }],
+        }],
       }));
       const released = await runWorkflowScript(script, environment);
       expect(released.exitCode).toBe(0);
 
       await writeFile(jobsPath, JSON.stringify({
         total_count: 1,
-        jobs: [{ name: "Stage exact package v0.19.1", conclusion: "success" }],
+        jobs: [{
+          name: "Stage exact package v0.19.1",
+          conclusion: "failure",
+          steps: [
+            { name: "Record exclusive stable-stage intent", conclusion: "success" },
+            { name: "Revalidate current main and stage exact package", conclusion: "failure" },
+          ],
+        }],
       }));
       const pending = await runWorkflowScript(script, environment);
       expect(pending.exitCode).not.toBe(0);
       expect(pending.stderr).toContain(
-        "run 12345 already staged pending 0.19.1",
+        "run 12345 already reserved stable stage 0.19.1",
       );
 
       const rejectedInNpm = await runWorkflowScript(script, {
@@ -724,12 +752,30 @@ describe("npm release workflows", () => {
       expect(rejectedInNpm.exitCode).toBe(0);
 
       await writeFile(jobsPath, JSON.stringify({
+        total_count: 2,
+        jobs: [{
+          name: "Stage exact package v0.19.2",
+          conclusion: "failure",
+          steps: [
+            { name: "Record cleared stable-stage intent v0.19.1", conclusion: "success" },
+            { name: "Record exclusive stable-stage intent", conclusion: "skipped" },
+          ],
+        }, {
+          name: "Stage exact package v0.19.1",
+          conclusion: "failure",
+          steps: [{ name: "Record exclusive stable-stage intent", conclusion: "success" }],
+        }],
+      }));
+      const durableResolution = await runWorkflowScript(script, environment);
+      expect(durableResolution.exitCode).toBe(0);
+
+      await writeFile(jobsPath, JSON.stringify({
         total_count: 1,
-        jobs: [{ name: "Stage exact package", conclusion: "success" }],
+        jobs: [{ name: "Stage exact package", conclusion: "success", steps: [] }],
       }));
       const unboundHistory = await runWorkflowScript(script, environment);
       expect(unboundHistory.exitCode).not.toBe(0);
-      expect(unboundHistory.stderr).toContain("lacks a version-bound stage job");
+      expect(unboundHistory.stderr).toContain("lacks a version-bound intent");
 
       await Promise.all([
         writeFile(runsPath, JSON.stringify({
@@ -749,11 +795,36 @@ describe("npm release workflows", () => {
             conclusion: "success",
             head_sha: "e12d3fd05ffaa722ac1c43a8ecaa7d21fece679a",
             run_attempt: 1,
+            steps: [],
           }],
         })),
       ]);
       const sealedLegacyStage = await runWorkflowScript(script, environment);
       expect(sealedLegacyStage.exitCode).toBe(0);
+
+      await Promise.all([
+        writeFile(runsPath, JSON.stringify({ total_count: 0, workflow_runs: [] })),
+        writeFile(currentJobsPath, JSON.stringify({
+          total_count: 2,
+          jobs: [{
+            conclusion: "failure",
+            name: "Stage exact package v0.19.1",
+            steps: [
+              { name: "Record exclusive stable-stage intent", conclusion: "success" },
+              { name: "Revalidate current main and stage exact package", conclusion: "failure" },
+            ],
+          }, {
+            conclusion: null,
+            name: "Stage exact package v0.19.2",
+            steps: [],
+          }],
+        })),
+      ]);
+      const sameRunRerun = await runWorkflowScript(script, environment);
+      expect(sameRunRerun.exitCode).not.toBe(0);
+      expect(sameRunRerun.stderr).toContain(
+        "run 67890 already reserved stable stage 0.19.1",
+      );
     } finally {
       await rm(directory, { recursive: true, force: true });
     }
@@ -1251,6 +1322,8 @@ describe("npm release workflows", () => {
       "allows only `main`",
       "original actor and triggering actor",
       "current attempt",
+      "including every retained attempt",
+      "successful version-bound intent step",
       "`actions: read` and `id-token: write`",
       "`Number.MAX_SAFE_INTEGER`",
       "`npm audit signatures --json",
@@ -1274,6 +1347,8 @@ describe("npm release workflows", () => {
     expect(guide).toMatch(/exactly the tarball,\s+`npm-pack\.json`, and `npm-package\.sha256`/u);
     expect(guide).toMatch(/new bare\s+Git directory/u);
     expect(guide).toMatch(/do not import a\s+script from the tagged tree/u);
+    expect(guide).toMatch(/trusted-publishing assertion cannot run\s+`npm stage list`/u);
+    expect(guide).toMatch(/not a\s+claim that npm exposes or prevents an out-of-band concurrent stage/u);
     expect(agents).toContain("Trust only `.github/workflows/npm-stage.yml` with `npm stage publish` permission");
     expect(agents).toContain("selected default branch `main`");
     expect(agents).toContain("administrator bypass disabled");
@@ -1282,6 +1357,10 @@ describe("npm release workflows", () => {
     expect(agents).toContain("`actions: read` plus `id-token: write`");
     expect(agents).toContain("clean default `latest`");
     expect(agents).toContain("pinned npm `11.19.0`");
+    expect(agents).toContain("Record a successful intent step immediately before mutation");
+    expect(agents).toContain("scan every retained attempt");
+    expect(agents).toContain("cannot list stages");
+    expect(agents).toContain("do not claim this workflow prevents out-of-band stages");
     expect(agents).toContain("sole main source commit");
     expect(agents).toContain("The protected tag workflow must bind the actor and event sender");
     expect(agents).toContain("public repository ID `1308971873`");
