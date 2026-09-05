@@ -4,12 +4,7 @@ on:
   push:
     tags:
       - "v*"
-  workflow_dispatch:
-    inputs:
-      tag:
-        description: Existing stable tag to recover after npm delivery succeeded
-        required: true
-        type: string
+      - "!v*-beta.*"
 
 permissions:
   contents: read
@@ -19,15 +14,53 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
+  authorize:
+    name: Authorize owner release tag
+    permissions: {}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - name: Verify immutable owner and public repository identity
+        env:
+          EXPECTED_ACTOR_ID: "894119"
+          EXPECTED_REPOSITORY: "hraness/kb"
+          EXPECTED_REPOSITORY_ID: "1308971873"
+          REF_PROTECTED: ${{ github.ref_protected }}
+        run: |
+          set -euo pipefail
+          if [[ "$GITHUB_EVENT_NAME" != push || \
+                "$GITHUB_ACTOR_ID" != "$EXPECTED_ACTOR_ID" || \
+                "$GITHUB_REPOSITORY" != "$EXPECTED_REPOSITORY" || \
+                "$GITHUB_REPOSITORY_ID" != "$EXPECTED_REPOSITORY_ID" || \
+                "$REF_PROTECTED" != true ]]; then
+            echo "::error::Release requires an owner-created protected tag in the exact public repository"
+            exit 1
+          fi
+          EXPECTED_ACTOR_ID="$EXPECTED_ACTOR_ID" \
+            EXPECTED_REPOSITORY="$EXPECTED_REPOSITORY" \
+            EXPECTED_REPOSITORY_ID="$EXPECTED_REPOSITORY_ID" node <<'NODE'
+          const { readFileSync } = require("node:fs");
+          const event = JSON.parse(readFileSync(process.env.GITHUB_EVENT_PATH, "utf8"));
+          if (
+            event.sender?.id !== Number(process.env.EXPECTED_ACTOR_ID)
+            || event.sender?.type !== "User"
+            || event.repository?.id !== Number(process.env.EXPECTED_REPOSITORY_ID)
+            || event.repository?.full_name !== process.env.EXPECTED_REPOSITORY
+            || event.repository?.visibility !== "public"
+            || event.repository?.private !== false
+            || event.repository?.default_branch !== "main"
+          ) throw new Error("Tag-push sender or public repository identity is not the immutable release authority");
+          NODE
+
   verify:
     name: Verify
+    needs: authorize
     permissions:
       contents: read
     runs-on: ubuntu-latest
     timeout-minutes: 45
     outputs:
       default_branch: ${{ steps.identity.outputs.default_branch }}
-      event_mode: ${{ steps.identity.outputs.event_mode }}
       source_sha: ${{ steps.identity.outputs.source_sha }}
       verified_tag: ${{ steps.identity.outputs.tag }}
       workflow_sha: ${{ steps.identity.outputs.workflow_sha }}
@@ -56,7 +89,7 @@ jobs:
         id: identity
         env:
           DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
-          RECOVERY_TAG: ${{ inputs.tag }}
+          REF_PROTECTED: ${{ github.ref_protected }}
         run: |
           set -euo pipefail
           git check-ref-format "refs/heads/$DEFAULT_BRANCH"
@@ -65,30 +98,13 @@ jobs:
           default_head="$(git rev-parse "origin/$DEFAULT_BRANCH")"
           checked_out_head="$(git rev-parse HEAD)"
 
-          case "$GITHUB_EVENT_NAME" in
-            push)
-              event_mode="push-tag"
-              release_tag="$GITHUB_REF_NAME"
-              if [[ "$GITHUB_REF" != "refs/tags/$release_tag" ]]; then
-                echo "::error::Release push is not an exact tag ref"
-                exit 1
-              fi
-              ;;
-            workflow_dispatch)
-              event_mode="recovery"
-              release_tag="$RECOVERY_TAG"
-              if [[ "$GITHUB_REF" != "refs/heads/$DEFAULT_BRANCH" || \
-                    "$GITHUB_SHA" != "$default_head" || \
-                    "$checked_out_head" != "$default_head" ]]; then
-                echo "::error::Recovery must run from current $DEFAULT_BRANCH head $default_head"
-                exit 1
-              fi
-              ;;
-            *)
-              echo "::error::Unsupported release event $GITHUB_EVENT_NAME"
-              exit 1
-              ;;
-          esac
+          release_tag="$GITHUB_REF_NAME"
+          if [[ "$GITHUB_EVENT_NAME" != push || \
+                "$GITHUB_REF" != "refs/tags/$release_tag" || \
+                "$REF_PROTECTED" != true ]]; then
+            echo "::error::Release requires a protected owner-created stable tag"
+            exit 1
+          fi
 
           if [[ ! "$release_tag" =~ ^v(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$ ]]; then
             echo "::error::Release tag $release_tag is not a stable semantic version"
@@ -97,14 +113,18 @@ jobs:
           git check-ref-format "refs/tags/$release_tag"
           release_ref="refs/kb-release-tags/$release_tag"
           git fetch --no-tags origin "refs/tags/$release_tag:$release_ref"
+          if [[ "$(git cat-file -t "$release_ref")" != tag ]]; then
+            echo "::error::Release tag must be annotated"
+            exit 1
+          fi
           tag_commit="$(git rev-parse "$release_ref^{commit}")"
           if [[ ! "$tag_commit" =~ ^[a-f0-9]{40}$ ]]; then
             echo "::error::Release tag did not resolve to one commit"
             exit 1
           fi
-          if [[ "$event_mode" == push-tag && \
-                ( "$GITHUB_SHA" != "$tag_commit" || "$checked_out_head" != "$tag_commit" ) ]]; then
-            echo "::error::Tag event does not match the checked release commit $tag_commit"
+          if [[ "$GITHUB_SHA" != "$tag_commit" || \
+                "$checked_out_head" != "$tag_commit" ]]; then
+            echo "::error::Tag does not match the checked release commit $tag_commit"
             exit 1
           fi
           if ! git merge-base --is-ancestor "$tag_commit" "$default_head"; then
@@ -148,8 +168,8 @@ jobs:
             exit 1
           fi
 
-          printf 'default_branch=%s\nevent_mode=%s\nsource_sha=%s\ntag=%s\nworkflow_sha=%s\n' \
-            "$DEFAULT_BRANCH" "$event_mode" "$tag_commit" "$release_tag" "$checked_out_head" \
+          printf 'default_branch=%s\nsource_sha=%s\ntag=%s\nworkflow_sha=%s\n' \
+            "$DEFAULT_BRANCH" "$tag_commit" "$release_tag" "$checked_out_head" \
             >> "$GITHUB_OUTPUT"
       - name: Materialize exact tagged source
         id: source
@@ -212,6 +232,21 @@ jobs:
           registry_archive="$registry_directory/$tarball_name"
           registry_pack_json="$registry_directory/npm-pack.json"
           registry_view_json="$registry_directory/npm-view.json"
+
+          registry_ready=false
+          for registry_poll in {1..60}; do
+            published_version="$(npm view "$package_spec" version --json \
+              --registry=https://registry.npmjs.org 2>/dev/null || true)"
+            if [[ "$published_version" == "\"$package_version\"" ]]; then
+              registry_ready=true
+              break
+            fi
+            sleep 10
+          done
+          if [[ "$registry_ready" != true ]]; then
+            echo "::error::$package_spec did not become readable from npm in time"
+            exit 1
+          fi
 
           if [[ "$(git -C "$GITHUB_WORKSPACE" rev-parse HEAD)" != "$WORKFLOW_SHA" ]]; then
             echo "::error::Reviewed workflow checkout changed before package verification"
@@ -280,7 +315,6 @@ jobs:
     timeout-minutes: 5
     env:
       DEFAULT_BRANCH: ${{ needs.verify.outputs.default_branch }}
-      EVENT_MODE: ${{ needs.verify.outputs.event_mode }}
       GH_REPO: ${{ github.repository }}
       GH_TOKEN: ${{ github.token }}
       VERIFIED_SOURCE_SHA: ${{ needs.verify.outputs.source_sha }}
@@ -296,28 +330,13 @@ jobs:
             echo "::error::Verified release identity is incomplete"
             exit 1
           fi
-          case "$EVENT_MODE" in
-            push-tag)
-              if [[ "$GITHUB_EVENT_NAME" != push || \
-                    "$GITHUB_REF" != "refs/tags/$VERIFIED_TAG" || \
-                    "$GITHUB_SHA" != "$VERIFIED_SOURCE_SHA" ]]; then
-                echo "::error::Tag release event changed after verification"
-                exit 1
-              fi
-              ;;
-            recovery)
-              if [[ "$GITHUB_EVENT_NAME" != workflow_dispatch || \
-                    "$GITHUB_REF" != "refs/heads/$DEFAULT_BRANCH" || \
-                    "$GITHUB_SHA" != "$WORKFLOW_SHA" ]]; then
-                echo "::error::Recovery event changed after verification"
-                exit 1
-              fi
-              ;;
-            *)
-              echo "::error::Verified release event mode is invalid"
-              exit 1
-              ;;
-          esac
+          if [[ "$GITHUB_EVENT_NAME" != push || \
+                "$GITHUB_REF" != "refs/tags/$VERIFIED_TAG" || \
+                "$GITHUB_SHA" != "$VERIFIED_SOURCE_SHA" || \
+                "$GITHUB_SHA" != "$WORKFLOW_SHA" ]]; then
+            echo "::error::Protected tag release event changed after verification"
+            exit 1
+          fi
 
           current_tag_sha="$(gh api "/repos/$GITHUB_REPOSITORY/commits/$VERIFIED_TAG" --jq '.sha')"
           current_default_sha="$(gh api "/repos/$GITHUB_REPOSITORY/commits/$DEFAULT_BRANCH" --jq '.sha')"
@@ -332,11 +351,6 @@ jobs:
             echo "::error::Tag $VERIFIED_TAG is no longer reachable from $DEFAULT_BRANCH"
             exit 1
           fi
-          if [[ "$EVENT_MODE" == recovery && "$current_default_sha" != "$WORKFLOW_SHA" ]]; then
-            echo "::error::$DEFAULT_BRANCH advanced to $current_default_sha during recovery verification"
-            exit 1
-          fi
-
           repository_tags="$(gh api --paginate \
             "/repos/$GITHUB_REPOSITORY/tags?per_page=100" \
             --jq '.[].name')"
