@@ -69,6 +69,7 @@ jobs:
         with:
           fetch-depth: 0
           persist-credentials: false
+          ref: main
       - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
           node-version: "24"
@@ -129,13 +130,23 @@ jobs:
             echo "::error::Release tag did not resolve to one commit"
             exit 1
           fi
-          if [[ "$GITHUB_SHA" != "$tag_commit" || \
-                "$checked_out_head" != "$tag_commit" ]]; then
-            echo "::error::Tag does not match the checked release commit $tag_commit"
+          if [[ "$GITHUB_SHA" != "$tag_commit" ]]; then
+            echo "::error::Tag event does not match release commit $tag_commit"
+            exit 1
+          fi
+          if [[ "$checked_out_head" != "$default_head" ]]; then
+            echo "::error::Reviewed checkout is not exact current $DEFAULT_BRANCH"
             exit 1
           fi
           if ! git merge-base --is-ancestor "$tag_commit" "$default_head"; then
             echo "::error::Tag $release_tag is not reachable from current $DEFAULT_BRANCH"
+            exit 1
+          fi
+          if ! git diff --quiet --no-ext-diff --no-textconv \
+            "$tag_commit" "$default_head" -- \
+            .github/workflows/release.yml \
+            .github/workflows/npm-stage.yml; then
+            echo "::error::Tagged and current release workflow controls differ"
             exit 1
           fi
 
@@ -201,7 +212,7 @@ jobs:
           fi
 
           printf 'default_branch=%s\nsource_sha=%s\ntag=%s\nworkflow_sha=%s\n' \
-            "$DEFAULT_BRANCH" "$tag_commit" "$release_tag" "$checked_out_head" \
+            "$DEFAULT_BRANCH" "$tag_commit" "$release_tag" "$default_head" \
             >> "$GITHUB_OUTPUT"
       - name: Materialize exact tagged source
         id: source
@@ -409,6 +420,11 @@ jobs:
       VERIFIED_TAG: ${{ needs.verify.outputs.verified_tag }}
       WORKFLOW_SHA: ${{ needs.verify.outputs.workflow_sha }}
     steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+          ref: main
       - name: Reauthorize current release attempt
         env:
           EXPECTED_ACTOR_ID: "894119"
@@ -507,14 +523,49 @@ jobs:
           fi
           if [[ "$GITHUB_EVENT_NAME" != push || \
                 "$GITHUB_REF" != "refs/tags/$VERIFIED_TAG" || \
-                "$GITHUB_SHA" != "$VERIFIED_SOURCE_SHA" || \
-                "$GITHUB_SHA" != "$WORKFLOW_SHA" ]]; then
+                "$GITHUB_SHA" != "$VERIFIED_SOURCE_SHA" ]]; then
             echo "::error::Protected tag release event changed after verification"
             exit 1
           fi
 
+          verify_current_release_controls() {
+            local advertised_main imported_main
+            advertised_main="$(gh api "/repos/$GITHUB_REPOSITORY/commits/$DEFAULT_BRANCH" --jq '.sha')"
+            git fetch --no-tags --force origin \
+              "refs/heads/$DEFAULT_BRANCH:refs/remotes/kb-release-current/$DEFAULT_BRANCH"
+            imported_main="$(git rev-parse "refs/remotes/kb-release-current/$DEFAULT_BRANCH")"
+            if [[ ! "$advertised_main" =~ ^[a-f0-9]{40}$ || \
+                  "$imported_main" != "$advertised_main" ]]; then
+              echo "::error::Could not import one exact current $DEFAULT_BRANCH authority" >&2
+              return 1
+            fi
+            if ! git merge-base --is-ancestor "$VERIFIED_SOURCE_SHA" "$imported_main" || \
+               ! git merge-base --is-ancestor "$WORKFLOW_SHA" "$imported_main"; then
+              echo "::error::Release source or reviewed workflow is no longer on current $DEFAULT_BRANCH" >&2
+              return 1
+            fi
+            if ! git diff --quiet --no-ext-diff --no-textconv \
+              "$VERIFIED_SOURCE_SHA" "$imported_main" -- \
+              .github/workflows/release.yml \
+              .github/workflows/npm-stage.yml; then
+              echo "::error::Tagged and current release workflow controls differ" >&2
+              return 1
+            fi
+            if ! git diff --quiet --no-ext-diff --no-textconv \
+              "$WORKFLOW_SHA" "$imported_main" -- \
+              scripts/package-artifact.ts \
+              scripts/npm-package-identity.ts \
+              scripts/npm-release-attestation.ts \
+              scripts/package-smoke.ts \
+              scripts/prepare-npm-package.ts; then
+              echo "::error::Current release verifier controls changed after verification" >&2
+              return 1
+            fi
+            printf '%s\n' "$imported_main"
+          }
+
           current_tag_sha="$(gh api "/repos/$GITHUB_REPOSITORY/commits/$VERIFIED_TAG" --jq '.sha')"
-          current_default_sha="$(gh api "/repos/$GITHUB_REPOSITORY/commits/$DEFAULT_BRANCH" --jq '.sha')"
+          current_default_sha="$(verify_current_release_controls)"
           if [[ "$current_tag_sha" != "$VERIFIED_SOURCE_SHA" ]]; then
             echo "::error::Tag $VERIFIED_TAG moved to $current_tag_sha after verification"
             exit 1
@@ -613,6 +664,11 @@ jobs:
           printf -v expected_release_body \
             'Automated immutable release for @hraness/kb@%s.\n\nSource commit: %s\nWorkflow run: %s' \
             "$verified_version" "$VERIFIED_SOURCE_SHA" "$GITHUB_RUN_ID"
+          final_default_sha="$(verify_current_release_controls)"
+          if [[ "$final_default_sha" != "$current_default_sha" ]]; then
+            echo "::error::Current $DEFAULT_BRANCH moved during final release authorization"
+            exit 1
+          fi
           release_json="$(mktemp "$RUNNER_TEMP/kb-release.XXXXXX")"
           if ! gh release create "$VERIFIED_TAG" \
             --verify-tag \

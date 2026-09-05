@@ -249,6 +249,9 @@ export function validateNpmStageWorkflow(source: string, label: string): void {
     "Record exclusive stable-stage intent",
     "Record cleared stable-stage intent",
     "jobs?filter=all&per_page=100",
+    "has a terminal write without one durable intent",
+    "has an unsealed generic stage job",
+    "jobId: 99146963354",
     'execute("npm", [',
     "dist-tags.latest",
   ]) {
