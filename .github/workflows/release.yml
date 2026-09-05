@@ -110,6 +110,13 @@ jobs:
             echo "::error::Release tag $release_tag is not a stable semantic version"
             exit 1
           fi
+          RELEASE_VERSION="${release_tag#v}" node -e '
+            const match = /^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)$/u.exec(process.env.RELEASE_VERSION ?? "");
+            if (match === null || match.slice(1).some((part) => BigInt(part) > BigInt(Number.MAX_SAFE_INTEGER))) {
+              console.error("::error::Release version components must not exceed Number.MAX_SAFE_INTEGER");
+              process.exit(1);
+            }
+          '
           git check-ref-format "refs/tags/$release_tag"
           release_ref="refs/kb-release-tags/$release_tag"
           git fetch --no-tags origin "refs/tags/$release_tag:$release_ref"
@@ -159,10 +166,35 @@ jobs:
             echo "::error::Tag $release_tag changed during identity verification"
             exit 1
           fi
-          newest_stable_tag="$(git tag --list 'v*' \
-            | grep -E '^v(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$' \
-            | LC_ALL=C sort -V \
-            | tail -n 1)"
+          newest_stable_tag="$(git tag --list 'v*' | node -e '
+            const { readFileSync } = require("node:fs");
+            const pattern = /^v(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)$/u;
+            const maximum = BigInt(Number.MAX_SAFE_INTEGER);
+            const parse = (tag) => {
+              const match = pattern.exec(tag);
+              if (match === null) return null;
+              const parts = match.slice(1).map(BigInt);
+              if (parts.some((part) => part > maximum)) {
+                console.error("::error::Stable version components exceed Number.MAX_SAFE_INTEGER: " + tag);
+                process.exit(1);
+              }
+              return parts;
+            };
+            const compare = (left, right) => {
+              for (let index = 0; index < 3; index += 1) {
+                if (left[index] !== right[index]) return left[index] > right[index] ? 1 : -1;
+              }
+              return 0;
+            };
+            let newest = null;
+            for (const tag of readFileSync(0, "utf8").split(/\r?\n/u)) {
+              const parts = parse(tag);
+              if (parts !== null && (newest === null || compare(parts, newest.parts) > 0)) {
+                newest = { parts, tag };
+              }
+            }
+            process.stdout.write(newest?.tag ?? "");
+          ')"
           if [[ "$newest_stable_tag" != "$release_tag" ]]; then
             echo "::error::Tag $release_tag is not the newest stable tag $newest_stable_tag"
             exit 1
@@ -212,6 +244,7 @@ jobs:
       - name: Verify canonical npm delivery
         env:
           EXPECTED_NAME: "@hraness/kb"
+          EXPECTED_SOURCE_SHA: ${{ steps.identity.outputs.source_sha }}
           EXPECTED_VERSION: ${{ steps.identity.outputs.tag }}
           SOURCE_TREE: ${{ steps.source.outputs.tree }}
           WORKFLOW_SHA: ${{ steps.identity.outputs.workflow_sha }}
@@ -232,12 +265,18 @@ jobs:
           registry_archive="$registry_directory/$tarball_name"
           registry_pack_json="$registry_directory/npm-pack.json"
           registry_view_json="$registry_directory/npm-view.json"
+          registry_latest_json="$registry_directory/npm-latest.json"
+          registry_audit_json="$registry_directory/npm-audit-signatures.json"
+          audit_directory="$RUNNER_TEMP/kb-release-signature-audit"
 
           registry_ready=false
           for registry_poll in {1..60}; do
             published_version="$(npm view "$package_spec" version --json \
               --registry=https://registry.npmjs.org 2>/dev/null || true)"
-            if [[ "$published_version" == "\"$package_version\"" ]]; then
+            published_latest="$(npm view "$EXPECTED_NAME" dist-tags.latest --json \
+              --registry=https://registry.npmjs.org 2>/dev/null || true)"
+            if [[ "$published_version" == "\"$package_version\"" && \
+                  "$published_latest" == "\"$package_version\"" ]]; then
               registry_ready=true
               break
             fi
@@ -255,6 +294,7 @@ jobs:
           current_tools=(
             scripts/package-artifact.ts
             scripts/npm-package-identity.ts
+            scripts/npm-release-attestation.ts
             scripts/package-smoke.ts
             scripts/prepare-npm-package.ts
           )
@@ -273,6 +313,7 @@ jobs:
           done
           current_prepare="$GITHUB_WORKSPACE/scripts/prepare-npm-package.ts"
           current_identity="$GITHUB_WORKSPACE/scripts/npm-package-identity.ts"
+          current_attestation="$GITHUB_WORKSPACE/scripts/npm-release-attestation.ts"
           current_smoke="$GITHUB_WORKSPACE/scripts/package-smoke.ts"
 
           (
@@ -291,6 +332,10 @@ jobs:
             --json \
             --registry=https://registry.npmjs.org \
             > "$registry_view_json"
+          npm view "$EXPECTED_NAME" dist-tags.latest \
+            --json \
+            --registry=https://registry.npmjs.org \
+            > "$registry_latest_json"
           bun --no-env-file --config=/dev/null run "$current_identity" \
             --expected-name "$EXPECTED_NAME" \
             --expected-version "$package_version" \
@@ -306,10 +351,53 @@ jobs:
               --pack-json "$registry_pack_json"
           )
 
+          if [[ -e "$audit_directory" ]]; then
+            echo "::error::npm signature audit directory already exists"
+            exit 1
+          fi
+          mkdir -p "$audit_directory"
+          AUDIT_DIRECTORY="$audit_directory" node <<'NODE'
+          const { writeFileSync } = require("node:fs");
+          const { join } = require("node:path");
+          writeFileSync(join(process.env.AUDIT_DIRECTORY, "package.json"), `${JSON.stringify({
+            name: "kb-release-signature-audit",
+            private: true,
+            version: "0.0.0",
+          }, null, 2)}\n`, { encoding: "utf8", flag: "wx" });
+          NODE
+          (
+            cd "$audit_directory"
+            npm install "$package_spec" \
+              --ignore-scripts \
+              --no-audit \
+              --no-fund \
+              --package-lock=false \
+              --save-exact \
+              --registry=https://registry.npmjs.org
+            npm audit signatures \
+              --json \
+              --include-attestations \
+              --registry=https://registry.npmjs.org \
+              > "$registry_audit_json"
+          )
+          registry_tarball_sha512="$(node -e '
+            const { createHash } = require("node:crypto");
+            const { readFileSync } = require("node:fs");
+            process.stdout.write(createHash("sha512").update(readFileSync(process.argv[1])).digest("hex"));
+          ' "$registry_archive")"
+          bun --no-env-file --config=/dev/null run "$current_attestation" \
+            --audit-json "$registry_audit_json" \
+            --expected-source-sha "$EXPECTED_SOURCE_SHA" \
+            --expected-tarball-sha512 "$registry_tarball_sha512" \
+            --expected-version "$package_version" \
+            --registry-latest-json "$registry_latest_json" \
+            --registry-view-json "$registry_view_json"
+
   publish:
     name: Publish
     needs: verify
     permissions:
+      actions: read
       contents: write
     runs-on: ubuntu-latest
     timeout-minutes: 5
@@ -321,6 +409,93 @@ jobs:
       VERIFIED_TAG: ${{ needs.verify.outputs.verified_tag }}
       WORKFLOW_SHA: ${{ needs.verify.outputs.workflow_sha }}
     steps:
+      - name: Reauthorize current release attempt
+        env:
+          EXPECTED_ACTOR_ID: "894119"
+          EXPECTED_REPOSITORY: "hraness/kb"
+          EXPECTED_REPOSITORY_ID: "1308971873"
+          EXPECTED_WORKFLOW_ID: "320004141"
+          EXPECTED_WORKFLOW_NAME: "Release"
+          EXPECTED_WORKFLOW_PATH: ".github/workflows/release.yml"
+        run: |
+          set -euo pipefail
+          if [[ ! "$GITHUB_RUN_ID" =~ ^[1-9][0-9]*$ || \
+                ! "$GITHUB_RUN_ATTEMPT" =~ ^[1-9][0-9]*$ || \
+                "$GITHUB_EVENT_NAME" != push || \
+                "$GITHUB_REPOSITORY" != "$EXPECTED_REPOSITORY" || \
+                "$GITHUB_REPOSITORY_ID" != "$EXPECTED_REPOSITORY_ID" || \
+                "$GITHUB_REF" != "refs/tags/$VERIFIED_TAG" ]]; then
+            echo "::error::Current release attempt is not the exact protected tag run"
+            exit 1
+          fi
+          attempt_json="$(mktemp "$RUNNER_TEMP/kb-release-attempt.XXXXXX")"
+          workflow_json="$(mktemp "$RUNNER_TEMP/kb-release-workflow.XXXXXX")"
+          repository_json="$(mktemp "$RUNNER_TEMP/kb-release-repository.XXXXXX")"
+          gh api --method GET \
+            "/repos/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID/attempts/$GITHUB_RUN_ATTEMPT" \
+            > "$attempt_json"
+          gh api --method GET \
+            "/repos/$GITHUB_REPOSITORY/actions/workflows/$EXPECTED_WORKFLOW_ID" \
+            > "$workflow_json"
+          gh api --method GET "/repos/$GITHUB_REPOSITORY" > "$repository_json"
+          ATTEMPT_JSON="$attempt_json" \
+            WORKFLOW_JSON="$workflow_json" \
+            REPOSITORY_JSON="$repository_json" \
+            EXPECTED_ACTOR_ID="$EXPECTED_ACTOR_ID" \
+            EXPECTED_REPOSITORY="$EXPECTED_REPOSITORY" \
+            EXPECTED_REPOSITORY_ID="$EXPECTED_REPOSITORY_ID" \
+            EXPECTED_RUN_ID="$GITHUB_RUN_ID" \
+            EXPECTED_RUN_ATTEMPT="$GITHUB_RUN_ATTEMPT" \
+            EXPECTED_SHA="$VERIFIED_SOURCE_SHA" \
+            EXPECTED_TAG="$VERIFIED_TAG" \
+            EXPECTED_WORKFLOW_ID="$EXPECTED_WORKFLOW_ID" \
+            EXPECTED_WORKFLOW_NAME="$EXPECTED_WORKFLOW_NAME" \
+            EXPECTED_WORKFLOW_PATH="$EXPECTED_WORKFLOW_PATH" node <<'NODE'
+          const { readFileSync } = require("node:fs");
+          const positiveInteger = (name) => {
+            const value = process.env[name] ?? "";
+            if (!/^[1-9][0-9]*$/u.test(value)) throw new Error(`Invalid ${name}`);
+            const number = Number(value);
+            if (!Number.isSafeInteger(number)) throw new Error(`Unsafe ${name}`);
+            return number;
+          };
+          const attempt = JSON.parse(readFileSync(process.env.ATTEMPT_JSON, "utf8"));
+          const workflow = JSON.parse(readFileSync(process.env.WORKFLOW_JSON, "utf8"));
+          const repository = JSON.parse(readFileSync(process.env.REPOSITORY_JSON, "utf8"));
+          const actorId = positiveInteger("EXPECTED_ACTOR_ID");
+          const repositoryId = positiveInteger("EXPECTED_REPOSITORY_ID");
+          const runId = positiveInteger("EXPECTED_RUN_ID");
+          const runAttempt = positiveInteger("EXPECTED_RUN_ATTEMPT");
+          const workflowId = positiveInteger("EXPECTED_WORKFLOW_ID");
+          if (
+            attempt.id !== runId
+            || attempt.run_attempt !== runAttempt
+            || attempt.workflow_id !== workflowId
+            || attempt.name !== process.env.EXPECTED_WORKFLOW_NAME
+            || attempt.path !== process.env.EXPECTED_WORKFLOW_PATH
+            || attempt.event !== "push"
+            || attempt.head_branch !== process.env.EXPECTED_TAG
+            || attempt.head_sha !== process.env.EXPECTED_SHA
+            || attempt.status !== "in_progress"
+            || attempt.conclusion !== null
+            || attempt.actor?.id !== actorId
+            || attempt.actor?.type !== "User"
+            || attempt.triggering_actor?.id !== actorId
+            || attempt.triggering_actor?.type !== "User"
+            || attempt.repository?.id !== repositoryId
+            || attempt.repository?.full_name !== process.env.EXPECTED_REPOSITORY
+            || attempt.repository?.private !== false
+            || workflow.id !== workflowId
+            || workflow.name !== process.env.EXPECTED_WORKFLOW_NAME
+            || workflow.path !== process.env.EXPECTED_WORKFLOW_PATH
+            || workflow.state !== "active"
+            || repository.id !== repositoryId
+            || repository.full_name !== process.env.EXPECTED_REPOSITORY
+            || repository.visibility !== "public"
+            || repository.private !== false
+            || repository.default_branch !== "main"
+          ) throw new Error("Current release attempt is not owner-authorized for this exact public workflow");
+          NODE
       - name: Publish verified GitHub Release
         run: |
           set -euo pipefail
@@ -357,9 +532,16 @@ jobs:
           printf '%s\n' "$repository_tags" | NEXT_TAG="$VERIFIED_TAG" node -e '
             const fs = require("node:fs");
             const pattern = /^v(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)$/u;
+            const maximum = BigInt(Number.MAX_SAFE_INTEGER);
             const parse = (tag) => {
               const match = pattern.exec(tag);
-              return match === null ? null : match.slice(1).map(BigInt);
+              if (match === null) return null;
+              const parts = match.slice(1).map(BigInt);
+              if (parts.some((part) => part > maximum)) {
+                console.error("::error::Stable version components exceed Number.MAX_SAFE_INTEGER: " + tag);
+                process.exit(1);
+              }
+              return parts;
             };
             const compare = (left, right) => {
               for (let index = 0; index < 3; index += 1) {
@@ -389,9 +571,16 @@ jobs:
           printf '%s\n' "$published_tags" | NEXT_TAG="$VERIFIED_TAG" node -e '
             const fs = require("node:fs");
             const pattern = /^v(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)$/u;
+            const maximum = BigInt(Number.MAX_SAFE_INTEGER);
             const parse = (tag) => {
               const match = pattern.exec(tag);
-              return match === null ? null : match.slice(1).map(BigInt);
+              if (match === null) return null;
+              const parts = match.slice(1).map(BigInt);
+              if (parts.some((part) => part > maximum)) {
+                console.error("::error::Stable version components exceed Number.MAX_SAFE_INTEGER: " + tag);
+                process.exit(1);
+              }
+              return parts;
             };
             const compare = (left, right) => {
               for (let index = 0; index < 3; index += 1) {
@@ -411,21 +600,51 @@ jobs:
             }
           '
 
-          if ! gh release view "$VERIFIED_TAG" >/dev/null 2>&1; then
-            gh release create "$VERIFIED_TAG" \
-              --verify-tag \
-              --generate-notes \
-              --latest \
-              --title "KB $VERIFIED_TAG"
-          fi
-          release_state="$(gh release view "$VERIFIED_TAG" \
-            --json assets,isDraft,isImmutable,isPrerelease,tagName \
-            --jq '[.tagName, .isDraft, .isPrerelease, .isImmutable, (.assets | length)] | @tsv')"
-          expected_state="$VERIFIED_TAG"$'\tfalse\tfalse\ttrue\t0'
-          if [[ "$release_state" != "$expected_state" ]]; then
-            echo "::error::Release $VERIFIED_TAG is not published and immutable"
+          verified_version="${VERIFIED_TAG#v}"
+          npm_latest="$(npm view "@hraness/kb" dist-tags.latest \
+            --json \
+            --registry=https://registry.npmjs.org)"
+          if [[ "$VERIFIED_TAG" != "v$verified_version" || \
+                "$npm_latest" != "\"$verified_version\"" ]]; then
+            echo "::error::npm latest is $npm_latest, expected $verified_version"
             exit 1
           fi
+
+          printf -v expected_release_body \
+            'Automated immutable release for @hraness/kb@%s.\n\nSource commit: %s\nWorkflow run: %s' \
+            "$verified_version" "$VERIFIED_SOURCE_SHA" "$GITHUB_RUN_ID"
+          release_json="$(mktemp "$RUNNER_TEMP/kb-release.XXXXXX")"
+          if ! gh release create "$VERIFIED_TAG" \
+            --verify-tag \
+            --latest \
+            --title "KB $VERIFIED_TAG" \
+            --notes "$expected_release_body"; then
+            echo "::notice::Release creation did not complete; validating exact idempotent state"
+          fi
+          gh api "/repos/$GITHUB_REPOSITORY/releases/tags/$VERIFIED_TAG" \
+            > "$release_json"
+          RELEASE_JSON="$release_json" \
+            EXPECTED_ACTIONS_BOT_ID="41898282" \
+            EXPECTED_BODY="$expected_release_body" \
+            EXPECTED_NAME="KB $VERIFIED_TAG" node <<'NODE'
+          const { readFileSync } = require("node:fs");
+          const release = JSON.parse(readFileSync(process.env.RELEASE_JSON, "utf8"));
+          if (
+            !release
+            || typeof release !== "object"
+            || release.tag_name !== process.env.VERIFIED_TAG
+            || release.name !== process.env.EXPECTED_NAME
+            || release.body !== process.env.EXPECTED_BODY
+            || release.draft !== false
+            || release.prerelease !== false
+            || release.immutable !== true
+            || !Array.isArray(release.assets)
+            || release.assets.length !== 0
+            || release.author?.id !== Number(process.env.EXPECTED_ACTIONS_BOT_ID)
+            || release.author?.login !== "github-actions[bot]"
+            || release.author?.type !== "Bot"
+          ) throw new Error("GitHub Release is not the exact immutable artifact created by this authorized Actions run");
+          NODE
           latest_tag="$(gh api "/repos/$GITHUB_REPOSITORY/releases/latest" --jq '.tag_name')"
           if [[ "$latest_tag" != "$VERIFIED_TAG" ]]; then
             echo "::error::Latest release is $latest_tag, expected $VERIFIED_TAG"

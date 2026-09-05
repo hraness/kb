@@ -416,6 +416,7 @@ async function verifyInstalledPackagePolicy(consumer: string): Promise<Readonly<
       readonly access?: unknown;
       readonly registry?: unknown;
     };
+    readonly tag?: unknown;
     readonly version?: unknown;
   };
   const [manifest, sourceManifest] = await Promise.all([
@@ -445,10 +446,12 @@ async function verifyInstalledPackagePolicy(consumer: string): Promise<Readonly<
     throw new Error("installed package must require Bun >=1.3.14");
   }
   if (
-    manifest.publishConfig?.access !== "public"
+    Object.hasOwn(manifest, "tag")
+    || Object.hasOwn(sourceManifest, "tag")
+    || manifest.publishConfig?.access !== "public"
     || manifest.publishConfig.registry !== "https://registry.npmjs.org"
   ) {
-    throw new Error("installed package must pin public publication to the canonical npm registry");
+    throw new Error("installed package must reject npm tag overrides and pin publication to the canonical registry");
   }
   const files = await regularFiles(installedPackage);
   for (const requiredPath of requiredPackageFiles) {
