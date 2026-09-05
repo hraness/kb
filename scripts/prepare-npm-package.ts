@@ -8,6 +8,8 @@ import { inspectPackageArtifact } from "./package-artifact.js";
 const packageName = "@hraness/kb";
 const npmRegistry = "https://registry.npmjs.org";
 const requiredNpmVersion = "11.19.0";
+const maximumStableVersionPart = BigInt(Number.MAX_SAFE_INTEGER);
+const stableVersionPattern = /^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$/u;
 
 function record(value: unknown, label: string): Record<string, unknown> {
   if (typeof value !== "object" || value === null || Array.isArray(value)) {
@@ -80,7 +82,15 @@ function verifyPublicManifest(manifest: Record<string, unknown>): string {
   if (manifestName !== packageName) {
     throw new Error(`package.json name is ${manifestName}, expected ${packageName}`);
   }
-  if (!/^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$/u.test(manifestVersion)) {
+  const versionMatch = stableVersionPattern.exec(manifestVersion);
+  if (
+    versionMatch === null
+    || versionMatch[1] === undefined
+    || versionMatch[2] === undefined
+    || versionMatch[3] === undefined
+    || [versionMatch[1], versionMatch[2], versionMatch[3]]
+      .some((part) => BigInt(part) > maximumStableVersionPart)
+  ) {
     throw new Error(`package.json version is not a stable semantic version: ${manifestVersion}`);
   }
   stringField(manifest, "description", "package.json");

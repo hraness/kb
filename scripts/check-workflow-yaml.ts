@@ -11,7 +11,10 @@ function record(value: unknown, label: string): Record<string, unknown> {
 }
 
 function workflowRecord(source: string, label: string): Record<string, unknown> {
-  const document = parseDocument(source, { prettyErrors: true, uniqueKeys: true });
+  const document = parseDocument(source, {
+    prettyErrors: true,
+    uniqueKeys: true,
+  });
   if (document.errors.length > 0) {
     throw new Error(`${label} is invalid YAML: ${document.errors[0]?.message ?? "unknown parse error"}`);
   }
@@ -21,7 +24,9 @@ function workflowRecord(source: string, label: string): Record<string, unknown> 
   }
   record(workflow.on, `${label} on`);
   const jobs = record(workflow.jobs, `${label} jobs`);
-  if (Object.keys(jobs).length === 0) throw new Error(`${label} jobs must not be empty`);
+  if (Object.keys(jobs).length === 0) {
+    throw new Error(`${label} jobs must not be empty`);
+  }
   return workflow;
 }
 
@@ -29,129 +34,193 @@ export function validateWorkflowYaml(source: string, label: string): void {
   workflowRecord(source, label);
 }
 
-function validateOwnerTagAuthorization(
-  workflow: Record<string, unknown>,
-  label: string,
-  dependentJobName: string,
-): void {
-  const jobs = record(workflow.jobs, `${label} jobs`);
-  const authorize = record(jobs.authorize, `${label} authorize job`);
-  if (Object.keys(record(authorize.permissions, `${label} authorize permissions`)).length !== 0) {
-    throw new Error(`${label} owner authorization must have no token permissions`);
-  }
-  if (!Array.isArray(authorize.steps) || authorize.steps.length !== 1) {
-    throw new Error(`${label} owner authorization must be one pre-checkout step`);
-  }
-  const step = record(authorize.steps[0], `${label} owner authorization step`);
-  const environment = record(step.env, `${label} owner authorization environment`);
-  const run = step.run;
-  if (
-    environment.EXPECTED_ACTOR_ID !== "894119"
-    || environment.EXPECTED_REPOSITORY !== "hraness/kb"
-    || environment.EXPECTED_REPOSITORY_ID !== "1308971873"
-    || environment.REF_PROTECTED !== "${{ github.ref_protected }}"
-    || typeof run !== "string"
-    || !run.includes('"$GITHUB_ACTOR_ID" != "$EXPECTED_ACTOR_ID"')
-    || !run.includes("event.sender?.id !== Number(process.env.EXPECTED_ACTOR_ID)")
-    || !run.includes('event.sender?.type !== "User"')
-    || !run.includes("event.repository?.id !== Number(process.env.EXPECTED_REPOSITORY_ID)")
-    || !run.includes('event.repository?.visibility !== "public"')
-    || !run.includes("event.repository?.private !== false")
-  ) {
-    throw new Error(`${label} owner authorization is missing an exact actor, sender, or public-repository guard`);
-  }
-  if (JSON.stringify(authorize).includes("actions/checkout@")) {
-    throw new Error(`${label} must authorize the tag sender before checkout`);
-  }
-  const dependent = record(jobs[dependentJobName], `${label} ${dependentJobName} job`);
-  if (dependent.needs !== "authorize") {
-    throw new Error(`${label} ${dependentJobName} must follow owner authorization`);
-  }
-}
-
-export function validateOwnerTagWorkflow(source: string, label: string): void {
-  const workflow = workflowRecord(source, label);
-  validateOwnerTagAuthorization(workflow, label, "verify");
-}
-
-export function validateNpmPublishWorkflow(source: string, label: string): void {
+export function validateNpmStageWorkflow(source: string, label: string): void {
   const workflow = workflowRecord(source, label);
   const triggers = record(workflow.on, `${label} on`);
-  if (Object.keys(triggers).length !== 1 || !("push" in triggers)) {
-    throw new Error(`${label} must accept only protected release-tag pushes`);
+  if (!("workflow_dispatch" in triggers)) {
+    throw new Error(`${label} must retain manual recovery dispatch`);
+  }
+  const dispatch = record(triggers.workflow_dispatch, `${label} workflow dispatch`);
+  const dispatchInputs = record(dispatch.inputs, `${label} workflow dispatch inputs`);
+  const publishInput = record(
+    dispatchInputs.publish_to_npm,
+    `${label} publish_to_npm input`,
+  );
+  if (
+    Object.keys(dispatchInputs).length !== 1
+    || publishInput.default !== false
+    || publishInput.required !== false
+    || publishInput.type !== "boolean"
+    || typeof publishInput.description !== "string"
+    || publishInput.description.length === 0
+  ) {
+    throw new Error(`${label} must expose one fail-closed boolean publish_to_npm input`);
   }
   const push = record(triggers.push, `${label} push trigger`);
-  if (!Array.isArray(push.tags) || push.tags.length !== 1 || push.tags[0] !== "v*") {
-    throw new Error(`${label} must accept exactly v* tag pushes`);
-  }
-
-  const permissions = record(workflow.permissions, `${label} permissions`);
-  if (permissions.contents !== "read" || Object.keys(permissions).length !== 1) {
-    throw new Error(`${label} top-level permissions must be contents: read only`);
+  if (
+    !Array.isArray(push.branches)
+    || push.branches.length !== 1
+    || push.branches[0] !== "main"
+    || !Array.isArray(push.paths)
+    || push.paths.length !== 1
+    || push.paths[0] !== "package.json"
+  ) {
+    throw new Error(`${label} must run only for package.json pushes to main`);
   }
   const jobs = record(workflow.jobs, `${label} jobs`);
-  const authorize = record(jobs.authorize, `${label} authorize job`);
   const select = record(jobs.select, `${label} select job`);
   const verify = record(jobs.verify, `${label} verify job`);
-  const publish = record(jobs.publish, `${label} publish job`);
-  validateOwnerTagAuthorization(workflow, label, "select");
-
+  const stage = record(jobs.stage, `${label} stage job`);
   const selectPermissions = record(select.permissions, `${label} select permissions`);
   if (
-    select.needs !== "authorize"
-    || selectPermissions.contents !== "read"
+    selectPermissions.contents !== "read"
+    || "id-token" in selectPermissions
     || Object.keys(selectPermissions).length !== 1
-  ) throw new Error(`${label} selection must follow authorization and remain read-only`);
-  const selectOutputs = record(select.outputs, `${label} select outputs`);
-  if (
-    selectOutputs.should_publish !== "${{ steps.selection.outputs.should_publish }}"
-    || selectOutputs.publish_tag !== "${{ steps.selection.outputs.publish_tag }}"
-  ) throw new Error(`${label} selection must expose the reviewed decision and tag`);
-  const selectionSource = JSON.stringify(select);
-  for (const required of [
-    "GITHUB_EVENT_NAME",
-    "GITHUB_SHA",
-    "GITHUB_REF_NAME",
-    "github.ref_protected",
-    "refs/remotes/origin/$DEFAULT_BRANCH",
-    "refs/npm-publish-tags/$GITHUB_REF_NAME",
-    "git cat-file -t",
-    "exact annotated release tag",
-    "publish_tag=latest",
-    "publish_tag=beta",
-  ]) {
-    if (!selectionSource.includes(required)) throw new Error(`${label} tag selection is missing ${required}`);
+  ) {
+    throw new Error(`${label} selection must remain read-only without OIDC authority`);
   }
-
-  const verifyPermissions = record(verify.permissions, `${label} verify permissions`);
+  const selectOutputs = record(select.outputs, `${label} select outputs`);
+  if (selectOutputs.should_stage !== "${{ steps.selection.outputs.should_stage }}") {
+    throw new Error(`${label} selection must expose the reviewed should_stage decision`);
+  }
   if (
     verify.needs !== "select"
-    || verify.if !== "needs.select.outputs.should_publish == 'true'"
-    || verifyPermissions.contents !== "read"
-    || Object.keys(verifyPermissions).length !== 1
-  ) throw new Error(`${label} package verification must follow selection and remain read-only`);
-
-  const publishPermissions = record(publish.permissions, `${label} publish permissions`);
-  if (publishPermissions["id-token"] !== "write" || Object.keys(publishPermissions).length !== 1) {
-    throw new Error(`${label} terminal publishing must hold only id-token: write`);
+    || verify.if !== "needs.select.outputs.should_stage == 'true'"
+  ) {
+    throw new Error(`${label} verification must require an affirmative stage selection`);
   }
-  if (publish.environment !== "npm-stage") {
-    throw new Error(`${label} publishing must use the exact npm-stage environment`);
+  const verifyPermissions = record(verify.permissions, `${label} verify permissions`);
+  if (verifyPermissions.contents !== "read" || "id-token" in verifyPermissions) {
+    throw new Error(`${label} verification must remain read-only without OIDC authority`);
   }
-  if (!Array.isArray(publish.steps)) throw new Error(`${label} publish steps must be a sequence`);
-  const steps = publish.steps.map((step, index) => record(step, `${label} publish step ${String(index + 1)}`));
+  const stagePermissions = record(stage.permissions, `${label} stage permissions`);
+  if (stage.needs !== "verify" || stage.if !== "inputs.publish_to_npm == true") {
+    throw new Error(`${label} staging must require explicit publish_to_npm opt-in`);
+  }
+  if (
+    stagePermissions.actions !== "read"
+    || stagePermissions["id-token"] !== "write"
+    || Object.keys(stagePermissions).length !== 2
+  ) {
+    throw new Error(`${label} staging must hold only actions: read and id-token: write`);
+  }
+  if (stage.environment !== "npm-stage") {
+    throw new Error(`${label} staging must use the exact npm-stage environment`);
+  }
+  if (!Array.isArray(select.steps)) {
+    throw new Error(`${label} select steps must be a sequence`);
+  }
+  const selectionSteps = select.steps.map((step, index) =>
+    record(step, `${label} select step ${String(index + 1)}`));
+  const selectionCommands = selectionSteps.filter((step) =>
+    typeof step.run === "string" && step.run.includes("scripts/npm-stage-selection.ts"));
+  if (selectionCommands.length !== 1 || typeof selectionCommands[0]?.run !== "string") {
+    throw new Error(`${label} must contain exactly one package-version selection step`);
+  }
+  const selectionCommand = selectionCommands[0].run;
+  for (const required of [
+    'git fetch --no-tags origin',
+    'git merge-base --is-ancestor "$BEFORE_SHA" "$default_head"',
+    'git show "$BEFORE_SHA:package.json"',
+    'bun run ./scripts/npm-stage-selection.ts',
+  ]) {
+    if (!selectionCommand.includes(required)) {
+      throw new Error(`${label} package-version selection is missing ${required}`);
+    }
+  }
+  if (!Array.isArray(stage.steps)) {
+    throw new Error(`${label} stage steps must be a sequence`);
+  }
+  const steps = stage.steps.map((step, index) =>
+    record(step, `${label} stage step ${String(index + 1)}`));
+  const authorizationStep = steps[0];
+  if (
+    authorizationStep?.name !== "Reauthorize current npm staging attempt"
+    || typeof authorizationStep.run !== "string"
+  ) {
+    throw new Error(`${label} staging must reauthorize the current attempt before any other step`);
+  }
+  const authorizationEnvironment = record(
+    authorizationStep.env,
+    `${label} staging authorization environment`,
+  );
+  if (
+    authorizationEnvironment.EXPECTED_ACTOR_ID !== "894119"
+    || authorizationEnvironment.EXPECTED_REPOSITORY !== "hraness/kb"
+    || authorizationEnvironment.EXPECTED_REPOSITORY_ID !== "1308971873"
+    || authorizationEnvironment.EXPECTED_SOURCE_SHA !== "${{ needs.verify.outputs.source_sha }}"
+    || authorizationEnvironment.EXPECTED_WORKFLOW_ID !== "344070109"
+    || authorizationEnvironment.EXPECTED_WORKFLOW_NAME !== "Stage npm package"
+    || authorizationEnvironment.EXPECTED_WORKFLOW_PATH !== ".github/workflows/npm-stage.yml"
+    || authorizationEnvironment.GH_TOKEN !== "${{ github.token }}"
+    || authorizationEnvironment.PUBLISH_TO_NPM !== "${{ inputs.publish_to_npm }}"
+    || authorizationEnvironment.REF_PROTECTED !== "${{ github.ref_protected }}"
+  ) {
+    throw new Error(`${label} staging authorization must bind the exact owner, repository, workflow, source, input, and protected ref`);
+  }
+  for (const required of [
+    '"$GITHUB_ACTOR_ID" != "$EXPECTED_ACTOR_ID"',
+    '"$GITHUB_EVENT_NAME" != workflow_dispatch',
+    '"$GITHUB_REPOSITORY_ID" != "$EXPECTED_REPOSITORY_ID"',
+    '"$GITHUB_REF" != refs/heads/main',
+    '"$GITHUB_SHA" != "$EXPECTED_SOURCE_SHA"',
+    '"$PUBLISH_TO_NPM" != true',
+    '"$REF_PROTECTED" != true',
+    'attempt.id !== runId',
+    'attempt.run_attempt !== runAttempt',
+    'attempt.workflow_id !== workflowId',
+    'attempt.name !== process.env.EXPECTED_WORKFLOW_NAME',
+    'attempt.path !== process.env.EXPECTED_WORKFLOW_PATH',
+    'attempt.event !== "workflow_dispatch"',
+    'attempt.head_branch !== "main"',
+    'attempt.head_sha !== process.env.EXPECTED_SHA',
+    'attempt.actor?.id !== actorId',
+    'attempt.actor?.type !== "User"',
+    'attempt.triggering_actor?.id !== actorId',
+    'attempt.triggering_actor?.type !== "User"',
+    'attempt.repository?.id !== repositoryId',
+    'workflow.id !== workflowId',
+    'workflow.name !== process.env.EXPECTED_WORKFLOW_NAME',
+    'workflow.path !== process.env.EXPECTED_WORKFLOW_PATH',
+    'workflow.state !== "active"',
+    'repository.id !== repositoryId',
+    'repository.visibility !== "public"',
+    'repository.default_branch !== "main"',
+  ]) {
+    if (!authorizationStep.run.includes(required)) {
+      throw new Error(`${label} staging attempt authorization is missing ${required}`);
+    }
+  }
+  for (const stepName of [
+    "Bind artifact reference",
+    "Rebind downloaded package",
+    "Revalidate current main and stage exact package",
+  ]) {
+    const boundary = steps.find((step) => step.name === stepName);
+    if (
+      boundary === undefined
+      || typeof boundary.run !== "string"
+      || !boundary.run.includes("BigInt(Number.MAX_SAFE_INTEGER)")
+      || !boundary.run.includes("Verified package version components exceed Number.MAX_SAFE_INTEGER")
+    ) {
+      throw new Error(`${label} ${stepName} must reject unsafe stable-version components`);
+    }
+  }
   if (steps.some((step) =>
     typeof step.uses === "string"
     && (step.uses.startsWith("actions/checkout@") || step.uses.startsWith("oven-sh/setup-bun@")))) {
-    throw new Error(`${label} publishing must not check out source or install Bun`);
+    throw new Error(`${label} staging must not check out source or install Bun`);
   }
   const publicationSteps = steps.filter((step) =>
-    typeof step.run === "string" && step.run.includes('npm publish "$TARBALL"'));
-  if (publicationSteps.length !== 1 || typeof publicationSteps[0]?.run !== "string") {
-    throw new Error(`${label} must contain exactly one direct-publication step`);
+    typeof step.run === "string" && step.run.includes("npm stage publish"));
+  if (publicationSteps.length !== 1) {
+    throw new Error(`${label} must contain exactly one staged-publication step`);
   }
   const publicationStep = publicationSteps[0];
-  const environment = record(publicationStep.env, `${label} direct-publication environment`);
+  if (publicationStep === undefined || typeof publicationStep.run !== "string") {
+    throw new Error(`${label} staged-publication command is missing`);
+  }
+  const environment = record(publicationStep.env, `${label} staged-publication environment`);
   for (const name of [
     "DEFAULT_BRANCH",
     "DIGEST",
@@ -160,60 +229,48 @@ export function validateNpmPublishWorkflow(source: string, label: string): void 
     "EXPECTED_METADATA_SHA256",
     "EXPECTED_SOURCE_SHA",
     "METADATA",
-    "PUBLISH_TAG",
     "TARBALL",
   ]) {
-    if (typeof environment[name] !== "string") throw new Error(`${label} direct publication must bind ${name}`);
+    if (typeof environment[name] !== "string") {
+      throw new Error(`${label} staged publication must bind ${name}`);
+    }
   }
   const guardCommands = [
     'git init --quiet --bare "$current_main"',
-    'git --git-dir="$current_main" fetch --quiet --no-tags --depth=1',
+    'git --git-dir="$current_main" fetch',
     'current_default_sha="$(git --git-dir="$current_main" rev-parse FETCH_HEAD)"',
-    'release_commit="$(git --git-dir="$current_main" rev-parse',
     'current_archive_sha256="$(sha256sum "$TARBALL"',
     'current_metadata_sha256="$(sha256sum "$METADATA"',
     'current_digest_sha256="$(sha256sum "$DIGEST"',
-    'npm view "$package_spec" version --json',
-    'npm publish "$TARBALL"',
-    '--tag "$PUBLISH_TAG"',
-    'npm view "$package_spec" dist --json',
-    "dist.attestations.provenance?.predicateType",
+    'npm stage publish "$TARBALL"',
+    "--tag latest",
+    "--registry=https://registry.npmjs.org",
   ];
   let previousIndex = -1;
-  for (const required of guardCommands) {
-    const index = publicationStep.run.indexOf(required);
+  for (const command of guardCommands) {
+    const index = publicationStep.run.indexOf(command);
     if (index <= previousIndex) {
-      throw new Error(`${label} must recheck current default-branch HEAD and artifact before direct publication/readback`);
+      throw new Error(`${label} must recheck current default-branch HEAD immediately before staged publication`);
     }
     previousIndex = index;
   }
-  const publishSource = JSON.stringify(publish);
-  if (/\bbun\b/u.test(publishSource) || publishSource.includes("./scripts/")) {
-    throw new Error(`${label} publishing must not execute repository code`);
-  }
-  if (/\bnpm\s+(?:dist-tag|stage)\b/u.test(source)) {
-    throw new Error(`${label} must publish with its initial tag and never promote or stage it`);
+  const stageSource = JSON.stringify(stage);
+  if (/\bbun\b/u.test(stageSource) || stageSource.includes("./scripts/")) {
+    throw new Error(`${label} staging must not execute repository code`);
   }
   if ((source.match(/id-token: write/gu) ?? []).length !== 1) {
     throw new Error(`${label} must grant OIDC authority to exactly one job`);
-  }
-  for (const forbidden of ["workflow_dispatch:", "actions: write", "authorization_run_id", "NPM_TOKEN", "NODE_AUTH_TOKEN"]) {
-    if (source.includes(forbidden)) throw new Error(`${label} contains forbidden release authority ${forbidden}`);
   }
 }
 
 if (import.meta.main) {
   const repositoryRoot = resolve(import.meta.dir, "..");
-  const ciPath = ".github/workflows/ci.yml";
-  validateWorkflowYaml(await readFile(resolve(repositoryRoot, ciPath), "utf8"), ciPath);
-  const releasePath = ".github/workflows/release.yml";
-  validateOwnerTagWorkflow(
-    await readFile(resolve(repositoryRoot, releasePath), "utf8"),
-    releasePath,
-  );
-  const npmPublishPath = ".github/workflows/npm-stage.yml";
-  validateNpmPublishWorkflow(
-    await readFile(resolve(repositoryRoot, npmPublishPath), "utf8"),
-    npmPublishPath,
+  for (const path of [".github/workflows/ci.yml", ".github/workflows/release.yml"]) {
+    validateWorkflowYaml(await readFile(resolve(repositoryRoot, path), "utf8"), path);
+  }
+  const npmStagePath = ".github/workflows/npm-stage.yml";
+  validateNpmStageWorkflow(
+    await readFile(resolve(repositoryRoot, npmStagePath), "utf8"),
+    npmStagePath,
   );
 }

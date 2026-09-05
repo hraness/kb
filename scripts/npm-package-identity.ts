@@ -11,6 +11,7 @@ import {
 const packageName = "@hraness/kb";
 const npmRegistry = "https://registry.npmjs.org";
 const stableVersionPattern = /^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$/u;
+const maximumStableVersionPart = BigInt(Number.MAX_SAFE_INTEGER);
 const ohAdoptionPreparerIntroduction = [0n, 18n, 0n] as const;
 
 type NpmPackFile = Readonly<{ mode: number; path: string; size: number }>;
@@ -61,7 +62,13 @@ function stableVersionParts(version: string): readonly [bigint, bigint, bigint] 
   if (match === null || match[1] === undefined || match[2] === undefined || match[3] === undefined) {
     throw new TypeError(`Package version must be a canonical stable semantic version: ${version}`);
   }
-  return [BigInt(match[1]), BigInt(match[2]), BigInt(match[3])];
+  const parts = [BigInt(match[1]), BigInt(match[2]), BigInt(match[3])] as const;
+  if (parts.some((part) => part > maximumStableVersionPart)) {
+    throw new TypeError(
+      `Package version components must not exceed Number.MAX_SAFE_INTEGER: ${version}`,
+    );
+  }
+  return parts;
 }
 
 export function requiresOhAdoptionPreparerExport(packageVersion: string): boolean {
@@ -127,9 +134,7 @@ function expectedFilename(name: string, version: string): string {
   if (name !== packageName) {
     throw new Error(`Expected package name must be ${packageName}, received ${name}`);
   }
-  if (!stableVersionPattern.test(version)) {
-    throw new Error(`Expected package version is not stable semantic version: ${version}`);
-  }
+  stableVersionParts(version);
   return `hraness-kb-${version}.tgz`;
 }
 
