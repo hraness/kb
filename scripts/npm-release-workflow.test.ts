@@ -49,13 +49,39 @@ function sha256(bytes: Uint8Array): string {
   return createHash("sha256").update(bytes).digest("hex");
 }
 
+async function persistPackedTarMutation(
+  artifactDirectory: string,
+  tarballName: string,
+  tar: Buffer,
+  metadata: Array<Record<string, unknown>>,
+): Promise<void> {
+  const tarballPath = join(artifactDirectory, tarballName);
+  const metadataPath = join(artifactDirectory, "npm-pack.json");
+  const digestPath = join(artifactDirectory, "npm-package.sha256");
+  if (metadata.length !== 1 || metadata[0] === undefined) {
+    throw new Error("Test npm-pack.json is invalid");
+  }
+  const archive = gzipSync(tar);
+  metadata[0].size = archive.byteLength;
+  metadata[0].integrity = integrity(archive);
+  metadata[0].shasum = sha1(archive);
+  const metadataBytes = Buffer.from(`${JSON.stringify(metadata)}\n`, "utf8");
+  await Promise.all([
+    writeFile(tarballPath, archive),
+    writeFile(metadataPath, metadataBytes),
+    writeFile(
+      digestPath,
+      `${sha256(archive)}  ${tarballName}\n${sha256(metadataBytes)}  npm-pack.json\n`,
+    ),
+  ]);
+}
+
 async function injectPackedTopLevelTag(
   artifactDirectory: string,
   tarballName: string,
 ): Promise<void> {
   const tarballPath = join(artifactDirectory, tarballName);
   const metadataPath = join(artifactDirectory, "npm-pack.json");
-  const digestPath = join(artifactDirectory, "npm-package.sha256");
   const tar = gunzipSync(await readFile(tarballPath));
   let offset = 0;
   let replaced = false;
@@ -87,24 +113,8 @@ async function injectPackedTopLevelTag(
     offset += Math.ceil(size / 512) * 512;
   }
   if (!replaced) throw new Error("Packed manifest was not mutated");
-
-  const archive = gzipSync(tar);
   const metadata = JSON.parse(await readFile(metadataPath, "utf8")) as Array<Record<string, unknown>>;
-  if (metadata.length !== 1 || metadata[0] === undefined) {
-    throw new Error("Test npm-pack.json is invalid");
-  }
-  metadata[0].size = archive.byteLength;
-  metadata[0].integrity = integrity(archive);
-  metadata[0].shasum = sha1(archive);
-  const metadataBytes = Buffer.from(`${JSON.stringify(metadata)}\n`, "utf8");
-  await Promise.all([
-    writeFile(tarballPath, archive),
-    writeFile(metadataPath, metadataBytes),
-    writeFile(
-      digestPath,
-      `${sha256(archive)}  ${tarballName}\n${sha256(metadataBytes)}  npm-pack.json\n`,
-    ),
-  ]);
+  await persistPackedTarMutation(artifactDirectory, tarballName, tar, metadata);
 }
 
 async function corruptPackedUstarVersion(
@@ -113,7 +123,6 @@ async function corruptPackedUstarVersion(
 ): Promise<void> {
   const tarballPath = join(artifactDirectory, tarballName);
   const metadataPath = join(artifactDirectory, "npm-pack.json");
-  const digestPath = join(artifactDirectory, "npm-package.sha256");
   const tar = gunzipSync(await readFile(tarballPath));
   const signature = Buffer.from([0x75, 0x73, 0x74, 0x61, 0x72, 0x00, 0x30, 0x30]);
   if (!tar.subarray(257, 265).equals(signature)) {
@@ -122,23 +131,70 @@ async function corruptPackedUstarVersion(
   tar[263] = 0x78;
   tar[264] = 0x78;
   writeHeaderChecksum(tar, 0);
-  const archive = gzipSync(tar);
   const metadata = JSON.parse(await readFile(metadataPath, "utf8")) as Array<Record<string, unknown>>;
-  if (metadata.length !== 1 || metadata[0] === undefined) {
-    throw new Error("Test npm-pack.json is invalid");
+  await persistPackedTarMutation(artifactDirectory, tarballName, tar, metadata);
+}
+
+async function injectPackedExtendedPrefixTraversal(
+  artifactDirectory: string,
+  tarballName: string,
+): Promise<void> {
+  const tarballPath = join(artifactDirectory, tarballName);
+  const metadataPath = join(artifactDirectory, "npm-pack.json");
+  const tar = gunzipSync(await readFile(tarballPath));
+  const metadata = JSON.parse(await readFile(metadataPath, "utf8")) as Array<Record<string, unknown>>;
+  const record = metadata[0];
+  if (record === undefined || !Array.isArray(record.files)) {
+    throw new Error("Test npm-pack.json lacks its file inventory");
   }
-  metadata[0].size = archive.byteLength;
-  metadata[0].integrity = integrity(archive);
-  metadata[0].shasum = sha1(archive);
-  const metadataBytes = Buffer.from(`${JSON.stringify(metadata)}\n`, "utf8");
-  await Promise.all([
-    writeFile(tarballPath, archive),
-    writeFile(metadataPath, metadataBytes),
-    writeFile(
-      digestPath,
-      `${sha256(archive)}  ${tarballName}\n${sha256(metadataBytes)}  npm-pack.json\n`,
-    ),
-  ]);
+  const target = record.files.find((value) => (
+    typeof value === "object"
+    && value !== null
+    && typeof (value as Record<string, unknown>).path === "string"
+    && String((value as Record<string, unknown>).path).startsWith("dist/")
+    && ![
+      "dist/cli.js",
+      "dist/evaluation-builder.js",
+      "dist/index.js",
+    ].includes(String((value as Record<string, unknown>).path))
+  )) as Record<string, unknown> | undefined;
+  if (target === undefined || typeof target.path !== "string") {
+    throw new Error("Test npm-pack.json lacks a mutable dist file");
+  }
+
+  let offset = 0;
+  let mutated = false;
+  while (offset + 512 <= tar.length) {
+    const header = tar.subarray(offset, offset + 512);
+    if (header.every((byte) => byte === 0)) break;
+    const size = readTarOctal(tar, offset + 124);
+    const field = (start: number, length: number): string => {
+      const bytes = header.subarray(start, start + length);
+      const zero = bytes.indexOf(0);
+      return (zero < 0 ? bytes : bytes.subarray(0, zero)).toString("ascii");
+    };
+    const name = field(0, 100);
+    const prefix = field(345, header[475] === 0 ? 130 : 155);
+    const path = prefix === "" ? name : `${prefix}/${name}`;
+    if (path === `package/${target.path}`) {
+      const safePrefix = `package/dist/${"a".repeat(117)}`;
+      if (Buffer.byteLength(safePrefix, "ascii") !== 130) {
+        throw new Error("Test USTAR prefix fixture has the wrong width");
+      }
+      header.fill(0, 0, 100);
+      header.write("fixture.js", 0, "ascii");
+      header.fill(0, 345, 500);
+      header.write(safePrefix, 345, "ascii");
+      header.write("/../hostile", 475, "ascii");
+      target.path = `${safePrefix.slice("package/".length)}/fixture.js`;
+      writeHeaderChecksum(tar, offset);
+      mutated = true;
+      break;
+    }
+    offset += 512 + Math.ceil(size / 512) * 512;
+  }
+  if (!mutated) throw new Error("Test package lacks the selected tar entry");
+  await persistPackedTarMutation(artifactDirectory, tarballName, tar, metadata);
 }
 
 function requireOwnerReleaseAuthorization(workflow: string): void {
@@ -425,9 +481,12 @@ describe("npm release workflows", () => {
       "Record cleared stable-stage intent v${{ inputs.resolved_stage_version }}",
       "Record exclusive stable-stage intent",
       "jobs?filter=all&per_page=100",
-      "has a terminal write without one durable intent",
+      "has a terminal write without one immediately preceding durable intent",
       "has an unsealed generic stage job",
       "jobId: 99146963354",
+      "Number.isSafeInteger(step?.number)",
+      "intents[0].number !== terminalWrites[0].number - 1",
+      "contains staging controls outside a version-bound stage job",
       "actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c",
       "Downloaded npm artifact must contain exactly the tarball, npm-pack.json, and npm-package.sha256",
       'expected_tarball_name="hraness-kb-$EXPECTED_VERSION.tgz"',
@@ -742,7 +801,11 @@ describe("npm release workflows", () => {
         jobs: [{
           name: "Stage exact package v0.19.0",
           conclusion: "success",
-          steps: [{ name: "Record exclusive stable-stage intent", conclusion: "success" }],
+          steps: [{
+            name: "Record exclusive stable-stage intent",
+            conclusion: "success",
+            number: 12,
+          }],
         }],
       }));
       const released = await runWorkflowScript(script, environment);
@@ -754,8 +817,12 @@ describe("npm release workflows", () => {
           name: "Stage exact package v0.19.1",
           conclusion: "failure",
           steps: [
-            { name: "Record exclusive stable-stage intent", conclusion: "success" },
-            { name: "Revalidate current main and stage exact package", conclusion: "failure" },
+            { name: "Record exclusive stable-stage intent", conclusion: "success", number: 12 },
+            {
+              name: "Revalidate current main and stage exact package",
+              conclusion: "failure",
+              number: 13,
+            },
           ],
         }],
       }));
@@ -777,13 +844,21 @@ describe("npm release workflows", () => {
           name: "Stage exact package v0.19.2",
           conclusion: "failure",
           steps: [
-            { name: "Record cleared stable-stage intent v0.19.1", conclusion: "success" },
-            { name: "Record exclusive stable-stage intent", conclusion: "skipped" },
+            {
+              name: "Record cleared stable-stage intent v0.19.1",
+              conclusion: "success",
+              number: 4,
+            },
+            { name: "Record exclusive stable-stage intent", conclusion: "skipped", number: 12 },
           ],
         }, {
           name: "Stage exact package v0.19.1",
           conclusion: "failure",
-          steps: [{ name: "Record exclusive stable-stage intent", conclusion: "success" }],
+          steps: [{
+            name: "Record exclusive stable-stage intent",
+            conclusion: "success",
+            number: 12,
+          }],
         }],
       }));
       const durableResolution = await runWorkflowScript(script, environment);
@@ -806,15 +881,76 @@ describe("npm release workflows", () => {
             steps: [{
               name: "Revalidate current main and stage exact package",
               conclusion: terminalConclusion,
+              number: 13,
             }],
           }],
         }));
         const unreservedMutation = await runWorkflowScript(script, environment);
         expect(unreservedMutation.exitCode).not.toBe(0);
         expect(unreservedMutation.stderr).toContain(
-          "has a terminal write without one durable intent",
+          "has a terminal write without one immediately preceding durable intent",
         );
       }
+
+      await writeFile(jobsPath, JSON.stringify({
+        total_count: 1,
+        jobs: [{
+          name: "Renamed untrusted mutation job",
+          conclusion: "failure",
+          steps: [{
+            name: "Revalidate current main and stage exact package",
+            conclusion: "failure",
+            number: 13,
+          }],
+        }],
+      }));
+      const renamedMutation = await runWorkflowScript(script, environment);
+      expect(renamedMutation.exitCode).not.toBe(0);
+      expect(renamedMutation.stderr).toContain(
+        "has a terminal write without one immediately preceding durable intent",
+      );
+
+      await writeFile(jobsPath, JSON.stringify({
+        total_count: 1,
+        jobs: [{
+          name: "Stage exact package v0.19.1",
+          conclusion: "failure",
+          steps: [
+            {
+              name: "Revalidate current main and stage exact package",
+              conclusion: "failure",
+              number: 12,
+            },
+            { name: "Record exclusive stable-stage intent", conclusion: "success", number: 13 },
+          ],
+        }],
+      }));
+      const reversedIntent = await runWorkflowScript(script, environment);
+      expect(reversedIntent.exitCode).not.toBe(0);
+      expect(reversedIntent.stderr).toContain(
+        "has a terminal write without one immediately preceding durable intent",
+      );
+
+      await writeFile(jobsPath, JSON.stringify({
+        total_count: 1,
+        jobs: [{
+          name: "Stage exact package v0.19.1",
+          conclusion: "failure",
+          steps: [
+            { name: "Record exclusive stable-stage intent", conclusion: "success", number: 0 },
+            {
+              name: "Revalidate current main and stage exact package",
+              conclusion: "failure",
+              number: 1,
+            },
+          ],
+        }],
+      }));
+      const unsafeStepNumber = await runWorkflowScript(script, environment);
+      expect(unsafeStepNumber.exitCode).not.toBe(0);
+      expect(unsafeStepNumber.stderr).toContain(
+        "has a terminal write without one immediately preceding durable intent",
+      );
 
       await Promise.all([
         writeFile(runsPath, JSON.stringify({
@@ -839,6 +975,7 @@ describe("npm release workflows", () => {
             steps: [{
               name: "Revalidate current main and stage exact package",
               conclusion: "success",
+              number: 13,
             }],
           }],
         })),
@@ -854,8 +991,12 @@ describe("npm release workflows", () => {
             conclusion: "failure",
             name: "Stage exact package v0.19.1",
             steps: [
-              { name: "Record exclusive stable-stage intent", conclusion: "success" },
-              { name: "Revalidate current main and stage exact package", conclusion: "failure" },
+              { name: "Record exclusive stable-stage intent", conclusion: "success", number: 12 },
+              {
+                name: "Revalidate current main and stage exact package",
+                conclusion: "failure",
+                number: 13,
+              },
             ],
           }, {
             conclusion: null,
@@ -920,34 +1061,51 @@ describe("npm release workflows", () => {
     }
   });
 
-  test("the source-free staging boundary rejects a USTAR version/path differential", async () => {
+  test("the source/release and source-free parsers reject shared hostile USTAR fixtures", async () => {
     const workflow = await readFile(stageWorkflowUrl, "utf8");
     const script = workflowStepScript(workflow, "Rebind downloaded package");
     const manifest = JSON.parse(await readFile(manifestUrl, "utf8")) as { readonly version: string };
-    const root = await mkdtemp(join(tmpdir(), "kb-stage-ustar-version-"));
-    const artifactDirectory = join(root, "kb-npm-stage");
     const tarballName = `hraness-kb-${manifest.version}.tgz`;
-    try {
-      await run([
-        process.execPath,
-        "run",
-        "./scripts/prepare-npm-package.ts",
-        artifactDirectory,
-      ], repository);
-      await corruptPackedUstarVersion(artifactDirectory, tarballName);
-      const rejected = await runWorkflowScript(script, {
-        EXPECTED_SOURCE_SHA: "a".repeat(40),
-        EXPECTED_TARBALL_NAME: tarballName,
-        EXPECTED_VERSION: manifest.version,
-        GITHUB_OUTPUT: join(root, "github-output.txt"),
-        RUNNER_TEMP: root,
-      });
-      expect(rejected.exitCode).not.toBe(0);
-      expect(rejected.stderr).toContain("Packed package.json tar header is invalid");
-    } finally {
-      await rm(root, { recursive: true, force: true });
+    for (const fixture of [
+      {
+        mutate: corruptPackedUstarVersion,
+        name: "version",
+        sourceError: "exact USTAR magic/version",
+        stageError: "Packed package.json tar header is invalid",
+      },
+      {
+        mutate: injectPackedExtendedPrefixTraversal,
+        name: "extended-prefix",
+        sourceError: "unsafe path",
+        stageError: "Packed package.json tar path is unsafe",
+      },
+    ] as const) {
+      const root = await mkdtemp(join(tmpdir(), `kb-stage-ustar-${fixture.name}-`));
+      const artifactDirectory = join(root, "kb-npm-stage");
+      const tarball = join(artifactDirectory, tarballName);
+      try {
+        await run([
+          process.execPath,
+          "run",
+          "./scripts/prepare-npm-package.ts",
+          artifactDirectory,
+        ], repository);
+        await fixture.mutate(artifactDirectory, tarballName);
+        await expect(inspectPackageArtifact(tarball)).rejects.toThrow(fixture.sourceError);
+        const rejected = await runWorkflowScript(script, {
+          EXPECTED_SOURCE_SHA: "a".repeat(40),
+          EXPECTED_TARBALL_NAME: tarballName,
+          EXPECTED_VERSION: manifest.version,
+          GITHUB_OUTPUT: join(root, "github-output.txt"),
+          RUNNER_TEMP: root,
+        });
+        expect(rejected.exitCode).not.toBe(0);
+        expect(rejected.stderr).toContain(fixture.stageError);
+      } finally {
+        await rm(root, { recursive: true, force: true });
+      }
     }
-  });
+  }, 120_000);
 
   test("hostile actor or sender drift cannot reach the protected release workflow", async () => {
     const workflow = await readFile(releaseWorkflowUrl, "utf8");
@@ -1344,6 +1502,8 @@ describe("npm release workflows", () => {
     for (const required of [
       "contentSha256",
       "contentSha512",
+      "header.subarray(257, 265).equals(ustarSignature)",
+      "header[475] === 0 ? 130 : 155",
       "Unsupported package tar entry type",
       "Package tar contains data after its zero trailer",
       "maxOutputLength",
@@ -1421,6 +1581,7 @@ describe("npm release workflows", () => {
     expect(agents).toContain("clean default `latest`");
     expect(agents).toContain("pinned npm `11.19.0`");
     expect(agents).toContain("Record a successful intent step immediately before mutation");
+    expect(agents).toContain("safe positive Actions step number");
     expect(agents).toContain("scan every retained attempt");
     expect(agents).toContain("cannot list stages");
     expect(agents).toContain("do not claim this workflow prevents out-of-band stages");

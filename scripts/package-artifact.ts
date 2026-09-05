@@ -5,6 +5,7 @@ import { gunzipSync } from "node:zlib";
 const blockSize = 512;
 const packagePrefix = "package/";
 const maximumTarBytes = 6_500_000;
+const ustarSignature = Buffer.from([0x75, 0x73, 0x74, 0x61, 0x72, 0x00, 0x30, 0x30]);
 
 const packageBudget = Object.freeze({
   entryCount: { min: 190, max: 420 },
@@ -215,9 +216,19 @@ export async function inspectPackageArtifact(
       break;
     }
     verifyHeaderChecksum(header, offset);
+    if (!header.subarray(257, 265).equals(ustarSignature)) {
+      throw new Error(
+        `Package tar header at byte ${String(offset)} lacks the exact USTAR magic/version`,
+      );
+    }
 
     const name = readString(header, 0, 100, `entry name at byte ${String(offset)}`);
-    const prefix = readString(header, 345, 155, `entry prefix at byte ${String(offset)}`);
+    const prefix = readString(
+      header,
+      345,
+      header[475] === 0 ? 130 : 155,
+      `entry prefix at byte ${String(offset)}`,
+    );
     const path = prefix.length > 0 ? `${prefix}/${name}` : name;
     const size = readOctal(header, 124, 12, `entry size for ${path}`);
     const mode = readOctal(header, 100, 8, `entry mode for ${path}`);

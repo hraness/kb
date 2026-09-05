@@ -181,9 +181,14 @@ SHA-512, and the independent SHA-256 manifest before mutation. Immediately
 before staging,
 it independently parses the packed manifest, rejects npm's top-level `tag`
 override, rejects an unresolved prior mutation intent from durable all-attempt
-Actions history, fetches current `main` into a new bare Git directory,
-uses npm/node-tar-compatible USTAR prefix semantics, then rehashes all three
-files and invokes only `npm stage publish` against
+Actions history, and inspects every recognized attempted terminal mutation
+before it trusts a job display name. A terminal mutation is bound only when its
+single successful durable intent has the immediately preceding safe positive
+Actions step number. The job fetches current `main` into a new bare
+Git directory, then parses the archive with the same exact eight-byte USTAR
+magic/version signature and byte-475 130/155-byte prefix discriminator used by
+the current source/release archive verifier. It rehashes all three files and
+invokes only `npm stage publish` against
 `https://registry.npmjs.org`. It rejects ambient tag configuration, runs from
 an empty directory with empty user/global npm config, and proves pinned npm's
 clean default `latest` before invocation. Leaving the tag implicit preserves

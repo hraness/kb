@@ -475,7 +475,11 @@ jobs:
               ) {
                 throw new Error(`npm-stage run ${runId} contains an invalid job`);
               }
-              if (!job.name.startsWith("Stage exact package")) continue;
+              const terminalWrites = job.steps.filter((step) => (
+                step?.name === "Revalidate current main and stage exact package"
+                && step?.conclusion !== null
+                && step?.conclusion !== "skipped"
+              ));
               const intents = job.steps.filter((step) => (
                 step?.name === "Record exclusive stable-stage intent"
                 && step?.conclusion === "success"
@@ -485,6 +489,9 @@ jobs:
                 && step.name.startsWith("Record cleared stable-stage intent")
                 && step?.conclusion === "success"
               ));
+              const hasSafePositiveStepNumber = (step) => (
+                Number.isSafeInteger(step?.number) && step.number > 0
+              );
               if (intents.length > 1 || resolutions.length > 1) {
                 throw new Error(`npm-stage run ${runId} has ambiguous intent history`);
               }
@@ -510,6 +517,25 @@ jobs:
                 reserve(legacy.version, runId);
                 continue;
               }
+              if (
+                terminalWrites.length > 1
+                || (terminalWrites.length === 1 && (
+                  intents.length !== 1
+                  || !hasSafePositiveStepNumber(terminalWrites[0])
+                  || !hasSafePositiveStepNumber(intents[0])
+                  || intents[0].number !== terminalWrites[0].number - 1
+                ))
+              ) {
+                throw new Error(
+                  `npm-stage run ${runId} has a terminal write without one immediately preceding durable intent`,
+                );
+              }
+              if (!job.name.startsWith("Stage exact package")) {
+                if (terminalWrites.length > 0 || intents.length > 0 || resolutions.length > 0) {
+                  throw new Error(`npm-stage run ${runId} contains staging controls outside a version-bound stage job`);
+                }
+                continue;
+              }
               const match = /^Stage exact package v((?:0|[1-9]\d*)\.(?:0|[1-9]\d*)\.(?:0|[1-9]\d*))$/u.exec(job.name);
               if (match === null) {
                 throw new Error(`npm-stage run ${runId} lacks a version-bound stage job`);
@@ -522,14 +548,6 @@ jobs:
                 }
                 parseVersion(resolutionMatch[1], `Cleared version from run ${runId}`);
                 increment(resolutionCounts, resolutionMatch[1]);
-              }
-              const terminalWrites = job.steps.filter((step) => (
-                step?.name === "Revalidate current main and stage exact package"
-                && step?.conclusion !== null
-                && step?.conclusion !== "skipped"
-              ));
-              if (terminalWrites.length > 1 || (terminalWrites.length === 1 && intents.length !== 1)) {
-                throw new Error(`npm-stage run ${runId} has a terminal write without one durable intent`);
               }
             }
           };
