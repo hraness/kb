@@ -222,9 +222,9 @@ export function validateNpmStageWorkflow(source: string, label: string): void {
       throw new Error(`${label} ${stepName} must reject unsafe stable-version components`);
     }
   }
-  const pendingStageStep = steps.find((step) => step.name === "Reject another pending stable stage");
+  const pendingStageStep = steps.find((step) => step.name === "Reject unresolved stable-stage intent");
   if (pendingStageStep === undefined || typeof pendingStageStep.run !== "string") {
-    throw new Error(`${label} must reject another unresolved successful stage`);
+    throw new Error(`${label} must reject another unresolved stage intent`);
   }
   if (!pendingStageStep.run.includes("BigInt(Number.MAX_SAFE_INTEGER)")) {
     throw new Error(`${label} pending-stage guard must reject unsafe stable-version components`);
@@ -244,8 +244,11 @@ export function validateNpmStageWorkflow(source: string, label: string): void {
   for (const required of [
     "Completed npm-stage history exceeds the reviewed 100-run bound",
     "Stage exact package v",
-    "already staged pending",
-    "does not identify a blocking stage",
+    "already reserved stable stage",
+    "does not identify a blocking intent",
+    "Record exclusive stable-stage intent",
+    "Record cleared stable-stage intent",
+    "jobs?filter=all&per_page=100",
     'execute("npm", [',
     "dist-tags.latest",
   ]) {
@@ -266,6 +269,36 @@ export function validateNpmStageWorkflow(source: string, label: string): void {
   const publicationStep = publicationSteps[0];
   if (publicationStep === undefined || typeof publicationStep.run !== "string") {
     throw new Error(`${label} staged-publication command is missing`);
+  }
+  const intentSteps = steps.filter((step) => step.name === "Record exclusive stable-stage intent");
+  const resolutionSteps = steps.filter((step) =>
+    step.name === "Record cleared stable-stage intent v${{ inputs.resolved_stage_version }}");
+  if (
+    intentSteps.length !== 1
+    || resolutionSteps.length !== 1
+    || steps.indexOf(intentSteps[0]!) !== steps.indexOf(publicationStep) - 1
+    || steps.indexOf(resolutionSteps[0]!) <= steps.indexOf(pendingStageStep)
+    || steps.indexOf(resolutionSteps[0]!) >= steps.indexOf(intentSteps[0]!)
+  ) {
+    throw new Error(`${label} must persist resolution and exclusive intent immediately before mutation`);
+  }
+  const intentStep = intentSteps[0]!;
+  const resolutionStep = resolutionSteps[0]!;
+  const intentEnvironment = record(intentStep.env, `${label} stable-stage intent environment`);
+  const resolutionEnvironment = record(
+    resolutionStep.env,
+    `${label} stable-stage resolution environment`,
+  );
+  if (
+    typeof intentStep.run !== "string"
+    || intentEnvironment.EXPECTED_VERSION !== "${{ needs.verify.outputs.package_version }}"
+    || !intentStep.run.includes("$GITHUB_RUN_ID")
+    || !intentStep.run.includes("$GITHUB_RUN_ATTEMPT")
+    || resolutionStep.if !== "inputs.resolved_stage_version != ''"
+    || typeof resolutionStep.run !== "string"
+    || resolutionEnvironment.RESOLVED_STAGE_VERSION !== "${{ inputs.resolved_stage_version }}"
+  ) {
+    throw new Error(`${label} stable-stage intent and resolution identities are incomplete`);
   }
   const environment = record(publicationStep.env, `${label} staged-publication environment`);
   for (const name of [
