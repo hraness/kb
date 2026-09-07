@@ -150,6 +150,66 @@ describe("strict browser-like cookie filtering", () => {
     }
   });
 
+  test("installed provider does not fall back after every selected inline cookie has opaque isolation", async () => {
+    const profile = mkdtempSync(join(tmpdir(), "hraness-kb-sweet-cookie-inline-isolation-test-"));
+    const database = new Database(join(profile, "cookies.sqlite"));
+    try {
+      database.exec(`
+        CREATE TABLE moz_cookies (
+          name TEXT,
+          value TEXT,
+          host TEXT,
+          path TEXT,
+          expiry INTEGER,
+          isSecure INTEGER,
+          isHttpOnly INTEGER,
+          sameSite INTEGER,
+          originAttributes TEXT,
+          isPartitionedAttributeSet INTEGER
+        );
+        INSERT INTO moz_cookies
+          (name, value, host, path, expiry, isSecure, isHttpOnly, sameSite, originAttributes, isPartitionedAttributeSet)
+        VALUES ('fallback', 'must-not-be-read', 'example.com', '/', ${future}, 1, 1, 1, '', 0)
+      `);
+      database.close();
+
+      const result = await getBrowserCookies({
+        url: "https://example.com/",
+        inlineCookiesJson: JSON.stringify({
+          cookies: [
+            {
+              name: "opaque-without-key",
+              value: "synthetic",
+              domain: "example.com",
+              partitionKeyOpaque: true,
+            },
+            {
+              name: "opaque-with-null-key",
+              value: "synthetic",
+              domain: "example.com",
+              partitionKey: null,
+              partitionKeyOpaque: true,
+            },
+          ],
+        }),
+        browsers: ["firefox"],
+        firefoxProfile: profile,
+      });
+
+      expect(result.cookies).toEqual([]);
+      expect(result.warnings).toEqual([
+        "2 inline cookie(s) with partition or container provenance were excluded because replay cannot preserve their isolation context.",
+      ]);
+    } finally {
+      try {
+        database.close();
+      } catch {
+        // The happy path closes before the provider could inspect the synthetic profile.
+      }
+      rmSync(profile, { recursive: true, force: true });
+    }
+  });
+
   test("enforces host/domain, request path, Secure, expiry, and syntax", () => {
     const result = filterCookieProviderResult({
       cookies: [
@@ -186,8 +246,11 @@ describe("strict browser-like cookie filtering", () => {
         { name: "ambiguous-parent", value: "no", domain: "example.com", path: "/account" },
         { name: "unproven-exact", value: "no", domain: "sub.example.com", path: "/account" },
         { name: "explicit-parent", value: "yes", domain: "example.com", hostOnly: false, path: "/account" },
-        { name: "exact-host", value: "yes", domain: "sub.example.com", hostOnly: true, path: "/account" },
+        { name: "exact-host", value: "yes", domain: "sub.example.com", hostOnly: true, path: "/account", partitionKeyOpaque: false },
         { name: "partitioned", value: "no", domain: "sub.example.com", hostOnly: true, path: "/account", partitioned: true },
+        { name: "opaque", value: "no", domain: "sub.example.com", hostOnly: true, path: "/account", partitionKeyOpaque: true },
+        { name: "opaque-null-key", value: "no", domain: "sub.example.com", hostOnly: true, path: "/account", partitionKey: null, partitionKeyOpaque: true },
+        { name: "malformed-opaque", value: "no", domain: "sub.example.com", hostOnly: true, path: "/account", partitionKeyOpaque: "false" },
         { name: "container", value: "no", domain: "sub.example.com", hostOnly: true, path: "/account", originAttributes: "^userContextId=2" },
         { name: "object-partition", value: "no", domain: "sub.example.com", hostOnly: true, path: "/account", partitionKey: { topLevelSite: "https://attacker.example" } },
         { name: "malformed-top-frame", value: "no", domain: "sub.example.com", hostOnly: true, path: "/account", top_frame_site_key: 0 },
@@ -196,7 +259,7 @@ describe("strict browser-like cookie filtering", () => {
       warnings: [],
     }, target);
 
-    expect(result.rejected).toBe(7);
+    expect(result.rejected).toBe(10);
     expect(result.cookies).toEqual([
       expect.objectContaining({ name: "exact-host", domain: "sub.example.com", hostOnly: true }),
       expect.objectContaining({ name: "explicit-parent", domain: "example.com", hostOnly: false }),
@@ -260,6 +323,32 @@ describe("explicit cookie payload formats", () => {
     expect(domainless.ok && domainless.scopeProvenance).toBe("target-inferred");
     expect(header.ok && header.scopeProvenance).toBe("target-inferred");
   });
+
+  test.each(["json", "base64-json"] as const)(
+    "fails closed on opaque partition provenance in explicit %s payloads",
+    (format) => {
+      const records = [
+        { ...cookie, name: "missing-marker" },
+        { ...cookie, name: "explicit-false", partitionKeyOpaque: false },
+        { ...cookie, name: "opaque-without-key", partitionKeyOpaque: true },
+        { ...cookie, name: "opaque-with-null-key", partitionKey: null, partitionKeyOpaque: true },
+        { ...cookie, name: "malformed-marker", partitionKeyOpaque: "false" },
+      ];
+      const json = JSON.stringify({ cookies: records });
+      const input = format === "json" ? json : Buffer.from(json).toString("base64");
+      const parsed = parseCookiePayload(input, target, 1_700_000_000);
+
+      expect(parsed.ok).toBeTrue();
+      if (!parsed.ok) return;
+      expect(parsed.format).toBe(format);
+      expect(parsed.scopeProvenance).toBe("explicit");
+      expect(parsed.rejected).toBe(3);
+      expect(parsed.cookies.map(({ name }) => name)).toEqual([
+        "explicit-false",
+        "missing-marker",
+      ]);
+    },
+  );
 
   test("rejects empty, malformed, and entirely out-of-scope input", () => {
     expect(parseCookiePayload("not cookies", target)).toEqual({ ok: false, reason: "invalid" });

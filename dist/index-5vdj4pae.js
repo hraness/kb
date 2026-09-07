@@ -23,7 +23,7 @@ import {
   filterCookieProviderResult,
   readCookieFile,
   renderCookieHeader
-} from "./index-84x0vjjp.js";
+} from "./index-bnmax0dq.js";
 
 // src/clip/acquire.ts
 import {

@@ -418,8 +418,8 @@ export function validateKbSkillContractResources(
       errors.push(`SKILL.md must link ${link}`);
     }
   }
-  if (!resources.skill.includes("bun add --global @hraness/kb@0.19.0")) {
-    errors.push("SKILL.md must retain the immutable 0.19.0 runtime pin");
+  if (!resources.skill.includes("bun add --global @hraness/kb@0.19.1")) {
+    errors.push("SKILL.md must retain the immutable 0.19.1 runtime pin");
   }
   for (const [name, contents, headings] of [
     ["customize.md", resources.customize, CUSTOMIZE_HEADINGS],

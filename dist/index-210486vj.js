@@ -2,7 +2,7 @@
 import {
   findKbPackageRoot,
   isolatedAgentBrowserEnvironment
-} from "./index-qry4vhxk.js";
+} from "./index-5vdj4pae.js";
 import {
   BoundedByteBuffer
 } from "./index-gh719d91.js";
@@ -23,7 +23,7 @@ var homebrewSqliteLibraryPaths = [
 var dependencyVersions = {
   defuddle: "0.19.1",
   "agent-browser": "0.32.3",
-  "@steipete/sweet-cookie": "0.4.2",
+  "@steipete/sweet-cookie": "0.4.4",
   "@tobilu/qmd": expectedQmdVersion
 };
 var dependencyNames = [

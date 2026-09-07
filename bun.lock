@@ -6,7 +6,7 @@
       "name": "@hraness/kb",
       "dependencies": {
         "@hraness/oh": "github:hraness/oh#v0.2.0",
-        "@steipete/sweet-cookie": "github:hraness/sweet-cookie#v0.4.2",
+        "@steipete/sweet-cookie": "github:hraness/sweet-cookie#v0.4.4",
         "@tobilu/qmd": "git+https://github.com/hraness/qmd.git#aa993dceb3ef8cfb71d470554ca437570f5a2b3c",
         "agent-browser": "0.32.3",
         "defuddle": "0.19.1",
@@ -91,7 +91,7 @@
 
     "@simple-git/argv-parser": ["@simple-git/argv-parser@1.1.1", "", { "dependencies": { "@simple-git/args-pathspec": "^1.0.3" } }, "sha512-Q9lBcfQ+VQCpQqGJFHe5yooOS5hGdLFFbJ5R+R5aDsnkPCahtn1hSkMcORX65J2Z5lxSkD0lQorMsncuBQxYUw=="],
 
-    "@steipete/sweet-cookie": ["@steipete/sweet-cookie@github:hraness/sweet-cookie#04ddf06", { "bin": { "sweet-cookie": "packages/core/dist/cli.js" } }, "hraness-sweet-cookie-04ddf06", "sha512-SxVC8mp7OiWY4RHtBPlDl51xpRDTh8lNctnLdUGdos62oflrrroC3qQZ/YMdR2Vd62wKUBmnErBlrLumTuj2cw=="],
+    "@steipete/sweet-cookie": ["@steipete/sweet-cookie@github:hraness/sweet-cookie#1a8b6f0", { "bin": { "sweet-cookie": "packages/core/dist/cli.js" } }, "hraness-sweet-cookie-1a8b6f0", "sha512-gL+Gu9WsBbE0Xk1xaXOYESKChl0y8HEGYl7Oi8c4MhR0Q+Tu8YjqVQi8hk/sOg5wL6gddUcpz7sGn8augLNUFw=="],
 
     "@tinyhttp/content-disposition": ["@tinyhttp/content-disposition@2.2.4", "", {}, "sha512-5Kc5CM2Ysn3vTTArBs2vESUt0AQiWZA86yc1TI3B+lxXmtEq133C1nxXNOgnzhrivdPZIh3zLj5gDnZjoLL5GA=="],
 
