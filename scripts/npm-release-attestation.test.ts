@@ -31,6 +31,7 @@ function bundle(
   const keyid = publish ? "SHA256:test-key" : "";
   return {
     predicateType,
+    signedAccessSignatureUrl: "",
     bundle: {
       mediaType,
       verificationMaterial: {
@@ -151,6 +152,17 @@ function statement(
   input: Fixture,
   expectedPredicateType: string,
 ): Record<string, unknown> {
+  const candidate = attestationBundle(input, expectedPredicateType);
+  const envelope = record(record(candidate.bundle, "bundle").dsseEnvelope, "envelope");
+  const payload = envelope.payload;
+  if (typeof payload !== "string") throw new TypeError("payload must be a string");
+  return record(JSON.parse(Buffer.from(payload, "base64").toString("utf8")) as unknown, "statement");
+}
+
+function attestationBundle(
+  input: Fixture,
+  expectedPredicateType: string,
+): Record<string, unknown> {
   const verified = verifiedRecord(input);
   const bundles = verified.attestationBundles;
   if (!Array.isArray(bundles)) throw new TypeError("attestationBundles must be an array");
@@ -158,10 +170,7 @@ function statement(
     .map((value) => record(value, "attestation bundle"))
     .find((value) => value.predicateType === expectedPredicateType);
   if (candidate === undefined) throw new TypeError("attestation bundle is missing");
-  const envelope = record(record(candidate.bundle, "bundle").dsseEnvelope, "envelope");
-  const payload = envelope.payload;
-  if (typeof payload !== "string") throw new TypeError("payload must be a string");
-  return record(JSON.parse(Buffer.from(payload, "base64").toString("utf8")) as unknown, "statement");
+  return candidate;
 }
 
 function replaceStatement(
@@ -198,6 +207,49 @@ describe("npm release attestation", () => {
       tarballSha512,
       version,
     });
+  });
+
+  test("accepts only npm's currently evidenced empty signed access signature URL", () => {
+    const corruptions: readonly Readonly<{
+      label: string;
+      mutate: (attestation: Record<string, unknown>) => void;
+    }>[] = [
+      {
+        label: "missing signed access signature URL",
+        mutate: (attestation) => {
+          delete attestation.signedAccessSignatureUrl;
+        },
+      },
+      {
+        label: "non-string signed access signature URL",
+        mutate: (attestation) => {
+          attestation.signedAccessSignatureUrl = 0;
+        },
+      },
+      {
+        label: "nonempty signed access signature URL",
+        mutate: (attestation) => {
+          attestation.signedAccessSignatureUrl = "https://registry.example/signature";
+        },
+      },
+      {
+        label: "unknown attestation wrapper key",
+        mutate: (attestation) => {
+          attestation.unexpected = true;
+        },
+      },
+    ];
+
+    for (const predicateType of [publishPredicateType, provenancePredicateType]) {
+      for (const corruption of corruptions) {
+        const input = structuredClone(validInput());
+        corruption.mutate(attestationBundle(input, predicateType));
+        expect(
+          () => verifyNpmReleaseAttestation(input),
+          `${predicateType}: ${corruption.label}`,
+        ).toThrow();
+      }
+    }
   });
 
   test("rejects identity, provenance, publication, signature, and channel drift", () => {

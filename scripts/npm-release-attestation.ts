@@ -157,9 +157,19 @@ function decodeStatement(
   mediaType: string,
 ): Record<string, unknown> {
   const attestation = record(value, `${predicateType} attestation`);
-  exactKeys(attestation, ["bundle", "predicateType"], `${predicateType} attestation`);
+  exactKeys(
+    attestation,
+    ["bundle", "predicateType", "signedAccessSignatureUrl"],
+    `${predicateType} attestation`,
+  );
   if (attestation.predicateType !== predicateType) {
     throw new TypeError(`${predicateType} attestation has the wrong predicate type`);
+  }
+  if (
+    typeof attestation.signedAccessSignatureUrl !== "string"
+    || attestation.signedAccessSignatureUrl !== ""
+  ) {
+    throw new TypeError(`${predicateType} attestation signed access signature URL must be empty`);
   }
   const bundle = record(attestation.bundle, `${predicateType} bundle`);
   exactKeys(
