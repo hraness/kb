@@ -1,6 +1,6 @@
 {
   "name": "@hraness/kb",
-  "version": "0.19.1",
+  "version": "0.19.2",
   "description": "A knowledge base for coding agents, built from Markdown, backlinks, semantic search, and Git context.",
   "license": "MIT",
   "contentPolicy": {
