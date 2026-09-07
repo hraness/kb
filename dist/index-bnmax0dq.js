@@ -122,7 +122,7 @@ function hasSafeUnpartitionedProvenance(value) {
     if (typeof provenance !== "string" || provenance.trim() !== "")
       return false;
   }
-  for (const field of ["partitioned"]) {
+  for (const field of ["partitioned", "partitionKeyOpaque"]) {
     const flag = value[field];
     if (flag === undefined || flag === null)
       continue;

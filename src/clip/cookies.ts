@@ -157,7 +157,7 @@ function hasSafeUnpartitionedProvenance(value: CandidateCookie): boolean {
     if (provenance === undefined || provenance === null) continue;
     if (typeof provenance !== "string" || provenance.trim() !== "") return false;
   }
-  for (const field of ["partitioned"] as const) {
+  for (const field of ["partitioned", "partitionKeyOpaque"] as const) {
     const flag = value[field];
     if (flag === undefined || flag === null) continue;
     if (typeof flag !== "boolean" || flag) return false;
