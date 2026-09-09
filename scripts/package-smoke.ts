@@ -69,7 +69,16 @@ const baselineRequiredNamedExports = {
   "@hraness/kb/untrusted-content": ["createUntrustedToolResult", "projectUntrustedJson"],
 } as const;
 const binNames = ["kb", "kb-evaluation-builder"];
-const verificationPackages = ["@types/bun@^1.3.14","fast-check@^4.8.0","typescript@^6.0.3"];
+// Match the repository's qualified compiler/declaration tuple. Bun's wildcard
+// Node type dependency can otherwise select incompatible declarations.
+const verificationToolchain = Object.freeze({
+  "@types/bun": "1.4.0",
+  "@types/node": "26.4.0",
+  "typescript": "6.0.3",
+  "fast-check": "4.9.0",
+});
+const verificationPackages = Object.entries(verificationToolchain)
+  .map(([name, version]) => `${name}@${version}`);
 const skillNames = ["kb"] as const;
 const metadataSearchToolFiles = [
   "src/clip/metadata-search-tool/Cargo.lock",
@@ -115,6 +124,31 @@ function integerField(value: Record<string, unknown>, key: string, label: string
     throw new Error(`${label}.${key} must be a non-negative safe integer`);
   }
   return field as number;
+}
+
+async function logConsumerToolchain(consumer: string): Promise<void> {
+  const packages = [];
+  for (const [name, expectedVersion] of Object.entries({
+    ...verificationToolchain,
+    "bun-types": verificationToolchain["@types/bun"],
+  })) {
+    const bytes = await readFile(join(consumer, "node_modules", name, "package.json"));
+    const manifest = record(JSON.parse(bytes.toString("utf8")) as unknown, `${name} manifest`);
+    const version = stringField(manifest, "version", `${name} manifest`);
+    if (manifest.name !== name || version !== expectedVersion) {
+      throw new Error(`Clean consumer ${name} does not match the qualified version ${expectedVersion}.`);
+    }
+    packages.push({
+      name,
+      version,
+      manifestSha256: createHash("sha256").update(bytes).digest("hex"),
+    });
+  }
+  const lock = await readFile(join(consumer, "bun.lock"));
+  console.log(JSON.stringify({
+    packageConsumerToolchain: packages,
+    bunLockSha256: createHash("sha256").update(lock).digest("hex"),
+  }));
 }
 
 function resolveInputPath(repository: string, path: string): string {
@@ -675,6 +709,7 @@ void [${importSpecifiers.map((_specifier, index) =>
   ).join(", ")}];\n`;
   await writeFile(join(consumer, "index.ts"), consumerSource);
   await writeFile(join(consumer, "tsconfig.bundler.json"), "{\n  \"compilerOptions\": {\n    \"target\": \"ES2023\",\n    \"lib\": [\n      \"ES2023\",\n      \"DOM\",\n      \"DOM.Iterable\"\n    ],\n    \"types\": [\n      \"bun\",\n      \"node\"\n    ],\n    \"strict\": true,\n    \"noEmit\": true,\n    \"skipLibCheck\": false,\n    \"module\": \"Preserve\",\n    \"moduleResolution\": \"Bundler\"\n  },\n  \"include\": [\n    \"index.ts\"\n  ]\n}");
+  await logConsumerToolchain(consumer);
   await run([process.execPath, "x", "tsc", "-p", "./tsconfig.bundler.json"], consumer);
 
   console.log(JSON.stringify({

@@ -151,7 +151,14 @@ verifies and downloads the canonical archive; it does not rebuild mirror
 bytes. It requires the exact completed successful canonical run, repeats the full source gate on current main, and runs the current package verifier against the tagged source and downloaded archive. It hands exactly the tarball,
 `npm-pack.json`, and `npm-package.sha256` to the terminal staging job.
 
-That job holds only `actions: read`, `contents: read`, and `id-token: write`.
+The clean consumer uses the verifier's exact, source-qualified TypeScript,
+Bun, and Node declaration versions, including an explicit Node declaration
+pin. Keep strict declaration checking enabled. Before compiling, the verifier
+records resolved versions and manifest and lock hashes so a dependency failure
+can be diagnosed without retaining private machine state. Updating this
+verification tuple does not change the canonical archive or its source identity.
+
+The terminal staging job holds only `actions: read`, `contents: read`, and `id-token: write`.
 It checks out no source and runs no repository code. Its first step
 reauthorizes the current attempt and both owner actors against the active
 workflow and current main. It independently verifies safe packed
