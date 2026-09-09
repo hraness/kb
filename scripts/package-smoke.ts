@@ -374,8 +374,14 @@ async function verifyInstalledSkills(consumer: string): Promise<void> {
     readFile(join(installedRoot, "kb", "SKILL.md"), "utf8"),
     readFile(join(installedRoot, "kb", "agents", "openai.yaml"), "utf8"),
   ]);
-  if (!skill.includes(`@hraness/kb@${manifest.version}`)) {
-    throw new Error("installed KB skill npm pin does not match the package version");
+  const versionParts = manifest.version.split(".").map(BigInt);
+  const githubRelease = versionParts[0]! > 0n || versionParts[1]! > 19n
+    || (versionParts[1] === 19n && versionParts[2]! >= 4n);
+  const runtimePin = githubRelease
+    ? `https://github.com/hraness/kb/releases/download/v${manifest.version}/hraness-kb-${manifest.version}.tgz`
+    : `@hraness/kb@${manifest.version}`;
+  if (!skill.includes(runtimePin)) {
+    throw new Error("installed KB skill immutable runtime pin does not match the package version");
   }
   if (!metadata.includes("$kb")) {
     throw new Error("installed KB skill metadata must invoke $kb explicitly");

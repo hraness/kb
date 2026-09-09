@@ -71,6 +71,35 @@ describe("npm stage selection", () => {
     })).toThrow("must provide the previous package.json");
   });
 
+  test("selects an older canonical tag without confusing it with current main", () => {
+    expect(selectNpmStage({
+      currentManifest: manifest("0.20.0"),
+      eventName: "workflow_dispatch",
+      releaseTag: "v0.19.4",
+    })).toEqual({ currentVersion: "0.19.4", reason: "manual-recovery", shouldStage: true });
+    for (const releaseTag of [
+      "0.19.4", "refs/tags/v0.19.4", "v0.19.4\n", "v0.19.4-beta.1", "v00.19.4",
+      "v0.20.1", "v9007199254740992.0.0", "v0.19.4;echo x",
+    ]) {
+      expect(() => selectNpmStage({
+        currentManifest: manifest("0.20.0"), eventName: "workflow_dispatch", releaseTag,
+      })).toThrow();
+    }
+    expect(() => selectNpmStage({
+      currentManifest: manifest("0.20.0"), previousManifest: manifest("0.19.4"),
+      eventName: "push", releaseTag: "v0.19.4",
+    })).toThrow("requires workflow_dispatch");
+    const versionPart = fc.integer({ min: 0, max: 1_000_000 });
+    fc.assert(fc.property(versionPart, versionPart, (a, b) => {
+      const current = Math.max(a, b);
+      const selected = Math.min(a, b);
+      expect(selectNpmStage({
+        currentManifest: manifest(`1.${current}.0`), eventName: "workflow_dispatch",
+        releaseTag: `v1.${selected}.0`,
+      }).currentVersion).toBe(`1.${selected}.0`);
+    }), { numRuns: 100 });
+  });
+
   test("accepts and compares every version component through Number.MAX_SAFE_INTEGER", () => {
     expect(selectNpmStage({
       currentManifest: manifest("9007199254740991.9007199254740991.9007199254740991"),
@@ -160,6 +189,21 @@ describe("npm stage selection", () => {
         + "reason=stable-version-increase\n"
         + "should_stage=true\n"
         + "previous_version=0.17.2\n",
+      );
+      await writeFile(githubOutput, "");
+      const selectedChild = Bun.spawn([
+        process.execPath, "run", fileURLToPath(new URL("./npm-stage-selection.ts", import.meta.url)),
+        "--current-manifest", currentManifest, "--event", "workflow_dispatch",
+        "--github-output", githubOutput, "--release-tag", "v0.17.2",
+      ], { stderr: "pipe", stdout: "pipe" });
+      const [selectedCode, selectedOutput, selectedError] = await Promise.all([
+        selectedChild.exited, new Response(selectedChild.stdout).text(), new Response(selectedChild.stderr).text(),
+      ]);
+      expect(selectedCode).toBe(0);
+      expect(selectedError).toBe("");
+      expect(selectedOutput).toContain("Stage @hraness/kb@0.17.2: manual-recovery");
+      expect(await readFile(githubOutput, "utf8")).toBe(
+        "current_version=0.17.2\nreason=manual-recovery\nshould_stage=true\n",
       );
     } finally {
       await rm(work, { force: true, recursive: true });

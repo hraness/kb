@@ -73,12 +73,12 @@ describe("durable-session documentation", () => {
 
   test("keeps the package, README, and public skill on one immutable release", async () => {
     const { manifest, readme, skill } = await publicSurface();
-    const packagePin = `@hraness/kb@${manifest.version}`;
+    const packagePin = `https://github.com/hraness/kb/releases/download/v${manifest.version}/hraness-kb-${manifest.version}.tgz`;
     const skillPin = `hraness/kb#v${manifest.version}`;
-    expect(readme).toContain(`bun add --global ${packagePin}`);
-    expect(readme).toContain(`bun add --exact ${packagePin}`);
+    expect(readme).toContain(`bun add --global --ignore-scripts ${packagePin}`);
+    expect(readme).toContain(`bun add --exact --ignore-scripts ${packagePin}`);
     expect(readme).toContain(skillPin);
-    expect(skill).toContain(`bun add --global ${packagePin}`);
+    expect(skill).toContain(`bun add --global --ignore-scripts ${packagePin}`);
     expect(`${readme}\n${skill}`).not.toContain("@hraness/kb@latest");
   });
 

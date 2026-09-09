@@ -167,7 +167,7 @@ jobs:
         "staged-publication boundary must prove",
       ],
       [
-        "entries.length !== 3",
+        "entries.length !== 5",
         "entries.length < 0",
         "staged-publication boundary must prove",
       ],
@@ -323,9 +323,6 @@ jobs:
     const source = await readFile(path, "utf8");
 
     for (const required of [
-      "push:",
-      "branches: [main]",
-      'paths:\n      - "package.json"',
       "workflow_dispatch:",
       "publish_to_npm:",
       "resolved_stage_version:",
@@ -360,7 +357,7 @@ jobs:
       "bun install --frozen-lockfile --ignore-scripts",
       "bun run check",
       "git status --porcelain --untracked-files=all -- dist bun.lock",
-      "scripts/prepare-npm-package.ts",
+      'scripts/github-release.ts download "$canonical_directory"',
       "scripts/package-smoke.ts",
       "npm-package.sha256",
       "actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c",
@@ -405,9 +402,13 @@ jobs:
       "npm-stage.yml",
     )).toThrow("fail-closed boolean publish_to_npm input");
     expect(() => validateNpmStageWorkflow(
-      source.replace('default: ""', 'default: "0.19.0"'),
+      source.replace(/(resolved_stage_version:[\s\S]*?default:) ""/u, '$1 "0.19.0"'),
       "npm-stage.yml",
     )).toThrow("empty-by-default resolved_stage_version");
+    expect(() => validateNpmStageWorkflow(
+      source.replace(/(release_tag:[\s\S]*?default:) ""/u, '$1 "v0.19.3"'),
+      "npm-stage.yml",
+    )).toThrow("empty-by-default canonical release_tag");
     expect(() => validateNpmStageWorkflow(
       source.replace(
         "if: inputs.publish_to_npm == true",
@@ -449,22 +450,18 @@ jobs:
     )).toThrow("exact reviewed step sequence");
   });
 
-  test("gates the immutable GitHub release on the exact public npm artifact", async () => {
-    const path = resolve(import.meta.dir, "../.github/workflows/release.yml");
-    const source = await readFile(path, "utf8");
-
-    expect(source).toContain("Verify canonical npm delivery");
-    expect(source).toContain('package_spec="$EXPECTED_NAME@$package_version"');
-    expect(source).toContain("scripts/npm-package-identity.ts");
-    expect(source).toContain("scripts/npm-release-attestation.ts");
-    expect(source).toContain("--registry-view-json");
-    expect(source).toContain("npm audit signatures");
-    expect(source).toContain("--include-attestations");
-    expect(source).toContain("--registry-latest-json");
-    expect(source).toContain('npm view "@hraness/kb" dist-tags.latest');
-    expect(source).not.toContain('cmp "$source_archive" "$registry_archive"');
-    expect(source).toContain("--registry=https://registry.npmjs.org");
-    expect(source).toContain("scripts/package-smoke.ts");
+  test("rejects a canonical release that waits on npm or signs with unchecked authority", async () => {
+    const source = await readFile(resolve(import.meta.dir, "../.github/workflows/release.yml"), "utf8");
+    const npmDependency = source.replace(
+      '          node "$GITHUB_WORKSPACE/scripts/github-release.ts" prepare "$artifact_directory"',
+      '          npm view @hraness/kb dist-tags.latest\n' +
+        '          node "$GITHUB_WORKSPACE/scripts/github-release.ts" prepare "$artifact_directory"',
+    );
+    expect(npmDependency).not.toBe(source);
+    expect(() => validateReleaseWorkflow(npmDependency, "release.yml")).toThrow("must not depend on npm");
+    const uncheckedSigner = source.replace('      attestations: write', '      attestations: write\n      packages: write');
+    expect(uncheckedSigner).not.toBe(source);
+    expect(() => validateReleaseWorkflow(uncheckedSigner, "release.yml")).toThrow("reviewed signing permissions");
   });
 
   test("structurally binds release mutation to owner authorization and current controls", async () => {
@@ -495,9 +492,9 @@ jobs:
         "current-main checkout",
       ],
       [
-        'run "$current_attestation"',
-        'run "$current_identity"',
-        "npm attestation",
+        'node "$GITHUB_WORKSPACE/scripts/github-release.ts" prepare "$artifact_directory"',
+        'node "$GITHUB_WORKSPACE/scripts/github-release.ts" publish "$artifact_directory"',
+        "canonical artifact",
       ],
       [
         "attempt.triggering_actor?.id !== actorId",
@@ -555,9 +552,9 @@ jobs:
       "fail-closed step control flow",
     );
     const extraReleaseMutation = source.replace(
-      '          if ! gh release create "$VERIFIED_TAG" \\',
+      '          node scripts/github-release.ts publish "$RUNNER_TEMP/kb-github-handoff"',
       '          gh release edit "$VERIFIED_TAG" --title hostile\n' +
-        '          if ! gh release create "$VERIFIED_TAG" \\',
+        '          node scripts/github-release.ts publish "$RUNNER_TEMP/kb-github-handoff"',
     );
     expect(extraReleaseMutation).not.toBe(source);
     expect(() => validateReleaseWorkflow(extraReleaseMutation, "release.yml")).toThrow(

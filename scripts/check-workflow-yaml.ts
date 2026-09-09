@@ -283,166 +283,82 @@ export function validateReleaseWorkflow(source: string, label: string): void {
   const workflow = workflowRecord(source, label);
   const triggers = record(workflow.on, `${label} on`);
   const push = record(triggers.push, `${label} push trigger`);
-  if (
-    Object.keys(triggers).length !== 1
-    || !Array.isArray(push.tags)
-    || JSON.stringify(push.tags) !== JSON.stringify(["v*", "!v*-beta.*"])
-  ) {
+  if (Object.keys(triggers).length !== 1 || JSON.stringify(push.tags) !== JSON.stringify(["v*", "!v*-beta.*"])) {
     throw new Error(`${label} must accept only stable version-tag pushes`);
   }
-  const topPermissions = record(workflow.permissions, `${label} permissions`);
-  if (topPermissions.contents !== "read" || Object.keys(topPermissions).length !== 1) {
-    throw new Error(`${label} top-level permissions must be contents: read only`);
-  }
+  const permissions = record(workflow.permissions, `${label} permissions`);
+  if (JSON.stringify(permissions) !== JSON.stringify({ contents: "read" })) throw new Error(`${label} top-level permissions must be contents: read only`);
   const concurrency = record(workflow.concurrency, `${label} concurrency`);
-  if (concurrency.group !== "stable-release" || concurrency["cancel-in-progress"] !== false) {
-    throw new Error(`${label} must serialize stable releases without cancellation`);
-  }
-
+  if (concurrency.group !== "stable-release" || concurrency["cancel-in-progress"] !== false) throw new Error(`${label} must serialize stable releases without cancellation`);
   const jobs = record(workflow.jobs, `${label} jobs`);
-  if (JSON.stringify(Object.keys(jobs).sort()) !== JSON.stringify(["authorize", "publish", "verify"])) {
-    throw new Error(`${label} must contain exactly authorize, verify, and publish jobs`);
-  }
-  const authorize = record(jobs.authorize, `${label} authorize job`);
-  const verify = record(jobs.verify, `${label} verify job`);
-  const publish = record(jobs.publish, `${label} publish job`);
-  if ([authorize, verify, publish].some((job) => (
-    job.if !== undefined || job["continue-on-error"] !== undefined
-  ))) {
-    throw new Error(`${label} jobs must retain fail-closed control flow`);
+  if (JSON.stringify(Object.keys(jobs).sort()) !== JSON.stringify(["attest", "authorize", "publish", "verify"])) throw new Error(`${label} must contain exactly authorize, verify, attest, and publish jobs`);
+  const authorize = record(jobs.authorize, `${label} authorize`);
+  const verify = record(jobs.verify, `${label} verify`);
+  const attest = record(jobs.attest, `${label} attest`);
+  const publish = record(jobs.publish, `${label} publish`);
+  for (const job of [authorize, verify, attest, publish]) {
+    if (job.if !== undefined || job["continue-on-error"] !== undefined) throw new Error(`${label} jobs must retain fail-closed control flow`);
   }
   validateOwnerTagAuthorization(authorize, `${label} owner authorization`);
-
-  const verifyPermissions = record(verify.permissions, `${label} verify permissions`);
-  if (
-    verify.needs !== "authorize"
-    || verifyPermissions.contents !== "read"
-    || Object.keys(verifyPermissions).length !== 1
-  ) {
-    throw new Error(`${label} verification must follow authorization with contents: read only`);
-  }
+  if (verify.needs !== "authorize" || JSON.stringify(verify.permissions) !== JSON.stringify({ contents: "read" })) throw new Error(`${label} verification must remain read-only after owner authorization`);
   const verifySteps = jobSteps(verify, `${label} verify`);
   validateExactStepSequence(verifySteps, [
-    {
-      kind: "uses",
-      uses: "actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0",
-    },
-    {
-      kind: "uses",
-      uses: "actions/setup-node@820762786026740c76f36085b0efc47a31fe5020",
-    },
-    {
-      kind: "uses",
-      uses: "oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6",
-    },
-    { kind: "run", name: "Pin npm" },
-    { kind: "run", name: "Verify release identity" },
-    { kind: "run", name: "Materialize exact tagged source" },
-    { kind: "run", name: "Install tagged source" },
-    { kind: "run", name: "Check tagged source" },
-    { kind: "run", name: "Verify generated tagged tree" },
-    { kind: "run", name: "Verify tagged package boundary" },
-    { kind: "run", name: "Verify canonical npm delivery" },
+    { kind: "uses", uses: "actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0" },
+    { kind: "uses", uses: "actions/setup-node@820762786026740c76f36085b0efc47a31fe5020" },
+    { kind: "uses", uses: "oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6" },
+    { kind: "run", name: "Pin npm" }, { kind: "run", name: "Verify release identity" },
+    { kind: "run", name: "Materialize exact tagged source" }, { kind: "run", name: "Install tagged source" },
+    { kind: "run", name: "Check tagged source" }, { kind: "run", name: "Verify generated tagged tree" },
+    { kind: "run", name: "Verify tagged package boundary" }, { kind: "run", name: "Prepare and smoke canonical GitHub artifact" },
+    { kind: "uses", name: "Upload verified GitHub artifact", uses: "actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a" },
   ], `${label} verification`);
-  const verifyCheckout = verifySteps[0]!;
-  const verifyCheckoutWith = record(verifyCheckout.with, `${label} verify checkout inputs`);
-  if (
-    typeof verifyCheckout.uses !== "string"
-    || !verifyCheckout.uses.startsWith("actions/checkout@")
-    || verifyCheckoutWith["fetch-depth"] !== 0
-    || verifyCheckoutWith["persist-credentials"] !== false
-    || verifyCheckoutWith.ref !== "main"
-  ) {
-    throw new Error(`${label} verification must begin from an uncredentialed full-history current-main checkout`);
-  }
+  if (verifySteps[6]?.run !== "bun install --frozen-lockfile --ignore-scripts" || verifySteps[7]?.run !== "bun run check") throw new Error(`${label} must retain complete tagged-source verification`);
+  const checkout = record(verifySteps[0]?.with, `${label} verify checkout`);
+  if (checkout.ref !== "main" || checkout["fetch-depth"] !== 0 || checkout["persist-credentials"] !== false) throw new Error(`${label} requires an uncredentialed complete-history current-main checkout`);
   const verifyCommands = joinedCommands(verifySteps);
-  let previousIndex = -1;
-  for (const required of [
-    'refs/heads/$DEFAULT_BRANCH:refs/remotes/origin/$DEFAULT_BRANCH',
-    'checked_out_head="$(git rev-parse HEAD)"',
-    'git merge-base --is-ancestor "$tag_commit" "$default_head"',
-    'Tagged and current release workflow controls differ',
-    'git worktree add --detach "$source_tree" "$SOURCE_SHA"',
-    'current_attestation="$GITHUB_WORKSPACE/scripts/npm-release-attestation.ts"',
-    "npm audit signatures",
-    'run "$current_attestation"',
-  ]) {
-    const index = verifyCommands.indexOf(required);
-    if (index <= previousIndex) {
-      throw new Error(`${label} must bind current controls, tagged source, and npm attestation in order`);
-    }
-    previousIndex = index;
-  }
-
-  const publishPermissions = record(publish.permissions, `${label} publish permissions`);
-  if (
-    publish.needs !== "verify"
-    || publishPermissions.actions !== "read"
-    || publishPermissions.contents !== "write"
-    || Object.keys(publishPermissions).length !== 2
-  ) {
-    throw new Error(`${label} publication must follow verification with only actions: read and contents: write`);
-  }
-  const publishSteps = jobSteps(publish, `${label} publish`);
-  validateExactStepSequence(publishSteps, [
-    {
-      kind: "uses",
-      uses: "actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0",
-    },
+  for (const expected of [
+    'git merge-base --is-ancestor "$tag_commit" "$default_head"', "Tagged and current release workflow controls differ",
+    'git worktree add --detach "$source_tree" "$SOURCE_SHA"', 'bun run ./scripts/prepare-npm-package.ts "$artifact_directory"',
+    "bun run ./scripts/package-smoke.ts", 'node "$GITHUB_WORKSPACE/scripts/github-release.ts" prepare "$artifact_directory"',
+  ]) if (!verifyCommands.includes(expected)) throw new Error(`${label} must bind current controls, tagged source, and the canonical artifact`);
+  if (/npm (?:view|publish|stage|audit)/u.test(verifyCommands)) throw new Error(`${label} canonical publication must not depend on npm registry admission`);
+  if (attest.needs !== "verify" || JSON.stringify(attest.permissions) !== JSON.stringify({ actions: "read", contents: "read", "id-token": "write", attestations: "write" })) throw new Error(`${label} attestation must have only the reviewed signing permissions`);
+  const attestationSteps = jobSteps(attest, `${label} attestation`);
+  validateExactStepSequence(attestationSteps, [
     { kind: "run", name: "Reauthorize current release attempt" },
-    { kind: "run", name: "Publish verified GitHub Release" },
+    { kind: "uses", uses: "actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c" },
+    { kind: "run", name: "Bind exact verified artifact" },
+    { kind: "uses", name: "Attest canonical release files", uses: "actions/attest@1e69f48acb82d1966a394da916b4c1698aa569d6" },
+    { kind: "run", name: "Preserve signed provenance bundle" },
+    { kind: "uses", name: "Upload attested GitHub artifact", uses: "actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a" },
+  ], `${label} attestation`);
+  const attestationInputs = record(attestationSteps[3]?.with, `${label} attestation inputs`);
+  const subjects = ["${{ needs.verify.outputs.archive_name }}", "npm-pack.json", "release-manifest.json", "SHA256SUMS"].map((name) => `\${{ runner.temp }}/kb-github-handoff/${name}`).join("\n") + "\n";
+  if (attestationInputs["subject-path"] !== subjects || attestationInputs["push-to-registry"] !== false || attestationInputs["create-storage-record"] !== false || Object.keys(attestationInputs).length !== 3) throw new Error(`${label} must attest exactly the four verified files without registry writes`);
+  if (JSON.stringify(publish.needs) !== JSON.stringify(["verify", "attest"]) || JSON.stringify(publish.permissions) !== JSON.stringify({ actions: "read", contents: "write" })) throw new Error(`${label} publication must follow independent verification and attestation with only release permissions`);
+  const publishSteps = jobSteps(publish, `${label} publication`);
+  validateExactStepSequence(publishSteps, [
+    { kind: "uses", uses: "actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0" },
+    { kind: "run", name: "Reauthorize current release attempt" },
+    { kind: "uses", uses: "actions/setup-node@820762786026740c76f36085b0efc47a31fe5020" },
+    { kind: "uses", uses: "actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c" },
+    { kind: "run", name: "Bind exact verified artifact" }, { kind: "run", name: "Publish verified GitHub Release" },
   ], `${label} publication`);
-  const publishCheckout = publishSteps[0]!;
-  const publishCheckoutWith = record(publishCheckout.with, `${label} publish checkout inputs`);
-  if (
-    publishCheckout.uses !== "actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0"
-    || publishCheckoutWith["fetch-depth"] !== 0
-    || publishCheckoutWith["persist-credentials"] !== false
-    || publishCheckoutWith.ref !== "main"
-  ) {
-    throw new Error(`${label} publication must begin from an uncredentialed full-history current-main checkout`);
-  }
-  const reauthorizeIndex = publishSteps.findIndex((step) => step.name === "Reauthorize current release attempt");
-  const mutationIndex = publishSteps.findIndex((step) =>
-    typeof step.run === "string" && step.run.includes('gh release create "$VERIFIED_TAG"'));
-  if (reauthorizeIndex !== 1 || mutationIndex <= reauthorizeIndex) {
-    throw new Error(`${label} must reauthorize the current attempt immediately before any release mutation boundary`);
-  }
-  const publishCommands = joinedCommands(publishSteps);
-  let publishGuardIndex = -1;
-  for (const required of [
-    "attempt.triggering_actor?.id !== actorId",
-    "Current release attempt is not owner-authorized for this exact public workflow",
-    "verify_current_release_controls()",
-    'scripts/npm-release-attestation.ts',
-    'final_default_sha="$(verify_current_release_controls)"',
-    'gh release create "$VERIFIED_TAG"',
-    'release.immutable !== true',
-    'author?.id !== Number(process.env.EXPECTED_ACTIONS_BOT_ID)',
-  ]) {
-    const index = publishCommands.indexOf(required);
-    if (index <= publishGuardIndex) {
-      throw new Error(`${label} must reauthorize and rebind current controls before immutable release publication`);
+  const publishCheckout = record(publishSteps[0]?.with, `${label} publication checkout`);
+  if (publishCheckout.ref !== "main" || publishCheckout["fetch-depth"] !== 0 || publishCheckout["persist-credentials"] !== false) throw new Error(`${label} requires a complete-history current-main checkout`);
+  for (const steps of [attestationSteps, publishSteps]) {
+    const commands = joinedCommands(steps);
+    for (const expected of ["attempt.triggering_actor?.id !== actorId", "attempt.actor?.id !== actorId", "attempt.run_attempt !== runAttempt", "Current release attempt is not owner-authorized for this exact public workflow", "Release handoff bytes differ from verified output", "Release handoff identity differs from verified outputs"]) {
+      if (!commands.includes(expected)) throw new Error(`${label} must reauthorize the exact attempt and rebind verified bytes`);
     }
-    publishGuardIndex = index;
   }
-  if (
-    (source.match(/gh release create "\$VERIFIED_TAG"/gu) ?? []).length !== 1
-    || source.includes("id-token: write")
-  ) {
-    throw new Error(`${label} must contain one tokenless GitHub Release mutation`);
+  const publicationCommands = joinedCommands(publishSteps);
+  for (const expected of ['scripts/github-release.ts', 'final_default_sha="$(verify_current_release_controls)"', 'node scripts/github-release.ts publish "$RUNNER_TEMP/kb-github-handoff"']) {
+    if (!publicationCommands.includes(expected)) throw new Error(`${label} must rebind current controls before publication`);
   }
-  validateNoUnexpectedProviderMutations(
-    publishSteps,
-    2,
-    'gh release create "$VERIFIED_TAG"',
-    `${label} publication`,
-  );
-  validateReviewedWorkflowSemantics(
-    workflow,
-    "730142a72697531c636c0979d4499a3934277f5d0057d557ad8419b88a8dade3",
-    label,
-  );
+  if (containsUnexpectedProviderInvocation(publicationCommands)) throw new Error(`${label} contains an unexpected provider mutation command outside its reviewed helper`);
+  if ((source.match(/id-token: write/gu) ?? []).length !== 1) throw new Error(`${label} must isolate OIDC in the attestation job`);
+  validateReviewedWorkflowSemantics(workflow, "67708f76b5931772c089d06442f083cb962519b461ccb81eb88e0b8da4545d6e", label);
 }
 
 function validatePendingStableReleaseClosure(command: string, label: string): void {
@@ -451,14 +367,13 @@ function validatePendingStableReleaseClosure(command: string, label: string): vo
   const tagLookupIndex = command.indexOf('const remoteTagLines = execute("git", [', priorTagIndex + 1);
   const tagErrorIndex = command.indexOf("lacks one annotated Git tag", tagLookupIndex + 1);
   const releaseIndex = command.indexOf('`repos/${repository}/releases/tags/${priorTag}`', tagLookupIndex + 1);
-  const latestReleaseIndex = command.indexOf("releases/latest", releaseIndex + 1);
   const comparisonIndex = command.indexOf(
     '`repos/${repository}/compare/${tagIdentity.get("source")}...main`',
-    latestReleaseIndex + 1,
+    releaseIndex + 1,
   );
   const releaseErrorIndex = command.indexOf(
     "lacks its exact immutable GitHub Release",
-    latestReleaseIndex + 1,
+    releaseIndex + 1,
   );
   const comparisonErrorIndex = command.indexOf(
     "is not reachable from current main",
@@ -470,9 +385,8 @@ function validatePendingStableReleaseClosure(command: string, label: string): vo
     || tagLookupIndex <= priorTagIndex
     || tagErrorIndex <= tagLookupIndex
     || releaseIndex <= tagLookupIndex
-    || latestReleaseIndex <= releaseIndex
-    || comparisonIndex <= latestReleaseIndex
-    || releaseErrorIndex <= latestReleaseIndex
+    || comparisonIndex <= releaseIndex
+    || releaseErrorIndex <= releaseIndex
     || comparisonErrorIndex <= comparisonIndex
   ) {
     throw new Error(`${label} must prove the prior npm latest release closure in order`);
@@ -496,10 +410,7 @@ function validatePendingStableReleaseClosure(command: string, label: string): vo
     'release?.author?.login !== "github-actions[bot]"',
     'release?.author?.type !== "Bot"',
     "!Array.isArray(release?.assets)",
-    "release.assets.length !== 0",
-    "latestRelease?.id !== release.id",
-    "latestRelease?.tag_name !== priorTag",
-    "latestRelease?.immutable !== true",
+    '!priorAssetsMatch(release.assets, priorTag.slice(1), tagIdentity.get("source"))',
     'comparison?.status !== "ahead" && comparison?.status !== "identical"',
   ]) {
     if (!command.includes(required)) {
@@ -529,13 +440,9 @@ function validateFinalStableReleaseClosure(command: string, label: string): void
     'gh api "repos/$GITHUB_REPOSITORY/releases/tags/$prior_tag"',
     tagLookupIndex + 1,
   );
-  const latestReleaseIndex = command.indexOf(
-    'gh api "repos/$GITHUB_REPOSITORY/releases/latest"',
-    releaseIndex + 1,
-  );
   const comparisonIndex = command.indexOf(
     'gh api "repos/$GITHUB_REPOSITORY/compare/$prior_source...$DEFAULT_BRANCH"',
-    latestReleaseIndex + 1,
+    releaseIndex + 1,
   );
   const comparisonGuardIndex = command.indexOf(
     'comparison?.status !== "ahead" && comparison?.status !== "identical"',
@@ -554,7 +461,7 @@ function validateFinalStableReleaseClosure(command: string, label: string): void
     terminalLatestGuardIndex + 1,
   );
   const candidateTagGuardIndex = command.indexOf(
-    "was created after package verification",
+    "changed after package verification",
     terminalRefsIndex + 1,
   );
   const priorTagGuardIndex = command.indexOf(
@@ -573,8 +480,7 @@ function validateFinalStableReleaseClosure(command: string, label: string): void
     || priorTagIndex <= priorVersionIndex
     || tagLookupIndex <= priorTagIndex
     || releaseIndex <= tagLookupIndex
-    || latestReleaseIndex <= releaseIndex
-    || comparisonIndex <= latestReleaseIndex
+    || comparisonIndex <= releaseIndex
     || comparisonGuardIndex <= comparisonIndex
     || terminalLatestIndex <= comparisonGuardIndex
     || terminalLatestGuardIndex <= terminalLatestIndex
@@ -615,10 +521,7 @@ function validateFinalStableReleaseClosure(command: string, label: string): void
     'release?.author?.login !== "github-actions[bot]"',
     'release?.author?.type !== "Bot"',
     "!Array.isArray(release?.assets)",
-    "release.assets.length !== 0",
-    "latestRelease?.id !== release.id",
-    "latestRelease?.tag_name !== priorTag",
-    "latestRelease?.immutable !== true",
+    "!priorAssetsMatch(release.assets, priorTag.slice(1), process.env.PRIOR_SOURCE)",
     'comparison?.status !== "ahead" && comparison?.status !== "identical"',
     'const terminal = JSON.parse(process.env.TERMINAL_LATEST ?? "null")',
     'if (typeof final !== "string" || terminal !== final)',
@@ -630,10 +533,10 @@ function validateFinalStableReleaseClosure(command: string, label: string): void
     'const expectedTagRef = `refs/tags/${process.env.RELEASE_TAG ?? ""}`',
     'const priorTagRef = `refs/tags/${process.env.PRIOR_TAG ?? ""}`',
     "PRIOR_TAG_IDENTITY",
-    "entries.some((entry) => entry.ref === expectedTagRef)",
+    "candidateEntries.length !== 2",
     'terminalPriorIdentity.get("object") !== initialPriorIdentity.get("object")',
     'terminalPriorIdentity.get("source") !== initialPriorIdentity.get("source")',
-    "entries.length !== 3",
+    "entries.length !== 5",
     "headEntries.length !== 1",
     "headEntries[0]?.sha !== expectedSourceSha",
     "Final remote snapshot has malformed identity data",
@@ -663,8 +566,9 @@ export function validateNpmStageWorkflow(source: string, label: string): void {
     dispatchInputs.resolved_stage_version,
     `${label} resolved_stage_version input`,
   );
+  const releaseTagInput = record(dispatchInputs.release_tag, `${label} release_tag input`);
   if (
-    Object.keys(dispatchInputs).length !== 2
+    Object.keys(dispatchInputs).length !== 3
     || publishInput.default !== false
     || publishInput.required !== false
     || publishInput.type !== "boolean"
@@ -682,16 +586,17 @@ export function validateNpmStageWorkflow(source: string, label: string): void {
   ) {
     throw new Error(`${label} must expose one empty-by-default resolved_stage_version recovery input`);
   }
-  const push = record(triggers.push, `${label} push trigger`);
   if (
-    !Array.isArray(push.branches)
-    || push.branches.length !== 1
-    || push.branches[0] !== "main"
-    || !Array.isArray(push.paths)
-    || push.paths.length !== 1
-    || push.paths[0] !== "package.json"
+    releaseTagInput.default !== ""
+    || releaseTagInput.required !== false
+    || releaseTagInput.type !== "string"
+    || typeof releaseTagInput.description !== "string"
+    || releaseTagInput.description.length === 0
   ) {
-    throw new Error(`${label} must run only for package.json pushes to main`);
+    throw new Error(`${label} must expose one empty-by-default canonical release_tag input`);
+  }
+  if (Object.keys(triggers).length !== 1) {
+    throw new Error(`${label} optional mirrors must run only through intentional manual dispatch`);
   }
   const jobs = record(workflow.jobs, `${label} jobs`);
   const select = record(jobs.select, `${label} select job`);
@@ -1028,6 +933,7 @@ export function validateNpmStageWorkflow(source: string, label: string): void {
     EXPECTED_DIGEST_SHA256: "${{ steps.artifact.outputs.digest_sha256 }}",
     EXPECTED_METADATA_SHA256: "${{ steps.artifact.outputs.metadata_sha256 }}",
     EXPECTED_SOURCE_SHA: "${{ needs.verify.outputs.source_sha }}",
+    EXPECTED_TAG_SOURCE_SHA: "${{ needs.verify.outputs.canonical_source_sha }}",
     EXPECTED_VERSION: "${{ needs.verify.outputs.package_version }}",
     GH_TOKEN: "${{ github.token }}",
     METADATA: "${{ steps.artifact.outputs.metadata }}",
@@ -1055,7 +961,6 @@ export function validateNpmStageWorkflow(source: string, label: string): void {
     'prior_version="$(FINAL_LATEST="$final_latest" node -p',
     'git ls-remote --tags "https://github.com/$GITHUB_REPOSITORY.git"',
     'gh api "repos/$GITHUB_REPOSITORY/releases/tags/$prior_tag"',
-    'gh api "repos/$GITHUB_REPOSITORY/releases/latest"',
     'gh api "repos/$GITHUB_REPOSITORY/compare/$prior_source...$DEFAULT_BRANCH"',
     'terminal_latest="$(npm view "@hraness/kb" dist-tags.latest',
     "Public npm latest changed during final release-closure verification",
@@ -1126,7 +1031,7 @@ export function validateNpmStageWorkflow(source: string, label: string): void {
   }
   validateReviewedWorkflowSemantics(
     workflow,
-    "630adfb7b23a21fe86379690c3b703a86ddd6415b005e5ca7b77e867a426bf44",
+    "8806e855b9dfa07ba2d93f6b705ab09a7e12f685cb01c6835201104dde0b4e39",
     label,
   );
 }
