@@ -493,6 +493,9 @@ describe("npm release workflows", () => {
       'const expectedName = "@hraness/kb"',
       "const minimumFiles = 190",
       "const maximumFiles = 218",
+      "const maximumEntries = 420",
+      "if (entries > maximumEntries)",
+      "maximumUnpackedBytes + maximumEntries * 512 + 1_024",
       "packageRecord.files.length !== packageRecord.entryCount",
       "unpackedSize !== packageRecord.unpackedSize",
       'createHash("sha1")',
@@ -1366,7 +1369,7 @@ describe("npm release workflows", () => {
     }
   });
 
-  test("the source/release and source-free parsers enforce the same 218-file ceiling", async () => {
+  test("the source/release and source-free parsers enforce independent 218-file and 420-entry ceilings", async () => {
     const [workflow, smoke, manifestSource] = await Promise.all([
       readFile(stageWorkflowUrl, "utf8"),
       readFile(packageSmokeUrl, "utf8"),
@@ -1374,6 +1377,8 @@ describe("npm release workflows", () => {
     ]);
     const script = workflowStepScript(workflow, "Rebind downloaded package");
     expect(script).toContain("const maximumFiles = 218;");
+    expect(script).toContain("const maximumEntries = 420;");
+    expect(script).toContain("maximumUnpackedBytes + maximumEntries * 512 + 1_024");
     expect(smoke).toContain("const maximumPackageFiles = 218;");
     const manifest = JSON.parse(manifestSource) as { readonly version: string };
     const root = await mkdtemp(join(tmpdir(), "kb-stage-file-count-"));
@@ -1456,6 +1461,58 @@ describe("npm release workflows", () => {
         } else {
           expect(staged.exitCode).not.toBe(0);
           expect(staged.stderr).toContain("npm-pack.json has an invalid or excessive entryCount");
+        }
+      }
+
+      // npm metadata counts regular files; raw USTAR additionally counts directories.
+      // Each variant starts from the original archive and metadata, not the 219-file mutation.
+      for (const entryCount of [420, 421]) {
+        const metadata = JSON.parse(metadataSource) as Array<Record<string, unknown>>;
+        const headers: Buffer[] = [];
+        for (let index = originalInventory.entryCount; index < entryCount; index += 1) {
+          const path = `dist/package-entry-count-boundary-${String(index)}`;
+          expect(originalInventory.entries.some((entry) => entry.path === path)).toBe(false);
+          const header = Buffer.from(tar.subarray(template.offset, template.offset + 512));
+          header.fill(0, 0, 100);
+          header.write(`package/${path}`, 0, 100, "ascii");
+          header.write("0000755\0", 100, 8, "ascii");
+          header.write("00000000000\0", 124, 12, "ascii");
+          header[156] = 53;
+          header.fill(0, 157, 257);
+          header.fill(0, 345, 500);
+          writeHeaderChecksum(header, 0);
+          headers.push(header);
+        }
+        await persistPackedTarMutation(
+          artifactDirectory,
+          tarballName,
+          Buffer.concat([tar.subarray(0, trailerOffset), ...headers, Buffer.alloc(1_024)]),
+          metadata,
+        );
+        if (entryCount === 420) {
+          const accepted = await inspectPackageArtifact(tarball);
+          expect(accepted.entryCount).toBe(420);
+          expect(accepted.fileCount).toBe(originalInventory.fileCount);
+          expect(accepted.unpackedBytes).toBe(originalInventory.unpackedBytes);
+        } else {
+          await expect(inspectPackageArtifact(tarball)).rejects.toThrow(
+            "Package entry count 421 is outside the reviewed range 190-420",
+          );
+        }
+        const staged = await runWorkflowScript(script, {
+          EXPECTED_SOURCE_SHA: "a".repeat(40),
+          EXPECTED_TARBALL_NAME: tarballName,
+          EXPECTED_VERSION: manifest.version,
+          GITHUB_OUTPUT: join(root, "github-output.txt"),
+          RUNNER_TEMP: root,
+        });
+        if (entryCount === 420) {
+          if (staged.exitCode !== 0) {
+            throw new Error(`420-entry package was rejected:\n${staged.stderr}${staged.stdout}`);
+          }
+        } else {
+          expect(staged.exitCode).not.toBe(0);
+          expect(staged.stderr).toContain("Packed package.json tar contains too many entries");
         }
       }
     } finally {

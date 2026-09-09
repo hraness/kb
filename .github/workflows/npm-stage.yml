@@ -771,6 +771,7 @@ jobs:
           const { gunzipSync } = require("node:zlib");
           const minimumFiles = 190;
           const maximumFiles = 218;
+          const maximumEntries = 420;
           const minimumPackedBytes = 950_000;
           const maximumPackedBytes = 1_200_000;
           const minimumUnpackedBytes = 4_500_000;
@@ -915,7 +916,7 @@ jobs:
             throw new Error("Downloaded tarball differs from npm-pack.json SHA-1 or SHA-512");
           }
           const tar = gunzipSync(archiveBytes, {
-            maxOutputLength: maximumUnpackedBytes + maximumFiles * 1_024 + 1_024,
+            maxOutputLength: maximumUnpackedBytes + maximumEntries * 512 + 1_024,
           });
           const tarText = (header, start, length) => {
             const field = header.subarray(start, start + length);
@@ -1013,7 +1014,7 @@ jobs:
             }
             offset += padded;
             entries += 1;
-            if (entries > maximumFiles * 2) {
+            if (entries > maximumEntries) {
               throw new Error("Packed package.json tar contains too many entries");
             }
           }
