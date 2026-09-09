@@ -1,6 +1,5 @@
 // @bun
-// src/workflow.ts
-import { serialize } from "v8";
+// src/workflow-model.ts
 var MAX_WORKFLOW_NODES = 64;
 var MAX_WORKFLOW_CONCURRENCY = 8;
 var MAX_GIT_WORKFLOW_CONCURRENCY = 4;
@@ -178,131 +177,154 @@ function checkedOutputBytes(value) {
   }
   return maximum;
 }
+// src/workflow-runtime.ts
+import { Cause, Effect as Effect3, Exit, Option } from "effect";
+
+// src/workflow-program.ts
+import { Effect as Effect2, Fiber } from "effect";
+
+// src/workflow-platform.ts
+import { serialize } from "v8";
+import { Effect } from "effect";
+function admitCallback(id, run) {
+  const completion = Promise.resolve().then(run).then((value) => ({ ok: true, id, value })).catch((error) => ({ ok: false, id, error }));
+  return { completion };
+}
+function awaitCallback(callback) {
+  return Effect.promise(() => callback.completion);
+}
+function nextCallback(callbacks) {
+  return Effect.promise(() => Promise.race(Array.from(callbacks, ({ completion }) => completion)));
+}
 function structuredOutputBytes(value, node) {
-  try {
-    return serialize(value).byteLength;
-  } catch (error) {
-    throw new WorkflowRunError("node-failed", `Workflow node ${JSON.stringify(node)} returned a result that cannot be structurally serialized.`, { node, cause: error });
+  return Effect.try({
+    try: () => serialize(value).byteLength,
+    catch: (error) => new WorkflowRunError("node-failed", `Workflow node ${JSON.stringify(node)} returned a result that cannot be structurally serialized.`, { node, cause: error })
+  });
+}
+
+class WorkflowListenerRemovalFailure {
+  reason;
+  constructor(reason) {
+    this.reason = reason;
   }
 }
+function workflowCancellation(signal) {
+  return Effect.acquireRelease(Effect.sync(() => {
+    const controller = new AbortController;
+    let abortedByCaller = false;
+    const abort = () => {
+      abortedByCaller = true;
+      controller.abort(signal?.reason);
+    };
+    signal?.addEventListener("abort", abort, { once: true });
+    return { controller, abort, get abortedByCaller() {
+      return abortedByCaller;
+    } };
+  }), ({ abort }) => Effect.sync(() => {
+    try {
+      signal?.removeEventListener("abort", abort);
+    } catch (error) {
+      throw new WorkflowListenerRemovalFailure(error);
+    }
+  }));
+}
+
+// src/workflow-program.ts
 function abortedError() {
   return new WorkflowRunError("aborted", "Workflow execution was aborted.");
 }
-async function runWorkflow(definition, options) {
-  validateWorkflow(definition);
-  const concurrency = checkedConcurrency(options.concurrency);
-  const limits = resourceLimits(concurrency, options.resourceConcurrency);
-  const outputLimit = checkedOutputBytes(options.maxOutputBytes);
-  if (options.signal?.aborted === true)
-    throw abortedError();
-  const controller = new AbortController;
-  let abortedByCaller = false;
-  const abort = () => {
-    abortedByCaller = true;
-    controller.abort(options.signal?.reason);
-  };
-  options.signal?.addEventListener("abort", abort, { once: true });
-  const pending = new Set(definition.nodes.map(({ id }) => id));
-  const completed = new Set;
-  const values = new Map;
-  const active = new Map;
-  const activeResource = new Map;
-  const resourceCounts = {
-    default: 0,
-    git: 0,
-    qmd: 0
-  };
-  let failure;
-  let outputBytes = 0;
-  const completedValue = (id) => {
-    if (!values.has(id)) {
-      throw new Error(`Workflow result ${JSON.stringify(id)} is unavailable after its dependency completed.`);
-    }
-    return values.get(id);
-  };
-  const launch = (node) => {
-    const resource = node.resource ?? "default";
-    pending.delete(node.id);
-    resourceCounts[resource] += 1;
-    activeResource.set(node.id, resource);
-    const needs = needsFor(node);
-    const allowedResults = new Set(needs);
-    const dependencyResults = new Map(needs.map((id) => [id, completedValue(id)]));
-    const context = {
-      input: options.input,
-      kb: options.kb,
-      signal: controller.signal,
-      results: dependencyResults,
-      result: (id) => {
-        if (!allowedResults.has(id)) {
-          throw new Error(`Workflow result ${JSON.stringify(id)} is not a declared dependency of ${JSON.stringify(node.id)}.`);
-        }
-        return dependencyResults.get(id);
+function executeWorkflow(definition, options, policy) {
+  return Effect2.gen(function* () {
+    const cancellation = yield* workflowCancellation(options.signal);
+    const { controller } = cancellation;
+    const pending = new Set(definition.nodes.map(({ id }) => id));
+    const completed = new Set;
+    const values = new Map;
+    const active = new Map;
+    let failure;
+    let outputBytes = 0;
+    const completedValue = (id) => {
+      if (!values.has(id)) {
+        throw new Error(`Workflow result ${JSON.stringify(id)} is unavailable after its dependency completed.`);
       }
+      return values.get(id);
     };
-    const outcome = Promise.resolve().then(() => node.run(context)).then((value) => ({ ok: true, id: node.id, value })).catch((error) => ({
-      ok: false,
-      id: node.id,
-      error
-    }));
-    active.set(node.id, outcome);
-  };
-  try {
-    while (completed.size + (failure === undefined ? 0 : pending.size) < definition.nodes.length) {
-      if (controller.signal.aborted && failure === undefined)
-        failure = abortedError();
-      if (failure === undefined) {
-        for (const node of definition.nodes) {
-          if (!pending.has(node.id) || active.size >= concurrency)
-            continue;
-          if (!needsFor(node).every((dependency) => completed.has(dependency)))
-            continue;
-          const resource2 = node.resource ?? "default";
-          if (resourceCounts[resource2] >= limits[resource2])
-            continue;
-          launch(node);
+    const contextFor = (node) => {
+      const needs = needsFor(node);
+      const allowedResults = new Set(needs);
+      const dependencyResults = new Map(needs.map((id) => [id, completedValue(id)]));
+      const context = {
+        input: options.input,
+        kb: options.kb,
+        signal: controller.signal,
+        results: dependencyResults,
+        result: (id) => {
+          if (!allowedResults.has(id)) {
+            throw new Error(`Workflow result ${JSON.stringify(id)} is not a declared dependency of ${JSON.stringify(node.id)}.`);
+          }
+          return dependencyResults.get(id);
         }
+      };
+      return context;
+    };
+    while (completed.size < definition.nodes.length && failure === undefined) {
+      if (controller.signal.aborted) {
+        failure = abortedError();
+        break;
+      }
+      for (const node of definition.nodes) {
+        if (!pending.has(node.id) || active.size >= policy.concurrency)
+          continue;
+        if (!needsFor(node).every((dependency) => completed.has(dependency)))
+          continue;
+        const resource = node.resource ?? "default";
+        const occupied = Array.from(active.values()).filter((task3) => task3.resource === resource).length;
+        if (occupied >= policy.limits[resource])
+          continue;
+        const context = contextFor(node);
+        const task2 = yield* Effect2.uninterruptible(Effect2.gen(function* () {
+          const callback = yield* Effect2.sync(() => admitCallback(node.id, () => node.run(context)));
+          const fiber = yield* Effect2.forkScoped(Effect2.uninterruptible(awaitCallback(callback)));
+          return { callback, fiber, resource };
+        }));
+        pending.delete(node.id);
+        active.set(node.id, task2);
       }
       if (active.size === 0) {
-        if (failure !== undefined)
-          break;
-        throw new Error("Workflow scheduler made no progress after validation.");
+        return yield* Effect2.die(new Error("Workflow scheduler made no progress after validation."));
       }
-      const outcome = await Promise.race(active.values());
+      const outcome = yield* nextCallback(Array.from(active.values(), ({ callback }) => callback));
+      const task = active.get(outcome.id);
+      if (task !== undefined)
+        yield* Fiber.await(task.fiber).pipe(Effect2.asVoid);
       active.delete(outcome.id);
-      const resource = activeResource.get(outcome.id);
-      if (resource !== undefined)
-        resourceCounts[resource] -= 1;
-      activeResource.delete(outcome.id);
-      if (outcome.ok && failure === undefined) {
-        try {
-          const resultBytes = structuredOutputBytes(outcome.value, outcome.id);
-          if (resultBytes > outputLimit - outputBytes) {
-            throw new WorkflowRunError("output-limit", `Workflow results exceed the ${outputLimit}-byte output limit at node ${JSON.stringify(outcome.id)}.`, { node: outcome.id });
-          }
-          outputBytes += resultBytes;
+      if (outcome.ok) {
+        const measured = yield* Effect2.either(structuredOutputBytes(outcome.value, outcome.id));
+        if (measured._tag === "Left") {
+          failure = measured.left;
+        } else if (measured.right > policy.outputLimit - outputBytes) {
+          failure = new WorkflowRunError("output-limit", `Workflow results exceed the ${policy.outputLimit}-byte output limit at node ${JSON.stringify(outcome.id)}.`, { node: outcome.id });
+        } else {
+          outputBytes += measured.right;
           values.set(outcome.id, outcome.value);
           completed.add(outcome.id);
-        } catch (error) {
-          controller.abort(error);
-          failure = error instanceof WorkflowRunError ? error : new WorkflowRunError("node-failed", `Workflow node ${JSON.stringify(outcome.id)} failed while validating its result.`, { node: outcome.id, cause: error });
         }
-      } else if (!outcome.ok && failure === undefined) {
+        if (failure !== undefined)
+          controller.abort(failure);
+      } else {
         controller.abort(outcome.error);
-        failure = abortedByCaller ? abortedError() : new WorkflowRunError("node-failed", `Workflow node ${JSON.stringify(outcome.id)} failed.`, { node: outcome.id, cause: outcome.error });
+        failure = cancellation.abortedByCaller ? abortedError() : new WorkflowRunError("node-failed", `Workflow node ${JSON.stringify(outcome.id)} failed.`, { node: outcome.id, cause: outcome.error });
       }
     }
-    while (active.size > 0) {
-      const outcome = await Promise.race(active.values());
-      active.delete(outcome.id);
-    }
+    yield* Effect2.forEach(active.values(), ({ fiber }) => Fiber.await(fiber).pipe(Effect2.asVoid), { discard: true });
     if (failure !== undefined)
-      throw failure;
+      return yield* Effect2.fail(failure);
     let finalOutputBytes = 0;
     for (const node of definition.nodes) {
-      const resultBytes = structuredOutputBytes(values.get(node.id), node.id);
-      if (resultBytes > outputLimit - finalOutputBytes) {
-        throw new WorkflowRunError("output-limit", `Workflow results exceed the ${outputLimit}-byte output limit at node ${JSON.stringify(node.id)}.`, { node: node.id });
+      const resultBytes = yield* structuredOutputBytes(values.get(node.id), node.id);
+      if (resultBytes > policy.outputLimit - finalOutputBytes) {
+        return yield* Effect2.fail(new WorkflowRunError("output-limit", `Workflow results exceed the ${policy.outputLimit}-byte output limit at node ${JSON.stringify(node.id)}.`, { node: node.id }));
       }
       finalOutputBytes += resultBytes;
     }
@@ -320,9 +342,30 @@ async function runWorkflow(definition, options) {
       })),
       results: orderedValues
     };
-  } finally {
-    options.signal?.removeEventListener("abort", abort);
-  }
+  });
 }
 
+// src/workflow-runtime.ts
+async function runWorkflow(definition, options) {
+  validateWorkflow(definition);
+  const concurrency = checkedConcurrency(options.concurrency);
+  const limits = resourceLimits(concurrency, options.resourceConcurrency);
+  const outputLimit = checkedOutputBytes(options.maxOutputBytes);
+  if (options.signal?.aborted === true) {
+    throw new WorkflowRunError("aborted", "Workflow execution was aborted.");
+  }
+  const exit = await Effect3.runPromiseExit(Effect3.scoped(executeWorkflow(definition, options, { concurrency, limits, outputLimit })));
+  if (Exit.isSuccess(exit))
+    return exit.value;
+  const cleanup = Array.from(Cause.defects(exit.cause)).find((defect2) => defect2 instanceof WorkflowListenerRemovalFailure);
+  if (cleanup !== undefined)
+    throw cleanup.reason;
+  const failure = Cause.failureOption(exit.cause);
+  if (Option.isSome(failure))
+    throw failure.value;
+  const defect = Cause.dieOption(exit.cause);
+  if (Option.isSome(defect))
+    throw defect.value;
+  throw new Error("Workflow owner was interrupted without a caller cancellation outcome.");
+}
 export { MAX_WORKFLOW_NODES, MAX_WORKFLOW_CONCURRENCY, MAX_GIT_WORKFLOW_CONCURRENCY, DEFAULT_WORKFLOW_OUTPUT_BYTES, MAX_WORKFLOW_OUTPUT_BYTES, WorkflowRunError, defineWorkflow, workflowFromUnknown, runWorkflow };

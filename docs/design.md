@@ -322,6 +322,15 @@ source revision, and atomically replace the source file. Different-note writes
 do not share a lock or graph file. Git remains the cross-worktree review and
 merge mechanism.
 
+The single-note transaction has one internal Effect owner behind the Promise
+API. It retains the lock through every admitted native write and directory
+sync, including a sibling sync still pending after another fails. A visible
+replacement and its directory durability are separate milestones: failure
+after installation cannot authorize overwriting that replacement with older
+bytes. Existing revision, inode and no-clobber recovery checks decide which
+recovery operation is safe. Temporary cleanup and outer lock release keep
+their established error precedence.
+
 ## Exact metadata is authored
 
 Frontmatter is parsed as typed, nested data rather than flattened strings. Scalars retain their string, number, boolean, or null type; arrays and objects retain their structure. Tags from frontmatter are normalized for matching while the original metadata remains available in structured output.
@@ -461,6 +470,13 @@ structured-output byte limit. Failure or abort stops dependent nodes from
 starting and waits for already-running siblings to settle. The packaged
 workflows are ordinary imports, accept explicit inputs, and return structured
 results without writing the vault.
+
+One internal Effect program owns that scheduling lifetime. Native callbacks
+still enter through the original Promise microtask and settle through the
+native Promise race, preserving observable ordering and raw failure reasons.
+An interrupted fiber does not stand in for a settled callback. The public
+runner continues to return a Promise, so callers need no Effect runtime or
+service configuration.
 
 ```ts
 import { openKnowledgeBase } from "@hraness/kb/sdk";

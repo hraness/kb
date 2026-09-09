@@ -1,6 +1,6 @@
 {
   "name": "@hraness/kb",
-  "version": "0.19.2",
+  "version": "0.19.3",
   "description": "A knowledge base for coding agents, built from Markdown, backlinks, semantic search, and Git context.",
   "license": "MIT",
   "contentPolicy": {
@@ -277,6 +277,10 @@
     "src/agent-context.ts",
     "src/agent-guide-audit.ts",
     "src/authoring.ts",
+    "src/authoring-model.ts",
+    "src/authoring-platform.ts",
+    "src/authoring-program.ts",
+    "src/authoring-runtime.ts",
     "src/attachments.ts",
     "src/benchmark.ts",
     "src/capture.ts",
@@ -364,6 +368,10 @@
     "src/untrusted-content.ts",
     "src/vault.ts",
     "src/workflow.ts",
+    "src/workflow-model.ts",
+    "src/workflow-platform.ts",
+    "src/workflow-program.ts",
+    "src/workflow-runtime.ts",
     "src/workflows/decision-context.ts",
     "src/workflows/explain-change.ts",
     "src/workflows/index.ts",
@@ -388,8 +396,9 @@
     "url-metadata:tool:build": "bun ./dist/cli.js url-metadata tool build",
     "url-metadata:tool:check": "bun ./dist/cli.js url-metadata tool check",
     "test:package": "bun run ./scripts/package-smoke.ts",
-    "check": "bun run check:workflows && bun run check:portfolio-inventory && bun run check:installed-command-docs && bun run typecheck && bun run build && bun run test:package && bun run test && bun run url-metadata:tool:check",
-    "prepack": "bun run check"
+    "check": "bun run check:effect && bun run check:workflows && bun run check:portfolio-inventory && bun run check:installed-command-docs && bun run typecheck && bun run build && bun run test:package && bun run test && bun run url-metadata:tool:check",
+    "prepack": "bun run check",
+    "check:effect": "bun run scripts/check-effect-policy.ts && bun test ./scripts/check-effect-architecture.test.ts"
   },
   "dependencies": {
     "@hraness/oh": "github:hraness/oh#v0.2.0",
@@ -398,7 +407,8 @@
     "agent-browser": "0.32.3",
     "defuddle": "0.19.1",
     "yaml": "^2.9.0",
-    "zod": "^4.4.3"
+    "zod": "^4.4.3",
+    "effect": "3.22.1"
   },
   "devDependencies": {
     "@types/bun": "^1.3.14",
