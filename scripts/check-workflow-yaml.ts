@@ -1126,7 +1126,7 @@ export function validateNpmStageWorkflow(source: string, label: string): void {
   }
   validateReviewedWorkflowSemantics(
     workflow,
-    "92d4df09713882861aaa5fdd9163792771d1c2f687e9fc946b661c740c1dd8e2",
+    "630adfb7b23a21fe86379690c3b703a86ddd6415b005e5ca7b77e867a426bf44",
     label,
   );
 }

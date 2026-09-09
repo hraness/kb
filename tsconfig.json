@@ -167,6 +167,9 @@
     "src/**/*.ts",
     "src/**/*.tsx",
     "examples/**/*.ts",
-    "examples/**/*.tsx"
+    "examples/**/*.tsx",
+    "scripts/check-effect-architecture.ts",
+    "scripts/check-effect-architecture.test.ts",
+    "scripts/check-effect-policy.ts"
   ]
 }

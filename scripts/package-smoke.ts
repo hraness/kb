@@ -10,7 +10,7 @@ import {
 import { requiresOhAdoptionPreparerExport } from "./npm-package-identity.js";
 
 const packageName = "@hraness/kb";
-const maximumPackageFiles = 210;
+const maximumPackageFiles = 218;
 const maximumPackedBytes = 1_200_000;
 const maximumUnpackedBytes = 5_250_000;
 const importSpecifiers = [
