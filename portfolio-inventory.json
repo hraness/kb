@@ -8,7 +8,7 @@
       "name": "@hraness/kb",
       "path": ".",
       "visibility": "public",
-      "version": "0.19.5"
+      "version": "0.19.6"
     }
   ],
   "dependencies": [
@@ -18,13 +18,6 @@
       "specifier": "github:hraness/oh#v0.2.0",
       "to": "@hraness/oh",
       "sourceRepository": "hraness/oh"
-    },
-    {
-      "from": "@hraness/kb",
-      "scope": "runtime",
-      "specifier": "github:hraness/sweet-cookie#v0.4.4",
-      "to": "@steipete/sweet-cookie",
-      "sourceRepository": "hraness/sweet-cookie"
     },
     {
       "from": "@hraness/kb",

@@ -478,7 +478,7 @@ export function filterCookieProviderResult(value: unknown, target: URL): CookieP
   }
   // Browser databases distinguish host-only, Domain, partitioned, and container
   // cookies. A provider that drops that provenance cannot be replayed safely.
-  // Require the hostOnly field retained by the pinned provider fork; this also
+  // Require the hostOnly field retained by the pinned provider; this also
   // makes an install with an incompatible provider fail closed.
   const provenancePreserving = value.cookies.filter((cookie) =>
     isRecord(cookie) && typeof cookie.hostOnly === "boolean");

@@ -35,7 +35,7 @@ describe("clip doctor", () => {
         dependencies: {
           defuddle: "^0.19.1",
           "agent-browser": "0.32.3",
-          "@steipete/sweet-cookie": "github:hraness/sweet-cookie#v0.4.4",
+          "@steipete/sweet-cookie": "0.4.3",
           "@tobilu/qmd": "2.5.3",
         },
       })],
@@ -43,7 +43,7 @@ describe("clip doctor", () => {
       [join(consumerRoot, "node_modules", "agent-browser", "package.json"), packageManifest("agent-browser", "0.32.3")],
       [
         join(consumerRoot, "node_modules", "@steipete", "sweet-cookie", "package.json"),
-        packageManifest("@steipete/sweet-cookie", "0.4.4"),
+        packageManifest("@steipete/sweet-cookie", "0.4.3"),
       ],
       [join(qmdRoot, "package.json"), packageManifest("@tobilu/qmd", "2.5.3")],
       [join(qmdRoot, "node_modules", "sqlite-vec", "package.json"), packageManifest("sqlite-vec", "0.1.9")],
@@ -138,13 +138,13 @@ describe("clip doctor", () => {
     });
     expect(report.dependencies.find(({ name }) => name === "@steipete/sweet-cookie")).toEqual({
       name: "@steipete/sweet-cookie",
-      expectedVersion: "0.4.4",
-      declaredVersion: "github:hraness/sweet-cookie#v0.4.4",
-      installedVersion: "0.4.4",
+      expectedVersion: "0.4.3",
+      declaredVersion: "0.4.3",
+      installedVersion: "0.4.3",
       status: "ready",
     });
     expect(renderDoctorReport(report)).toContain(
-      "@steipete/sweet-cookie: ready (declared github:hraness/sweet-cookie#v0.4.4; installed 0.4.4; expected 0.4.4)",
+      "@steipete/sweet-cookie: ready (declared 0.4.3; installed 0.4.3; expected 0.4.3)",
     );
     expect(report.search.keywordOnly).toEqual({ status: "ready", modelRequired: false });
     expect(report.search.semanticPrerequisites).toMatchObject({
