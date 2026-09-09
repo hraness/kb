@@ -14,7 +14,7 @@ system.
 Bun 1.3.14 or newer is required.
 
 ```sh
-bun add --global @hraness/kb@0.19.2
+bun add --global --ignore-scripts https://github.com/hraness/kb/releases/download/v0.19.3/hraness-kb-0.19.3.tgz
 kb --help
 ```
 
@@ -80,7 +80,7 @@ neither the vault nor a hosted knowledge service.
 
 ## Links
 
-[Install `@hraness/kb` from npm](https://www.npmjs.com/package/@hraness/kb) ·
+[Install KB from GitHub Releases](https://github.com/hraness/kb/releases) ·
 [KB source on GitHub](https://github.com/hraness/kb) ·
 [KB overview](https://hraness.com/kb)
 
@@ -253,16 +253,16 @@ Treat the knowledge base as repository-adjacent durable memory. Authored Markdow
 
 ## Installation reference
 
-[Bun](https://bun.sh/docs/installation) is the required runtime.
+[Bun](https://bun.sh/docs/installation) is the required runtime. GitHub Releases are the canonical distribution; npm is an optional mirror. The examples target the prepared `0.19.3` release and become available when its GitHub release is published. Existing `0.19.2` npm installs remain available during that transition. For signed artifact verification, see [the release procedure](docs/publishing.md#verify-a-published-release).
 
 ### Tell your coding agent to install it
 
 Copy this prompt into Codex, Claude Code, or another coding agent:
 
 ```text
-Install the `kb` Agent Skill from `hraness/kb#v0.19.2` with the standard skills
+Install the `kb` Agent Skill from `hraness/kb#v0.19.3` with the standard skills
 CLI. Use the skill's runtime instructions to install the exact
-`@hraness/kb@0.19.2` registry release only when the command is missing. Verify it
+versioned GitHub release archive only when the command is missing. Verify it
 with `kb doctor` and `kb --help`, but do not initialize or modify a vault until
 I ask.
 ```
@@ -270,33 +270,33 @@ I ask.
 Install the single public skill with either runner:
 
 ```sh
-npx skills add hraness/kb#v0.19.2
-bunx skills add hraness/kb#v0.19.2
+npx skills add hraness/kb#v0.19.3
+bunx skills add hraness/kb#v0.19.3
 ```
 
 Both commands discover the same `kb` skill and install it into the selected
 agent runner. Skill installation is inert: it does not initialize a vault,
 refresh a catalog, or edit Markdown. When invoked, the skill uses an existing
 `kb` command or, when the command is missing, checks for Bun and installs the
-CLI from the immutable `@hraness/kb@0.19.2` npm version.
+CLI from the immutable GitHub release archive.
 
 The public skills CLI reads `skills/kb/` from the repository. The immutable
-`0.19.2` npm package includes the same tree under
+`0.19.3` packed release includes the same tree under
 `node_modules/@hraness/kb/skills/kb/`, and the package check verifies that the
 installed skill is byte-identical to the repository source.
 
 Install the two global commands with Bun:
 
 ```sh
-bun add --global @hraness/kb@0.19.2
+bun add --global --ignore-scripts https://github.com/hraness/kb/releases/download/v0.19.3/hraness-kb-0.19.3.tgz
 kb --help
 kb-evaluation-builder --help
 ```
 
-The same registry package can be installed with npm:
+The same GitHub archive can be installed with npm:
 
 ```sh
-npm install --global --ignore-scripts @hraness/kb@0.19.2
+npm install --global --ignore-scripts https://github.com/hraness/kb/releases/download/v0.19.3/hraness-kb-0.19.3.tgz
 kb --help
 ```
 
@@ -306,10 +306,10 @@ above disables dependency lifecycle scripts. Optional native search and
 rendered-browser setup remain unavailable until the relevant scripts are
 reviewed and enabled; run `kb doctor` to inspect the resulting capabilities.
 
-For programmatic use, add the exact npm version to a Bun project:
+For programmatic use, add the versioned GitHub archive to a Bun project:
 
 ```sh
-bun add --exact @hraness/kb@0.19.2
+bun add --exact --ignore-scripts https://github.com/hraness/kb/releases/download/v0.19.3/hraness-kb-0.19.3.tgz
 ```
 
 The resulting dependency should remain exact:
@@ -317,17 +317,16 @@ The resulting dependency should remain exact:
 ```json
 {
   "dependencies": {
-    "@hraness/kb": "0.19.2"
+    "@hraness/kb": "https://github.com/hraness/kb/releases/download/v0.19.3/hraness-kb-0.19.3.tgz"
   }
 }
 ```
 
-Version 0.19.2 retains three public GitHub dependencies: `@hraness/oh` at
+Version 0.19.3 retains three public GitHub dependencies: `@hraness/oh` at
 immutable release `v0.2.0` for closure verification,
 `@steipete/sweet-cookie` at Hraness release `v0.4.4` for the cookie-scope safety
 fork, and `@tobilu/qmd` at commit
-`aa993dceb3ef8cfb71d470554ca437570f5a2b3c` for store-local model behavior. A
-registry installation therefore needs Git and public GitHub access while it
+`aa993dceb3ef8cfb71d470554ca437570f5a2b3c` for store-local model behavior. Installation also needs Git and public GitHub access while it
 resolves those dependencies. They remain part of this release's supported
 installation contract until equivalent registry releases are available.
 
@@ -593,9 +592,9 @@ ritual. The package smoke test keeps future tagged packages byte-identical to
 that source tree.
 
 ```sh
-npx skills add hraness/kb#v0.19.2
+npx skills add hraness/kb#v0.19.3
 # or
-bunx skills add hraness/kb#v0.19.2
+bunx skills add hraness/kb#v0.19.3
 ```
 
 The skill invokes the installed `kb` command without depending on a repository
@@ -609,6 +608,10 @@ discovery omits it.
 See [Design](docs/design.md), [Portfolio federation](docs/portfolio.md), [Agent workflow](docs/agent-workflow.md), [PDF capture](docs/pdf.md), and [Contributing](CONTRIBUTING.md) for the durable contracts and development gate. hraness/kb is available under the [MIT License](LICENSE).
 
 ## Release notes
+
+### Upgrade to v0.19.3
+
+GitHub Releases become the canonical installation source. Each release binds its packed archive to the reviewed source and signed GitHub build identity. npm remains an optional mirror and older installations keep working. The SDK and CLI interfaces do not change.
 
 ### Upgrade to v0.19.2
 

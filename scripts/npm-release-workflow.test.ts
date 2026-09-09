@@ -25,8 +25,6 @@ const packageSmokeUrl = new URL("./package-smoke.ts", import.meta.url);
 const packagePreparationUrl = new URL("./prepare-npm-package.ts", import.meta.url);
 const packageArtifactUrl = new URL("./package-artifact.ts", import.meta.url);
 const packageIdentityUrl = new URL("./npm-package-identity.ts", import.meta.url);
-const publishingGuideUrl = new URL("../docs/publishing.md", import.meta.url);
-const agentGuideUrl = new URL("../AGENTS.md", import.meta.url);
 const npmRegistry = "https://registry.npmjs.org";
 const repository = fileURLToPath(new URL("../", import.meta.url));
 const firstPublicSourceCommit = "58bd07b69dd40ad83bb2e49b5368adac75fb12fc";
@@ -385,7 +383,7 @@ describe("npm release workflows", () => {
       readonly version?: unknown;
     };
     expect(manifest).toEqual(expect.objectContaining({
-      version: "0.19.2",
+      version: "0.19.3",
       description: "A knowledge base for coding agents, built from Markdown, backlinks, semantic search, and Git context.",
       keywords: [
         "knowledge-base",
@@ -405,7 +403,7 @@ describe("npm release workflows", () => {
     const opening = readme.slice(0, 1_500).replace(/\s+/gu, " ").toLowerCase();
     expect(opening).toContain(String(manifest.description).toLowerCase());
     for (const link of [
-      "[Install `@hraness/kb` from npm](https://www.npmjs.com/package/@hraness/kb)",
+      "[Install KB from GitHub Releases](https://github.com/hraness/kb/releases)",
       "[KB source on GitHub](https://github.com/hraness/kb)",
       "[KB overview](https://hraness.com/kb)",
     ]) expect(readme).toContain(link);
@@ -454,7 +452,7 @@ describe("npm release workflows", () => {
       "tarball_name: ${{ steps.artifact.outputs.tarball_name }}",
       "bun install --frozen-lockfile --ignore-scripts",
       "bun run check",
-      "scripts/prepare-npm-package.ts",
+      'scripts/github-release.ts download "$canonical_directory"',
       "scripts/package-smoke.ts",
       "npm-package.sha256",
       "$GITHUB_SHA-$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT",
@@ -577,7 +575,7 @@ describe("npm release workflows", () => {
     expect(workflow).not.toContain("secrets.NPM_TOKEN");
     expect(workflow).not.toContain("NODE_AUTH_TOKEN");
     expect(workflow).not.toMatch(/\bnpm publish\b/u);
-    expect(workflow).toContain('branches: [main]\n    paths:\n      - "package.json"');
+    expect(workflow).not.toContain("\n  push:");
     expect(workflow).toContain("workflow_dispatch:");
     expect(workflow).toContain("publish_to_npm:");
   });
@@ -1136,7 +1134,8 @@ describe("npm release workflows", () => {
             'if [[ "$1" == ls-remote && "$2" == --exit-code ]]; then',
             '  printf \'%s\\trefs/heads/main\\n\' "$MOCK_TERMINAL_MAIN_SHA"',
             '  if [[ "${MOCK_CANDIDATE_TAG_PRESENT:-false}" == true ]]; then',
-            '    printf \'%s\\trefs/tags/v0.19.1\\n\' "$MOCK_SOURCE_SHA"',
+            '    printf \'%s\\trefs/tags/v0.19.1\\n\' "$MOCK_CANDIDATE_OBJECT_SHA"',
+            '    printf \'%s\\trefs/tags/v0.19.1^{}\\n\' "$MOCK_CANONICAL_SOURCE_SHA"',
             "  fi",
             '  if [[ "${MOCK_PRIOR_TAG_DRIFT:-false}" == true ]]; then',
             '    printf \'%s\\trefs/tags/v0.19.0\\n\' "$MOCK_TERMINAL_PRIOR_OBJECT_SHA"',
@@ -1192,6 +1191,7 @@ describe("npm release workflows", () => {
 
       const runBoundary = async (options: Readonly<{
         candidateTagPresent?: boolean;
+        canonicalSourceSha?: string;
         comparisonStatus?: string;
         release?: Readonly<Record<string, unknown>>;
         terminalLatest?: string;
@@ -1237,13 +1237,16 @@ describe("npm release workflows", () => {
           EXPECTED_DIGEST_SHA256: sha256(digest),
           EXPECTED_METADATA_SHA256: sha256(metadata),
           EXPECTED_SOURCE_SHA: expectedSourceSha,
+          EXPECTED_TAG_SOURCE_SHA: options.canonicalSourceSha ?? expectedSourceSha,
           EXPECTED_VERSION: "0.19.1",
           GH_TOKEN: "test-token",
           GITHUB_REF: "refs/heads/main",
           GITHUB_REPOSITORY: "hraness/kb",
           GITHUB_SHA: expectedSourceSha,
           METADATA: metadataPath,
-          MOCK_CANDIDATE_TAG_PRESENT: options.candidateTagPresent === true ? "true" : "false",
+          MOCK_CANDIDATE_TAG_PRESENT: options.candidateTagPresent === false ? "false" : "true",
+          MOCK_CANDIDATE_OBJECT_SHA: "f".repeat(40),
+          MOCK_CANONICAL_SOURCE_SHA: options.canonicalSourceSha ?? expectedSourceSha,
           MOCK_COMMAND_LOG: commandLog,
           MOCK_COMPARISON_JSON: comparisonPath,
           MOCK_LATEST_RELEASE_JSON: latestReleasePath,
@@ -1280,9 +1283,13 @@ describe("npm release workflows", () => {
       expect(candidateTagIndex).toBeGreaterThan(latestIndices[2]!);
       expect(mutationIndex).toBeGreaterThan(candidateTagIndex);
 
-      const candidateCollision = await runBoundary({ candidateTagPresent: true });
+      const delayedMirror = await runBoundary({ canonicalSourceSha: "e".repeat(40) });
+      expect(delayedMirror.result.exitCode).toBe(0);
+      expect(delayedMirror.commandLog).toContain("npm stage publish");
+
+      const candidateCollision = await runBoundary({ candidateTagPresent: false });
       expect(candidateCollision.result.exitCode).not.toBe(0);
-      expect(candidateCollision.result.stderr).toContain("was created after package verification");
+      expect(candidateCollision.result.stderr).toContain("changed after package verification");
       expect(candidateCollision.commandLog).not.toContain("npm stage publish");
 
       const npmDrift = await runBoundary({ terminalLatest: "0.19.1" });
@@ -1440,14 +1447,11 @@ describe("npm release workflows", () => {
     const publishJob = workflow.slice(workflow.indexOf("\n  publish:\n"));
     const authorizationIndex = publishJob.indexOf("Reauthorize current release attempt");
     const liveTagIndex = publishJob.indexOf('current_tag_sha="$(gh api');
-    const mutationIndex = publishJob.indexOf('gh release create "$VERIFIED_TAG"');
-    const npmLatestIndex = publishJob.indexOf('npm view "@hraness/kb" dist-tags.latest');
+    const mutationIndex = publishJob.indexOf('node scripts/github-release.ts publish "$RUNNER_TEMP/kb-github-handoff"');
     expect(publishJob).toContain("permissions:\n      actions: read\n      contents: write");
     expect(authorizationIndex).toBeGreaterThan(-1);
     expect(authorizationIndex).toBeLessThan(liveTagIndex);
     expect(liveTagIndex).toBeLessThan(mutationIndex);
-    expect(npmLatestIndex).toBeGreaterThan(liveTagIndex);
-    expect(npmLatestIndex).toBeLessThan(mutationIndex);
     expect(publishJob).toContain(
       '"/repos/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID/attempts/$GITHUB_RUN_ATTEMPT"',
     );
@@ -1455,9 +1459,6 @@ describe("npm release workflows", () => {
     expect(publishJob).toContain("attempt.triggering_actor?.id !== actorId");
     expect(publishJob).toContain('attempt.triggering_actor?.type !== "User"');
     expect(publishJob).toContain('repository.visibility !== "public"');
-    expect(publishJob).toContain('EXPECTED_ACTIONS_BOT_ID="41898282"');
-    expect(publishJob).toContain("Automated immutable release for @hraness/kb@");
-    expect(publishJob).toContain("GitHub Release is not the exact immutable artifact created by this authorized Actions run");
 
     const script = workflowStepScript(workflow, "Reauthorize current release attempt");
     const directory = await mkdtemp(join(tmpdir(), "kb-release-attempt-"));
@@ -1653,169 +1654,18 @@ describe("npm release workflows", () => {
     }
   });
 
-  test("a pre-existing GitHub Release must carry this Actions run's exact identity", async () => {
-    const workflow = await readFile(releaseWorkflowUrl, "utf8");
-    const script = workflowStepScript(workflow, "Publish verified GitHub Release");
-    const directory = await mkdtemp(join(tmpdir(), "kb-release-identity-"));
-    const binaryDirectory = join(directory, "bin");
-    const releasePath = join(directory, "release.json");
-    const sourceSha = "b".repeat(40);
-    const expectedBody = [
-      "Automated immutable release for @hraness/kb@0.20.0.",
-      "",
-      `Source commit: ${sourceSha}`,
-      "Workflow run: 67890",
-    ].join("\n");
-    try {
-      await mkdir(binaryDirectory, { recursive: true });
-      await writeFile(
-        join(binaryDirectory, "npm"),
-        ["#!/bin/bash", "set -euo pipefail", "printf '\"0.20.0\"\\n'"].join("\n"),
-      );
-      await writeFile(
-        join(binaryDirectory, "gh"),
-        [
-          "#!/bin/bash",
-          "set -euo pipefail",
-          'case "$*" in',
-          '  *"/commits/v0.20.0"*) printf \'%s\\n\' "$MOCK_SOURCE_SHA" ;;',
-          '  *"/commits/main"*) printf \'%s\\n\' "$MOCK_SOURCE_SHA" ;;',
-          '  *"/compare/"*) printf \'ahead\\n\' ;;',
-          '  *"/tags?per_page=100"*) printf \'v0.20.0\\n\' ;;',
-          '  *"/releases?per_page=100"*) printf \'\\n\' ;;',
-          '  *"/releases/tags/v0.20.0"*) cat "$MOCK_RELEASE_JSON" ;;',
-          '  *"/releases/latest"*) printf \'v0.20.0\\n\' ;;',
-          '  *) echo "unexpected gh invocation: $*" >&2; exit 2 ;;',
-          "esac",
-        ].join("\n"),
-      );
-      await writeReleaseControlGitMock(binaryDirectory);
-      await Promise.all([
-        chmod(join(binaryDirectory, "npm"), 0o755),
-        chmod(join(binaryDirectory, "gh"), 0o755),
-      ]);
-      const environment = {
-        PATH: `${binaryDirectory}:${process.env.PATH ?? ""}`,
-        DEFAULT_BRANCH: "main",
-        GITHUB_EVENT_NAME: "push",
-        GITHUB_REF: "refs/tags/v0.20.0",
-        GITHUB_REPOSITORY: "hraness/kb",
-        GITHUB_RUN_ID: "67890",
-        GITHUB_SHA: sourceSha,
-        MOCK_RELEASE_JSON: releasePath,
-        MOCK_SOURCE_SHA: sourceSha,
-        RUNNER_TEMP: directory,
-        VERIFIED_SOURCE_SHA: sourceSha,
-        VERIFIED_TAG: "v0.20.0",
-        WORKFLOW_SHA: sourceSha,
-      };
-      const release = {
-        tag_name: "v0.20.0",
-        name: "KB v0.20.0",
-        body: expectedBody,
-        draft: false,
-        prerelease: false,
-        immutable: true,
-        assets: [],
-        author: { id: 123456, login: "collaborator", type: "User" },
-      };
-      await writeFile(releasePath, JSON.stringify(release));
-      const frontRun = await runWorkflowScript(script, environment);
-      expect(frontRun.exitCode).not.toBe(0);
-      expect(frontRun.stderr).toContain(
-        "GitHub Release is not the exact immutable artifact created by this authorized Actions run",
-      );
-
-      await writeFile(releasePath, JSON.stringify({
-        ...release,
-        author: { id: 41898282, login: "github-actions[bot]", type: "Bot" },
-      }));
-      const authorizedRecovery = await runWorkflowScript(script, environment);
-      expect(authorizedRecovery.exitCode).toBe(0);
-    } finally {
-      await rm(directory, { recursive: true, force: true });
-    }
-  });
-
-  test("gates immutable releases on an owner-created protected stable tag and exact npm delivery", async () => {
-    const [workflow, artifact, identity] = await Promise.all([
-      readFile(releaseWorkflowUrl, "utf8"),
-      readFile(packageArtifactUrl, "utf8"),
-      readFile(packageIdentityUrl, "utf8"),
-    ]);
-    for (const required of [
-      'tags:\n      - "v*"\n      - "!v*-beta.*"',
-      "Authorize owner release tag",
-      'EXPECTED_ACTOR_ID: "894119"',
-      'EXPECTED_REPOSITORY_ID: "1308971873"',
-      'event.sender?.type !== "User"',
-      'event.repository?.visibility !== "public"',
-      "REF_PROTECTED: ${{ github.ref_protected }}",
-      "ref: main",
-      'release_ref="refs/kb-release-tags/$release_tag"',
-      "Release tag must be annotated",
-      'git merge-base --is-ancestor "$tag_commit" "$default_head"',
-      "Tagged and current release workflow controls differ",
-      "Tag $release_tag is not the newest stable tag",
-      'git worktree add --detach "$source_tree" "$SOURCE_SHA"',
-      'current_prepare="$GITHUB_WORKSPACE/scripts/prepare-npm-package.ts"',
-      'current_identity="$GITHUB_WORKSPACE/scripts/npm-package-identity.ts"',
-      'current_attestation="$GITHUB_WORKSPACE/scripts/npm-release-attestation.ts"',
-      'current_smoke="$GITHUB_WORKSPACE/scripts/package-smoke.ts"',
-      'git -C "$GITHUB_WORKSPACE" rev-parse "$WORKFLOW_SHA:$relative_tool"',
-      'git hash-object "$current_tool"',
-      "bun --no-env-file --config=/dev/null run",
-      '--source-pack-json "$source_pack_json"',
-      '--registry-pack-json "$registry_pack_json"',
-      '--registry-view-json "$registry_view_json"',
-      'npm view "$package_spec" name version dist',
-      'npm view "$EXPECTED_NAME" dist-tags.latest',
-      'npm install "$package_spec"',
-      "npm audit signatures",
-      "--include-attestations",
-      '--expected-source-sha "$EXPECTED_SOURCE_SHA"',
-      '--expected-tarball-sha512 "$registry_tarball_sha512"',
-      '--registry-latest-json "$registry_latest_json"',
-      'npm view "@hraness/kb" dist-tags.latest',
-      'current_tag_sha="$(gh api',
-      "verify_current_release_controls",
-      "Current release verifier controls changed after verification",
-      'scripts/npm-release-attestation.ts',
-      'scripts/prepare-npm-package.ts',
-      'compare/$VERIFIED_SOURCE_SHA...$current_default_sha',
-      'EXPECTED_ACTIONS_BOT_ID="41898282"',
-      "Automated immutable release for @hraness/kb@",
-    ] as const) expect(workflow).toContain(required);
-    const auditIndex = workflow.indexOf("npm audit signatures");
-    const attestationIndex = workflow.indexOf('bun --no-env-file --config=/dev/null run "$current_attestation"');
-    const publishJobIndex = workflow.indexOf("\n  publish:\n");
-    const liveLatestIndex = workflow.lastIndexOf('npm view "@hraness/kb" dist-tags.latest');
-    const releaseMutationIndex = workflow.indexOf('gh release create "$VERIFIED_TAG"');
-    expect(auditIndex).toBeGreaterThan(workflow.indexOf("npm@11.19.0"));
-    expect(attestationIndex).toBeGreaterThan(auditIndex);
-    expect(attestationIndex).toBeLessThan(publishJobIndex);
-    expect(liveLatestIndex).toBeGreaterThan(publishJobIndex);
-    expect(liveLatestIndex).toBeLessThan(releaseMutationIndex);
-    expect(workflow.match(/Stable version components exceed Number\.MAX_SAFE_INTEGER/gu) ?? [])
-      .toHaveLength(3);
-    expect(workflow).not.toContain('cmp "$source_archive" "$registry_archive"');
-    expect(workflow).not.toContain("bun run ./scripts/prepare-npm-package.ts");
-    expect(workflow).not.toContain("bun run ./scripts/package-smoke.ts");
-    expect(workflow).not.toMatch(/\bnpm (?:publish|stage publish)\b/u);
-    expect(workflow).not.toContain("workflow_dispatch:");
-    expect(workflow.match(/contents: write/gu) ?? []).toHaveLength(1);
-    for (const required of [
-      "contentSha256",
-      "contentSha512",
-      "header.subarray(257, 265).equals(ustarSignature)",
-      "header[475] === 0 ? 130 : 155",
-      "Unsupported package tar entry type",
-      "Package tar contains data after its zero trailer",
-      "maxOutputLength",
-      "actual.mode !== file.mode",
-      "npm registry metadata differs from the downloaded canonical package",
-      "canonicalRegistryTarball",
-    ] as const) expect(`${artifact}\n${identity}`).toContain(required);
+  test("canonical GitHub release authority has no npm admission dependency", async () => {
+    const workflow = parse(await readFile(releaseWorkflowUrl, "utf8")) as {
+      jobs: Record<string, { needs?: unknown; permissions?: unknown; steps: Array<{ name?: string; uses?: string; run?: string }> }>;
+    };
+    expect(Object.keys(workflow.jobs).sort()).toEqual(["attest", "authorize", "publish", "verify"]);
+    expect(workflow.jobs.verify?.permissions).toEqual({ contents: "read" });
+    expect(workflow.jobs.publish?.needs).toEqual(["verify", "attest"]);
+    expect(workflow.jobs.attest?.steps.some((step) => step.uses?.startsWith("actions/checkout@"))).toBe(false);
+    const commands = Object.values(workflow.jobs).flatMap((job) => job.steps.map((step) => step.run ?? "")).join("\n");
+    expect(commands).not.toMatch(/npm (?:view|publish|stage|audit)/u);
+    expect(workflow.jobs.verify?.steps.find((step) => step.name === "Check tagged source")?.run).toBe("bun run check");
+    expect(workflow.jobs.attest?.steps.findIndex((step) => step.name === "Reauthorize current release attempt")).toBe(0);
   });
 
   test("provisions exact recovery history and npm in CI", async () => {
@@ -1830,80 +1680,6 @@ describe("npm release workflows", () => {
       'test "$(npm --version)" = "11.19.0"',
       '[[ "$(node --version)" == v24.* ]]',
     ] as const) expect(workflow).toContain(required);
-  });
-
-  test("documents the terminal authority and recovery boundary", async () => {
-    const [guide, agents] = await Promise.all([
-      readFile(publishingGuideUrl, "utf8"),
-      readFile(agentGuideUrl, "utf8"),
-    ]);
-    for (const required of [
-      "automatically starts",
-      "one-time `0.17.1` bootstrap",
-      "Do not reuse the\ninteractive path for a later release",
-      "[Stage a later version](#stage-a-later-version)",
-      "version is unchanged",
-      "exact `npm-stage` environment",
-      "disable administrator bypass",
-      "allows only `main`",
-      "original actor and triggering actor",
-      "current attempt",
-      "including every retained attempt",
-      "successful version-bound intent step",
-      "matching annotated tag",
-      "immutable zero-asset Latest Release",
-      "completed-release closure",
-      "`Number.MAX_SAFE_INTEGER`",
-      "`npm audit signatures --json",
-      "`dist-tags.latest`",
-      "owner ID `307125679`",
-      "clean default `latest`",
-      "top-level `tag`",
-      "rebinds the release\nhelpers to reviewed current-main Git blobs",
-      "checks out exact current `main`",
-      "repeats\nthe tag-to-main workflow closure",
-      "and invokes those files by absolute\npath",
-      "`npm pack --ignore-scripts`",
-      npmRegistry,
-    ] as const) expect(guide).toContain(required);
-    const normalizedGuide = guide.replace(/\s+/gu, " ");
-    expect(normalizedGuide).toContain(
-      "selected branch `main` with type `branch`",
-    );
-    expect(normalizedGuide).toContain(
-      "only `actions: read`, `contents: read`, and `id-token: write`",
-    );
-    expect(guide).toMatch(/the only job with\s+OIDC authority/u);
-    expect(guide).toMatch(/explicitly opted-in staging job\s+starts after verification/u);
-    expect(guide).toMatch(/approve the staged package through npm with two-factor\s+authentication/u);
-    expect(guide).toMatch(/checks out no\s+source and runs no\s+repository\s+code/u);
-    expect(guide).toMatch(/exactly the tarball,\s+`npm-pack\.json`, and `npm-package\.sha256`/u);
-    expect(guide).toMatch(/new bare\s+Git directory/u);
-    expect(guide).toMatch(/do not import a\s+script from the tagged tree/u);
-    expect(guide).toMatch(/trusted-publishing assertion cannot run\s+`npm stage list`/u);
-    expect(normalizedGuide).toContain(
-      "not a claim that npm exposes or prevents an out-of-band concurrent stage",
-    );
-    expect(agents).toContain("Trust only `.github/workflows/npm-stage.yml` with `npm stage publish` permission");
-    expect(agents).toContain("selected default branch `main`");
-    expect(agents).toContain("administrator bypass disabled");
-    expect(agents).toContain("public promotion remains human-gated by two-factor authentication");
-    expect(agents).toContain("boolean `publish_to_npm=true`");
-    expect(agents).toContain("`actions: read`, `contents: read`, and `id-token: write`");
-    expect(agents).toContain("the next stage remains locked until public `latest`");
-    expect(agents).toContain("exact immutable bot-created Latest Release");
-    expect(agents).toContain("clean default `latest`");
-    expect(agents).toContain("pinned npm `11.19.0`");
-    expect(agents).toContain("Record a successful intent step immediately before mutation");
-    expect(agents).toContain("safe positive Actions step number");
-    expect(agents).toContain("scan every retained attempt");
-    expect(agents).toContain("cannot list stages");
-    expect(agents).toContain("do not claim this workflow prevents out-of-band stages");
-    expect(agents).toContain("sole main source commit");
-    expect(agents).toContain("The protected tag workflow must bind the actor and event sender");
-    expect(agents).toContain("Run release verifiers from exact current `main`");
-    expect(agents).toContain("revalidate the complete verifier closure immediately before mutation");
-    expect(agents).toContain("public repository ID `1308971873`");
   });
 
   test("pins publication to the canonical npm registry", async () => {
@@ -1980,7 +1756,7 @@ describe("canonical npm package identity", () => {
       });
       const verified = await verifyNpmPackageIdentity(validInput);
       expect(verified.fileCount).toBe(204);
-      expect(verified.unpackedBytes).toBe(4_981_527);
+      expect(verified.unpackedBytes).toBe(sourceInventory.unpackedBytes);
       expect(verified.sourceArchiveSha512).not.toBe(verified.registryArchiveSha512);
 
       const originalTar = gunzipSync(sourceBytes);

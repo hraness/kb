@@ -64,6 +64,9 @@ jobs:
       source_sha: ${{ steps.identity.outputs.source_sha }}
       verified_tag: ${{ steps.identity.outputs.tag }}
       workflow_sha: ${{ steps.identity.outputs.workflow_sha }}
+      artifact_name: ${{ steps.artifact.outputs.artifact_name }}
+      artifact_hashes: ${{ steps.artifact.outputs.artifact_hashes }}
+      archive_name: ${{ steps.artifact.outputs.archive_name }}
     steps:
       - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
         with:
@@ -144,8 +147,7 @@ jobs:
           fi
           if ! git diff --quiet --no-ext-diff --no-textconv \
             "$tag_commit" "$default_head" -- \
-            .github/workflows/release.yml \
-            .github/workflows/npm-stage.yml; then
+            .github/workflows/release.yml; then
             echo "::error::Tagged and current release workflow controls differ"
             exit 1
           fi
@@ -252,161 +254,216 @@ jobs:
           set -euo pipefail
           bun pm pack --dry-run --ignore-scripts
           node --input-type=module -e 'const manifest = (await import("./package.json", { with: { type: "json" } })).default; await Promise.all(Object.values(manifest.exports).map(({ import: path }) => import(path)))'
-      - name: Verify canonical npm delivery
+      - name: Prepare and smoke canonical GitHub artifact
+        id: artifact
         env:
-          EXPECTED_NAME: "@hraness/kb"
-          EXPECTED_SOURCE_SHA: ${{ steps.identity.outputs.source_sha }}
-          EXPECTED_VERSION: ${{ steps.identity.outputs.tag }}
-          SOURCE_TREE: ${{ steps.source.outputs.tree }}
+          VERIFIED_SOURCE_SHA: ${{ steps.identity.outputs.source_sha }}
           WORKFLOW_SHA: ${{ steps.identity.outputs.workflow_sha }}
+          RELEASE_VERSION: ${{ github.ref_name }}
         run: |
           set -euo pipefail
-          package_version="${EXPECTED_VERSION#v}"
-          if [[ "$EXPECTED_VERSION" != "v$package_version" || \
-                ! "$package_version" =~ ^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$ ]]; then
-            echo "::error::Verified package version is invalid"
-            exit 1
-          fi
-          package_spec="$EXPECTED_NAME@$package_version"
-          tarball_name="hraness-kb-$package_version.tgz"
-          source_directory="$RUNNER_TEMP/kb-release-source-package"
-          registry_directory="$RUNNER_TEMP/kb-release-registry-package"
-          source_archive="$source_directory/$tarball_name"
-          source_pack_json="$source_directory/npm-pack.json"
-          registry_archive="$registry_directory/$tarball_name"
-          registry_pack_json="$registry_directory/npm-pack.json"
-          registry_view_json="$registry_directory/npm-view.json"
-          registry_latest_json="$registry_directory/npm-latest.json"
-          registry_audit_json="$registry_directory/npm-audit-signatures.json"
-          audit_directory="$RUNNER_TEMP/kb-release-signature-audit"
-
-          registry_ready=false
-          for registry_poll in {1..60}; do
-            published_version="$(npm view "$package_spec" version --json \
-              --registry=https://registry.npmjs.org 2>/dev/null || true)"
-            published_latest="$(npm view "$EXPECTED_NAME" dist-tags.latest --json \
-              --registry=https://registry.npmjs.org 2>/dev/null || true)"
-            if [[ "$published_version" == "\"$package_version\"" && \
-                  "$published_latest" == "\"$package_version\"" ]]; then
-              registry_ready=true
-              break
-            fi
-            sleep 10
-          done
-          if [[ "$registry_ready" != true ]]; then
-            echo "::error::$package_spec did not become readable from npm in time"
-            exit 1
-          fi
-
-          if [[ "$(git -C "$GITHUB_WORKSPACE" rev-parse HEAD)" != "$WORKFLOW_SHA" ]]; then
-            echo "::error::Reviewed workflow checkout changed before package verification"
-            exit 1
-          fi
-          current_tools=(
-            scripts/package-artifact.ts
-            scripts/npm-package-identity.ts
-            scripts/npm-release-attestation.ts
-            scripts/package-smoke.ts
-            scripts/prepare-npm-package.ts
-          )
-          for relative_tool in "${current_tools[@]}"; do
-            current_tool="$GITHUB_WORKSPACE/$relative_tool"
-            if [[ ! -f "$current_tool" || -L "$current_tool" ]]; then
-              echo "::error::Reviewed current workflow tool is missing or linked: $relative_tool"
-              exit 1
-            fi
-            expected_blob="$(git -C "$GITHUB_WORKSPACE" rev-parse "$WORKFLOW_SHA:$relative_tool")"
-            actual_blob="$(git hash-object "$current_tool")"
-            if [[ "$actual_blob" != "$expected_blob" ]]; then
-              echo "::error::Reviewed current workflow tool changed: $relative_tool"
-              exit 1
-            fi
-          done
-          current_prepare="$GITHUB_WORKSPACE/scripts/prepare-npm-package.ts"
-          current_identity="$GITHUB_WORKSPACE/scripts/npm-package-identity.ts"
-          current_attestation="$GITHUB_WORKSPACE/scripts/npm-release-attestation.ts"
-          current_smoke="$GITHUB_WORKSPACE/scripts/package-smoke.ts"
-
-          (
-            cd "$SOURCE_TREE"
-            bun --no-env-file --config=/dev/null run \
-              "$current_prepare" "$source_directory"
-          )
-          mkdir -p "$registry_directory"
-          npm pack "$package_spec" \
-            --ignore-scripts \
-            --json \
-            --pack-destination "$registry_directory" \
-            --registry=https://registry.npmjs.org \
-            > "$registry_pack_json"
-          npm view "$package_spec" name version dist \
-            --json \
-            --registry=https://registry.npmjs.org \
-            > "$registry_view_json"
-          npm view "$EXPECTED_NAME" dist-tags.latest \
-            --json \
-            --registry=https://registry.npmjs.org \
-            > "$registry_latest_json"
-          bun --no-env-file --config=/dev/null run "$current_identity" \
-            --expected-name "$EXPECTED_NAME" \
-            --expected-version "$package_version" \
-            --source-archive "$source_archive" \
-            --source-pack-json "$source_pack_json" \
-            --registry-archive "$registry_archive" \
-            --registry-pack-json "$registry_pack_json" \
-            --registry-view-json "$registry_view_json"
-          (
-            cd "$SOURCE_TREE"
-            bun --no-env-file --config=/dev/null run "$current_smoke" \
-              --archive "$registry_archive" \
-              --pack-json "$registry_pack_json"
-          )
-
-          if [[ -e "$audit_directory" ]]; then
-            echo "::error::npm signature audit directory already exists"
-            exit 1
-          fi
-          mkdir -p "$audit_directory"
-          AUDIT_DIRECTORY="$audit_directory" node <<'NODE'
-          const { writeFileSync } = require("node:fs");
+          RELEASE_VERSION="${RELEASE_VERSION#v}"
+          export RELEASE_VERSION
+          artifact_directory="$RUNNER_TEMP/kb-github-$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT"
+          cd "${{ steps.source.outputs.tree }}"
+          bun run ./scripts/prepare-npm-package.ts "$artifact_directory"
+          bun run ./scripts/package-smoke.ts \
+            --archive "$artifact_directory/hraness-kb-$RELEASE_VERSION.tgz" \
+            --pack-json "$artifact_directory/npm-pack.json"
+          node "$GITHUB_WORKSPACE/scripts/github-release.ts" prepare "$artifact_directory"
+          ARTIFACT_DIRECTORY="$artifact_directory" node <<'NODE'
+          const { appendFileSync, readFileSync, readdirSync } = require("node:fs");
+          const { createHash } = require("node:crypto");
           const { join } = require("node:path");
-          writeFileSync(join(process.env.AUDIT_DIRECTORY, "package.json"), `${JSON.stringify({
-            name: "kb-release-signature-audit",
-            private: true,
-            version: "0.0.0",
-          }, null, 2)}\n`, { encoding: "utf8", flag: "wx" });
+          const names = readdirSync(process.env.ARTIFACT_DIRECTORY).sort();
+          const hashes = Object.fromEntries(names.map((name) => [name, createHash("sha256").update(readFileSync(join(process.env.ARTIFACT_DIRECTORY, name))).digest("hex")]));
+          appendFileSync(process.env.GITHUB_OUTPUT, `artifact_name=github-release-${process.env.RELEASE_VERSION}-${process.env.VERIFIED_SOURCE_SHA}-${process.env.GITHUB_RUN_ID}-${process.env.GITHUB_RUN_ATTEMPT}\narchive_name=hraness-kb-${process.env.RELEASE_VERSION}.tgz\nartifact_hashes=${JSON.stringify(hashes)}\n`);
           NODE
-          (
-            cd "$audit_directory"
-            npm install "$package_spec" \
-              --ignore-scripts \
-              --no-audit \
-              --no-fund \
-              --package-lock=false \
-              --save-exact \
-              --registry=https://registry.npmjs.org
-            npm audit signatures \
-              --json \
-              --include-attestations \
-              --registry=https://registry.npmjs.org \
-              > "$registry_audit_json"
-          )
-          registry_tarball_sha512="$(node -e '
-            const { createHash } = require("node:crypto");
-            const { readFileSync } = require("node:fs");
-            process.stdout.write(createHash("sha512").update(readFileSync(process.argv[1])).digest("hex"));
-          ' "$registry_archive")"
-          bun --no-env-file --config=/dev/null run "$current_attestation" \
-            --audit-json "$registry_audit_json" \
-            --expected-source-sha "$EXPECTED_SOURCE_SHA" \
-            --expected-tarball-sha512 "$registry_tarball_sha512" \
-            --expected-version "$package_version" \
-            --registry-latest-json "$registry_latest_json" \
-            --registry-view-json "$registry_view_json"
+      - name: Upload verified GitHub artifact
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          if-no-files-found: error
+          name: ${{ steps.artifact.outputs.artifact_name }}
+          path: ${{ runner.temp }}/kb-github-${{ github.run_id }}-${{ github.run_attempt }}
+          compression-level: 0
+          retention-days: 30
+
+  attest:
+    name: Attest verified artifact
+    needs: verify
+    permissions:
+      actions: read
+      contents: read
+      id-token: write
+      attestations: write
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    outputs:
+      bundle_sha256: ${{ steps.bundle.outputs.bundle_sha256 }}
+    env:
+      DEFAULT_BRANCH: ${{ needs.verify.outputs.default_branch }}
+      GH_REPO: ${{ github.repository }}
+      GH_TOKEN: ${{ github.token }}
+      VERIFIED_SOURCE_SHA: ${{ needs.verify.outputs.source_sha }}
+      VERIFIED_TAG: ${{ needs.verify.outputs.verified_tag }}
+      WORKFLOW_SHA: ${{ needs.verify.outputs.workflow_sha }}
+    steps:
+      - name: Reauthorize current release attempt
+        env:
+          EXPECTED_ACTOR_ID: "894119"
+          EXPECTED_REPOSITORY: "hraness/kb"
+          EXPECTED_REPOSITORY_ID: "1308971873"
+          EXPECTED_WORKFLOW_ID: "320004141"
+          EXPECTED_WORKFLOW_NAME: "Release"
+          EXPECTED_WORKFLOW_PATH: ".github/workflows/release.yml"
+        run: |
+          set -euo pipefail
+          if [[ ! "$GITHUB_RUN_ID" =~ ^[1-9][0-9]*$ || \
+                ! "$GITHUB_RUN_ATTEMPT" =~ ^[1-9][0-9]*$ || \
+                "$GITHUB_EVENT_NAME" != push || \
+                "$GITHUB_REPOSITORY" != "$EXPECTED_REPOSITORY" || \
+                "$GITHUB_REPOSITORY_ID" != "$EXPECTED_REPOSITORY_ID" || \
+                "$GITHUB_REF" != "refs/tags/$VERIFIED_TAG" ]]; then
+            echo "::error::Current release attempt is not the exact protected tag run"
+            exit 1
+          fi
+          attempt_json="$(mktemp "$RUNNER_TEMP/kb-release-attempt.XXXXXX")"
+          workflow_json="$(mktemp "$RUNNER_TEMP/kb-release-workflow.XXXXXX")"
+          repository_json="$(mktemp "$RUNNER_TEMP/kb-release-repository.XXXXXX")"
+          gh api --method GET \
+            "/repos/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID/attempts/$GITHUB_RUN_ATTEMPT" \
+            > "$attempt_json"
+          gh api --method GET \
+            "/repos/$GITHUB_REPOSITORY/actions/workflows/$EXPECTED_WORKFLOW_ID" \
+            > "$workflow_json"
+          gh api --method GET "/repos/$GITHUB_REPOSITORY" > "$repository_json"
+          ATTEMPT_JSON="$attempt_json" \
+            WORKFLOW_JSON="$workflow_json" \
+            REPOSITORY_JSON="$repository_json" \
+            EXPECTED_ACTOR_ID="$EXPECTED_ACTOR_ID" \
+            EXPECTED_REPOSITORY="$EXPECTED_REPOSITORY" \
+            EXPECTED_REPOSITORY_ID="$EXPECTED_REPOSITORY_ID" \
+            EXPECTED_RUN_ID="$GITHUB_RUN_ID" \
+            EXPECTED_RUN_ATTEMPT="$GITHUB_RUN_ATTEMPT" \
+            EXPECTED_SHA="$VERIFIED_SOURCE_SHA" \
+            EXPECTED_TAG="$VERIFIED_TAG" \
+            EXPECTED_WORKFLOW_ID="$EXPECTED_WORKFLOW_ID" \
+            EXPECTED_WORKFLOW_NAME="$EXPECTED_WORKFLOW_NAME" \
+            EXPECTED_WORKFLOW_PATH="$EXPECTED_WORKFLOW_PATH" node <<'NODE'
+          const { readFileSync } = require("node:fs");
+          const positiveInteger = (name) => {
+            const value = process.env[name] ?? "";
+            if (!/^[1-9][0-9]*$/u.test(value)) throw new Error(`Invalid ${name}`);
+            const number = Number(value);
+            if (!Number.isSafeInteger(number)) throw new Error(`Unsafe ${name}`);
+            return number;
+          };
+          const attempt = JSON.parse(readFileSync(process.env.ATTEMPT_JSON, "utf8"));
+          const workflow = JSON.parse(readFileSync(process.env.WORKFLOW_JSON, "utf8"));
+          const repository = JSON.parse(readFileSync(process.env.REPOSITORY_JSON, "utf8"));
+          const actorId = positiveInteger("EXPECTED_ACTOR_ID");
+          const repositoryId = positiveInteger("EXPECTED_REPOSITORY_ID");
+          const runId = positiveInteger("EXPECTED_RUN_ID");
+          const runAttempt = positiveInteger("EXPECTED_RUN_ATTEMPT");
+          const workflowId = positiveInteger("EXPECTED_WORKFLOW_ID");
+          if (
+            attempt.id !== runId
+            || attempt.run_attempt !== runAttempt
+            || attempt.workflow_id !== workflowId
+            || attempt.name !== process.env.EXPECTED_WORKFLOW_NAME
+            || attempt.path !== process.env.EXPECTED_WORKFLOW_PATH
+            || attempt.event !== "push"
+            || attempt.head_branch !== process.env.EXPECTED_TAG
+            || attempt.head_sha !== process.env.EXPECTED_SHA
+            || attempt.status !== "in_progress"
+            || attempt.conclusion !== null
+            || attempt.actor?.id !== actorId
+            || attempt.actor?.type !== "User"
+            || attempt.triggering_actor?.id !== actorId
+            || attempt.triggering_actor?.type !== "User"
+            || attempt.repository?.id !== repositoryId
+            || attempt.repository?.full_name !== process.env.EXPECTED_REPOSITORY
+            || attempt.repository?.private !== false
+            || workflow.id !== workflowId
+            || workflow.name !== process.env.EXPECTED_WORKFLOW_NAME
+            || workflow.path !== process.env.EXPECTED_WORKFLOW_PATH
+            || workflow.state !== "active"
+            || repository.id !== repositoryId
+            || repository.full_name !== process.env.EXPECTED_REPOSITORY
+            || repository.visibility !== "public"
+            || repository.private !== false
+            || repository.default_branch !== "main"
+          ) throw new Error("Current release attempt is not owner-authorized for this exact public workflow");
+          NODE
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: ${{ needs.verify.outputs.artifact_name }}
+          path: ${{ runner.temp }}/kb-github-handoff
+      - name: Bind exact verified artifact
+        env:
+          ARTIFACT_DIRECTORY: ${{ runner.temp }}/kb-github-handoff
+          EXPECTED_HASHES: ${{ needs.verify.outputs.artifact_hashes }}
+          EXPECTED_ARCHIVE: ${{ needs.verify.outputs.archive_name }}
+          EXPECTED_BUNDLE: ""
+        run: |
+          set -euo pipefail
+          node <<'NODE'
+          const { readFileSync, readdirSync, lstatSync } = require("node:fs");
+          const { join } = require("node:path");
+          const { createHash } = require("node:crypto");
+          const dir = process.env.ARTIFACT_DIRECTORY;
+          if (!lstatSync(dir).isDirectory() || lstatSync(dir).isSymbolicLink()) throw new Error("Unsafe release handoff directory");
+          const archive = process.env.EXPECTED_ARCHIVE;
+          const version = process.env.VERIFIED_TAG.slice(1);
+          if (archive !== `hraness-kb-${version}.tgz`) throw new Error("Release archive name differs from verified outputs");
+          const expected = JSON.parse(process.env.EXPECTED_HASHES);
+          const names = [archive, "npm-pack.json", "release-manifest.json", "SHA256SUMS"].sort();
+          if (JSON.stringify(Object.keys(expected).sort()) !== JSON.stringify(names)) throw new Error("Verified output hashes have unexpected keys");
+          if (process.env.EXPECTED_BUNDLE !== "") { names.push("provenance.jsonl"); names.sort(); expected["provenance.jsonl"] = process.env.EXPECTED_BUNDLE; }
+          if (JSON.stringify(readdirSync(dir).sort()) !== JSON.stringify(names)) throw new Error("Release handoff file set differs");
+          for (const name of names) {
+            const path = join(dir, name); const stat = lstatSync(path);
+            if (!stat.isFile() || stat.isSymbolicLink() || stat.size <= 0 || stat.size > 128 * 1024 * 1024) throw new Error("Unsafe release handoff file");
+            if (!/^[a-f0-9]{64}$/.test(expected[name]) || createHash("sha256").update(readFileSync(path)).digest("hex") !== expected[name]) throw new Error("Release handoff bytes differ from verified output");
+          }
+          const manifest = JSON.parse(readFileSync(join(dir, "release-manifest.json"), "utf8"));
+          if (manifest.repository !== "hraness/kb" || manifest.repositoryId !== 1308971873 || manifest.package !== "@hraness/kb"
+            || manifest.sourceSha !== process.env.VERIFIED_SOURCE_SHA || manifest.workflowSha !== process.env.WORKFLOW_SHA
+            || manifest.tag !== process.env.VERIFIED_TAG || manifest.version !== version
+            || String(manifest.runId) !== process.env.GITHUB_RUN_ID || String(manifest.runAttempt) !== process.env.GITHUB_RUN_ATTEMPT) throw new Error("Release handoff identity differs from verified outputs");
+          NODE
+      - name: Attest canonical release files
+        id: provenance
+        uses: actions/attest@1e69f48acb82d1966a394da916b4c1698aa569d6 # v4.2.2
+        with:
+          subject-path: |
+            ${{ runner.temp }}/kb-github-handoff/${{ needs.verify.outputs.archive_name }}
+            ${{ runner.temp }}/kb-github-handoff/npm-pack.json
+            ${{ runner.temp }}/kb-github-handoff/release-manifest.json
+            ${{ runner.temp }}/kb-github-handoff/SHA256SUMS
+          push-to-registry: false
+          create-storage-record: false
+      - name: Preserve signed provenance bundle
+        id: bundle
+        env:
+          BUNDLE_PATH: ${{ steps.provenance.outputs.bundle-path }}
+        run: |
+          set -euo pipefail
+          test -f "$BUNDLE_PATH" && test ! -L "$BUNDLE_PATH"
+          cp "$BUNDLE_PATH" "$RUNNER_TEMP/kb-github-handoff/provenance.jsonl"
+          printf 'bundle_sha256=%s\n' "$(sha256sum "$RUNNER_TEMP/kb-github-handoff/provenance.jsonl" | cut -d ' ' -f 1)" >> "$GITHUB_OUTPUT"
+      - name: Upload attested GitHub artifact
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          if-no-files-found: error
+          name: attested-${{ needs.verify.outputs.artifact_name }}
+          path: ${{ runner.temp }}/kb-github-handoff
+          compression-level: 0
+          retention-days: 30
 
   publish:
     name: Publish
-    needs: verify
+    needs: [verify, attest]
     permissions:
       actions: read
       contents: write
@@ -512,6 +569,47 @@ jobs:
             || repository.default_branch !== "main"
           ) throw new Error("Current release attempt is not owner-authorized for this exact public workflow");
           NODE
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: "24"
+          package-manager-cache: false
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: attested-${{ needs.verify.outputs.artifact_name }}
+          path: ${{ runner.temp }}/kb-github-handoff
+      - name: Bind exact verified artifact
+        env:
+          ARTIFACT_DIRECTORY: ${{ runner.temp }}/kb-github-handoff
+          EXPECTED_HASHES: ${{ needs.verify.outputs.artifact_hashes }}
+          EXPECTED_ARCHIVE: ${{ needs.verify.outputs.archive_name }}
+          EXPECTED_BUNDLE: ${{ needs.attest.outputs.bundle_sha256 }}
+        run: |
+          set -euo pipefail
+          node <<'NODE'
+          const { readFileSync, readdirSync, lstatSync } = require("node:fs");
+          const { join } = require("node:path");
+          const { createHash } = require("node:crypto");
+          const dir = process.env.ARTIFACT_DIRECTORY;
+          if (!lstatSync(dir).isDirectory() || lstatSync(dir).isSymbolicLink()) throw new Error("Unsafe release handoff directory");
+          const archive = process.env.EXPECTED_ARCHIVE;
+          const version = process.env.VERIFIED_TAG.slice(1);
+          if (archive !== `hraness-kb-${version}.tgz`) throw new Error("Release archive name differs from verified outputs");
+          const expected = JSON.parse(process.env.EXPECTED_HASHES);
+          const names = [archive, "npm-pack.json", "release-manifest.json", "SHA256SUMS"].sort();
+          if (JSON.stringify(Object.keys(expected).sort()) !== JSON.stringify(names)) throw new Error("Verified output hashes have unexpected keys");
+          if (process.env.EXPECTED_BUNDLE !== "") { names.push("provenance.jsonl"); names.sort(); expected["provenance.jsonl"] = process.env.EXPECTED_BUNDLE; }
+          if (JSON.stringify(readdirSync(dir).sort()) !== JSON.stringify(names)) throw new Error("Release handoff file set differs");
+          for (const name of names) {
+            const path = join(dir, name); const stat = lstatSync(path);
+            if (!stat.isFile() || stat.isSymbolicLink() || stat.size <= 0 || stat.size > 128 * 1024 * 1024) throw new Error("Unsafe release handoff file");
+            if (!/^[a-f0-9]{64}$/.test(expected[name]) || createHash("sha256").update(readFileSync(path)).digest("hex") !== expected[name]) throw new Error("Release handoff bytes differ from verified output");
+          }
+          const manifest = JSON.parse(readFileSync(join(dir, "release-manifest.json"), "utf8"));
+          if (manifest.repository !== "hraness/kb" || manifest.repositoryId !== 1308971873 || manifest.package !== "@hraness/kb"
+            || manifest.sourceSha !== process.env.VERIFIED_SOURCE_SHA || manifest.workflowSha !== process.env.WORKFLOW_SHA
+            || manifest.tag !== process.env.VERIFIED_TAG || manifest.version !== version
+            || String(manifest.runId) !== process.env.GITHUB_RUN_ID || String(manifest.runAttempt) !== process.env.GITHUB_RUN_ATTEMPT) throw new Error("Release handoff identity differs from verified outputs");
+          NODE
       - name: Publish verified GitHub Release
         run: |
           set -euo pipefail
@@ -546,8 +644,7 @@ jobs:
             fi
             if ! git diff --quiet --no-ext-diff --no-textconv \
               "$VERIFIED_SOURCE_SHA" "$imported_main" -- \
-              .github/workflows/release.yml \
-              .github/workflows/npm-stage.yml; then
+              .github/workflows/release.yml; then
               echo "::error::Tagged and current release workflow controls differ" >&2
               return 1
             fi
@@ -555,7 +652,7 @@ jobs:
               "$WORKFLOW_SHA" "$imported_main" -- \
               scripts/package-artifact.ts \
               scripts/npm-package-identity.ts \
-              scripts/npm-release-attestation.ts \
+              scripts/github-release.ts \
               scripts/package-smoke.ts \
               scripts/prepare-npm-package.ts; then
               echo "::error::Current release verifier controls changed after verification" >&2
@@ -651,58 +748,9 @@ jobs:
             }
           '
 
-          verified_version="${VERIFIED_TAG#v}"
-          npm_latest="$(npm view "@hraness/kb" dist-tags.latest \
-            --json \
-            --registry=https://registry.npmjs.org)"
-          if [[ "$VERIFIED_TAG" != "v$verified_version" || \
-                "$npm_latest" != "\"$verified_version\"" ]]; then
-            echo "::error::npm latest is $npm_latest, expected $verified_version"
-            exit 1
-          fi
-
-          printf -v expected_release_body \
-            'Automated immutable release for @hraness/kb@%s.\n\nSource commit: %s\nWorkflow run: %s' \
-            "$verified_version" "$VERIFIED_SOURCE_SHA" "$GITHUB_RUN_ID"
           final_default_sha="$(verify_current_release_controls)"
           if [[ "$final_default_sha" != "$current_default_sha" ]]; then
-            echo "::error::Current $DEFAULT_BRANCH moved during final release authorization"
+            echo "::error::Current main moved during final release authorization"
             exit 1
           fi
-          release_json="$(mktemp "$RUNNER_TEMP/kb-release.XXXXXX")"
-          if ! gh release create "$VERIFIED_TAG" \
-            --verify-tag \
-            --latest \
-            --title "KB $VERIFIED_TAG" \
-            --notes "$expected_release_body"; then
-            echo "::notice::Release creation did not complete; validating exact idempotent state"
-          fi
-          gh api "/repos/$GITHUB_REPOSITORY/releases/tags/$VERIFIED_TAG" \
-            > "$release_json"
-          RELEASE_JSON="$release_json" \
-            EXPECTED_ACTIONS_BOT_ID="41898282" \
-            EXPECTED_BODY="$expected_release_body" \
-            EXPECTED_NAME="KB $VERIFIED_TAG" node <<'NODE'
-          const { readFileSync } = require("node:fs");
-          const release = JSON.parse(readFileSync(process.env.RELEASE_JSON, "utf8"));
-          if (
-            !release
-            || typeof release !== "object"
-            || release.tag_name !== process.env.VERIFIED_TAG
-            || release.name !== process.env.EXPECTED_NAME
-            || release.body !== process.env.EXPECTED_BODY
-            || release.draft !== false
-            || release.prerelease !== false
-            || release.immutable !== true
-            || !Array.isArray(release.assets)
-            || release.assets.length !== 0
-            || release.author?.id !== Number(process.env.EXPECTED_ACTIONS_BOT_ID)
-            || release.author?.login !== "github-actions[bot]"
-            || release.author?.type !== "Bot"
-          ) throw new Error("GitHub Release is not the exact immutable artifact created by this authorized Actions run");
-          NODE
-          latest_tag="$(gh api "/repos/$GITHUB_REPOSITORY/releases/latest" --jq '.tag_name')"
-          if [[ "$latest_tag" != "$VERIFIED_TAG" ]]; then
-            echo "::error::Latest release is $latest_tag, expected $VERIFIED_TAG"
-            exit 1
-          fi
+          node scripts/github-release.ts publish "$RUNNER_TEMP/kb-github-handoff"

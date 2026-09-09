@@ -55,12 +55,12 @@ missing:
 ```sh
 command -v kb >/dev/null 2>&1 || {
   command -v bun >/dev/null 2>&1 || exit 1
-  bun add --global @hraness/kb@0.19.2
+  bun add --global --ignore-scripts https://github.com/hraness/kb/releases/download/v0.19.3/hraness-kb-0.19.3.tgz
 }
 kb --help
 ```
 
-The exact npm version is the immutable release owned by this skill. Do not
+The versioned GitHub archive is the immutable release owned by this skill. Do not
 replace it with `latest`, a branch, or an unpinned package source. Both installed
 commands require Bun `1.3.14` or newer in `PATH`. Run `kb doctor` when the
 chosen workflow may need browser capture, media tools, PDF extraction, OCR, or

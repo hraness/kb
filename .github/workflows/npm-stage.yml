@@ -1,12 +1,13 @@
 name: Stage npm package
 
 on:
-  push:
-    branches: [main]
-    paths:
-      - "package.json"
   workflow_dispatch:
     inputs:
+      release_tag:
+        description: Exact canonical stable tag to mirror; empty selects the current main version
+        required: false
+        default: ""
+        type: string
       publish_to_npm:
         description: Stage the verified package through npm trusted publishing
         required: false
@@ -49,6 +50,7 @@ jobs:
         env:
           BEFORE_SHA: ${{ github.event.before }}
           DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
+          RELEASE_TAG: ${{ inputs.release_tag }}
         run: |
           set -euo pipefail
           expected_ref="refs/heads/$DEFAULT_BRANCH"
@@ -73,6 +75,9 @@ jobs:
           )
           case "$GITHUB_EVENT_NAME" in
             workflow_dispatch)
+              if [[ -n "$RELEASE_TAG" ]]; then
+                selection_args+=(--release-tag "$RELEASE_TAG")
+              fi
               ;;
             push)
               if [[ ! "$BEFORE_SHA" =~ ^[a-f0-9]{40}$ || \
@@ -112,6 +117,7 @@ jobs:
       package_version: ${{ steps.artifact.outputs.package_version }}
       source_sha: ${{ steps.identity.outputs.source_sha }}
       tarball_name: ${{ steps.artifact.outputs.tarball_name }}
+      canonical_source_sha: ${{ steps.artifact.outputs.canonical_source_sha }}
     steps:
       - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
         with:
@@ -154,20 +160,18 @@ jobs:
           fi
           printf 'source_sha=%s\n' "$default_head" >> "$GITHUB_OUTPUT"
       - name: Verify package can be staged
+        env:
+          SELECTED_VERSION: ${{ needs.select.outputs.current_version }}
         run: |
           set -euo pipefail
           package_name="$(node -p 'require("./package.json").name')"
-          package_version="$(node -p 'require("./package.json").version')"
+          package_version="$SELECTED_VERSION"
           if [[ "$package_name" != "@hraness/kb" ]]; then
             echo "::error::Unexpected package name $package_name"
             exit 1
           fi
           if [[ ! "$package_version" =~ ^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$ ]]; then
             echo "::error::Package version $package_version is not stable semantic version"
-            exit 1
-          fi
-          if git rev-parse --verify --quiet "refs/tags/v$package_version" >/dev/null; then
-            echo "::error::Create v$package_version only after exact npm delivery is verified"
             exit 1
           fi
           if ! npm view "$package_name" name --json \
@@ -198,18 +202,35 @@ jobs:
           fi
       - name: Prepare and smoke exact npm artifact
         id: artifact
+        env:
+          GH_TOKEN: ${{ github.token }}
+          VERIFIED_SOURCE_SHA: ${{ steps.identity.outputs.source_sha }}
+          SELECTED_VERSION: ${{ needs.select.outputs.current_version }}
         run: |
           set -euo pipefail
           artifact_directory="$RUNNER_TEMP/kb-npm-$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT"
-          package_version="$(node -p 'require("./package.json").version')"
+          package_version="$SELECTED_VERSION"
           tarball_name="hraness-kb-$package_version.tgz"
           archive="$artifact_directory/$tarball_name"
           metadata="$artifact_directory/npm-pack.json"
           digest="$artifact_directory/npm-package.sha256"
-          bun run ./scripts/prepare-npm-package.ts "$artifact_directory"
-          bun run ./scripts/package-smoke.ts \
-            --archive "$archive" \
-            --pack-json "$metadata"
+          canonical_directory="$RUNNER_TEMP/kb-canonical-mirror"
+          canonical_source_sha="$(gh api "/repos/$GITHUB_REPOSITORY/commits/refs%2Ftags%2Fv$package_version" --jq '.sha')"
+          [[ "$canonical_source_sha" =~ ^[a-f0-9]{40}$ ]]
+          git merge-base --is-ancestor "$canonical_source_sha" "$VERIFIED_SOURCE_SHA"
+          VERIFIED_SOURCE_SHA="$canonical_source_sha" node scripts/github-release.ts download "$canonical_directory" "$package_version"
+          canonical_source_tree="$RUNNER_TEMP/kb-canonical-source"
+          git worktree add --detach "$canonical_source_tree" "$canonical_source_sha"
+          mkdir "$artifact_directory"
+          cp "$canonical_directory/$tarball_name" "$archive"
+          cp "$canonical_directory/npm-pack.json" "$metadata"
+          (
+            cd "$canonical_source_tree"
+            bun --no-env-file --config=/dev/null run "$GITHUB_WORKSPACE/scripts/package-smoke.ts" \
+              --archive "$archive" \
+              --pack-json "$metadata"
+          )
+          printf 'canonical_source_sha=%s\n' "$canonical_source_sha" >> "$GITHUB_OUTPUT"
           archive_sha256="$(sha256sum "$archive" | cut -d ' ' -f 1)"
           metadata_sha256="$(sha256sum "$metadata" | cut -d ' ' -f 1)"
           printf '%s  %s\n%s  npm-pack.json\n' \
@@ -473,10 +494,17 @@ jobs:
             "api",
             `repos/${repository}/releases/tags/${priorTag}`,
           ], `immutable release ${priorTag}`));
-          const latestRelease = JSON.parse(execute("gh", [
-            "api",
-            `repos/${repository}/releases/latest`,
-          ], "latest immutable release"));
+          const priorAssetsMatch = (assets, version) => {
+            const parts = version.split(".").map(BigInt);
+            const historical = parts[0] === 0n && (parts[1] < 19n || (parts[1] === 19n && parts[2] <= 2n));
+            if (historical) return assets.length === 0;
+            const names = [`hraness-kb-${version}.tgz`, "npm-pack.json", "release-manifest.json", "SHA256SUMS", "provenance.jsonl"].sort();
+            return assets.length === names.length
+              && JSON.stringify(assets.map((asset) => asset?.name).sort()) === JSON.stringify(names)
+              && assets.every((asset) => Number.isSafeInteger(asset?.id) && asset.id > 0
+                && Number.isSafeInteger(asset?.size) && asset.size > 0 && asset.size <= 128 * 1024 * 1024
+                && asset.state === "uploaded" && /^sha256:[a-f0-9]{64}$/.test(asset.digest));
+          };
           if (
             release?.tag_name !== priorTag
             || release?.name !== `KB ${priorTag}`
@@ -487,10 +515,7 @@ jobs:
             || release?.author?.login !== "github-actions[bot]"
             || release?.author?.type !== "Bot"
             || !Array.isArray(release?.assets)
-            || release.assets.length !== 0
-            || latestRelease?.id !== release.id
-            || latestRelease?.tag_name !== priorTag
-            || latestRelease?.immutable !== true
+            || !priorAssetsMatch(release.assets, priorTag.slice(1))
           ) {
             throw new Error(`npm latest ${latestValue} lacks its exact immutable GitHub Release`);
           }
@@ -1079,6 +1104,7 @@ jobs:
           EXPECTED_DIGEST_SHA256: ${{ steps.artifact.outputs.digest_sha256 }}
           EXPECTED_METADATA_SHA256: ${{ steps.artifact.outputs.metadata_sha256 }}
           EXPECTED_SOURCE_SHA: ${{ needs.verify.outputs.source_sha }}
+          EXPECTED_TAG_SOURCE_SHA: ${{ needs.verify.outputs.canonical_source_sha }}
           EXPECTED_VERSION: ${{ needs.verify.outputs.package_version }}
           GH_TOKEN: ${{ github.token }}
           METADATA: ${{ steps.artifact.outputs.metadata }}
@@ -1198,12 +1224,10 @@ jobs:
           prior_tag="v$prior_version"
           prior_tag_identity="$RUNNER_TEMP/kb-final-prior-release-tag.txt"
           prior_release_json="$RUNNER_TEMP/kb-final-prior-release.json"
-          latest_release_json="$RUNNER_TEMP/kb-final-latest-release.json"
           prior_comparison_json="$RUNNER_TEMP/kb-final-prior-release-comparison.json"
           git ls-remote --tags "https://github.com/$GITHUB_REPOSITORY.git" \
             "refs/tags/$prior_tag" "refs/tags/$prior_tag^{}" > "$prior_tag_identity"
           gh api "repos/$GITHUB_REPOSITORY/releases/tags/$prior_tag" > "$prior_release_json"
-          gh api "repos/$GITHUB_REPOSITORY/releases/latest" > "$latest_release_json"
           prior_source="$(PRIOR_TAG="$prior_tag" TAG_IDENTITY="$prior_tag_identity" node <<'NODE'
           const { readFileSync } = require("node:fs");
           const priorTag = process.env.PRIOR_TAG ?? "";
@@ -1228,14 +1252,23 @@ jobs:
           gh api "repos/$GITHUB_REPOSITORY/compare/$prior_source...$DEFAULT_BRANCH" > "$prior_comparison_json"
           PRIOR_TAG="$prior_tag" \
             PRIOR_RELEASE_JSON="$prior_release_json" \
-            LATEST_RELEASE_JSON="$latest_release_json" \
             PRIOR_COMPARISON_JSON="$prior_comparison_json" node <<'NODE'
           const { readFileSync } = require("node:fs");
           const priorTag = process.env.PRIOR_TAG ?? "";
           const read = (name) => JSON.parse(readFileSync(process.env[name], "utf8"));
           const release = read("PRIOR_RELEASE_JSON");
-          const latestRelease = read("LATEST_RELEASE_JSON");
           const comparison = read("PRIOR_COMPARISON_JSON");
+          const priorAssetsMatch = (assets, version) => {
+            const parts = version.split(".").map(BigInt);
+            const historical = parts[0] === 0n && (parts[1] < 19n || (parts[1] === 19n && parts[2] <= 2n));
+            if (historical) return assets.length === 0;
+            const names = [`hraness-kb-${version}.tgz`, "npm-pack.json", "release-manifest.json", "SHA256SUMS", "provenance.jsonl"].sort();
+            return assets.length === names.length
+              && JSON.stringify(assets.map((asset) => asset?.name).sort()) === JSON.stringify(names)
+              && assets.every((asset) => Number.isSafeInteger(asset?.id) && asset.id > 0
+                && Number.isSafeInteger(asset?.size) && asset.size > 0 && asset.size <= 128 * 1024 * 1024
+                && asset.state === "uploaded" && /^sha256:[a-f0-9]{64}$/.test(asset.digest));
+          };
           if (
             release?.tag_name !== priorTag
             || release?.name !== `KB ${priorTag}`
@@ -1246,10 +1279,7 @@ jobs:
             || release?.author?.login !== "github-actions[bot]"
             || release?.author?.type !== "Bot"
             || !Array.isArray(release?.assets)
-            || release.assets.length !== 0
-            || latestRelease?.id !== release.id
-            || latestRelease?.tag_name !== priorTag
-            || latestRelease?.immutable !== true
+            || !priorAssetsMatch(release.assets, priorTag.slice(1))
           ) throw new Error(`npm latest ${priorTag.slice(1)} lacks its exact immutable GitHub Release`);
           if (comparison?.status !== "ahead" && comparison?.status !== "identical") {
             throw new Error(`npm latest ${priorTag.slice(1)} is not reachable from current main`);
@@ -1270,6 +1300,7 @@ jobs:
             "https://github.com/$GITHUB_REPOSITORY.git" \
             "refs/heads/$DEFAULT_BRANCH" \
             "refs/tags/$release_tag" \
+            "refs/tags/$release_tag^{}" \
             "refs/tags/$prior_tag" \
             "refs/tags/$prior_tag^{}" > "$terminal_refs_output"
           DEFAULT_BRANCH="$DEFAULT_BRANCH" \
@@ -1283,6 +1314,8 @@ jobs:
           const expectedTagRef = `refs/tags/${process.env.RELEASE_TAG ?? ""}`;
           const priorTagRef = `refs/tags/${process.env.PRIOR_TAG ?? ""}`;
           const expectedSourceSha = process.env.EXPECTED_SOURCE_SHA ?? "";
+          const expectedTagSourceSha = process.env.EXPECTED_TAG_SOURCE_SHA ?? "";
+          if (!/^[a-f0-9]{40}$/.test(expectedTagSourceSha)) throw new Error("Canonical source identity is invalid");
           const parse = (path) => readFileSync(path, "utf8").trim().split("\n").map((line) => {
             const match = /^([0-9a-f]{40})\t(refs\/(?:heads|tags)\/[^\s^]+)(\^\{\})?$/u.exec(line);
             if (match === null) throw new Error("Final remote snapshot has malformed identity data");
@@ -1290,8 +1323,11 @@ jobs:
           });
           const priorEntries = parse(process.env.PRIOR_TAG_IDENTITY);
           const entries = parse(process.env.TERMINAL_REFS_OUTPUT);
-          if (entries.some((entry) => entry.ref === expectedTagRef)) {
-            throw new Error(`Tag ${process.env.RELEASE_TAG} was created after package verification`);
+          const candidateEntries = entries.filter((entry) => entry.ref === expectedTagRef);
+          if (candidateEntries.length !== 2
+            || candidateEntries.filter((entry) => entry.peeled && entry.sha === expectedTagSourceSha).length !== 1
+            || candidateEntries.filter((entry) => !entry.peeled && entry.sha !== expectedTagSourceSha).length !== 1) {
+            throw new Error(`Canonical tag ${process.env.RELEASE_TAG} changed after package verification`);
           }
           const priorIdentity = (values) => {
             const identity = new Map();
@@ -1315,11 +1351,11 @@ jobs:
           }
           const headEntries = entries.filter((entry) => entry.ref === expectedHeadRef && !entry.peeled);
           if (
-            entries.length !== 3
+            entries.length !== 5
             || headEntries.length !== 1
             || headEntries[0]?.sha !== expectedSourceSha
           ) {
-            throw new Error(`Could not prove exact ${process.env.DEFAULT_BRANCH}, unchanged ${process.env.PRIOR_TAG}, and absent ${process.env.RELEASE_TAG} in one remote snapshot`);
+            throw new Error(`Could not prove exact ${process.env.DEFAULT_BRANCH}, unchanged ${process.env.PRIOR_TAG}, and exact annotated ${process.env.RELEASE_TAG} in one remote snapshot`);
           }
           NODE
           cd "$clean_npm_directory"

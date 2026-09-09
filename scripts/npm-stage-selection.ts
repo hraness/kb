@@ -22,6 +22,7 @@ type CliOptions = Readonly<{
   eventName: string;
   githubOutputPath: string;
   previousManifestPath?: string;
+  releaseTag?: string;
 }>;
 
 function record(value: unknown, label: string): Record<string, unknown> {
@@ -46,7 +47,7 @@ function packageIdentity(source: string, label: string): PackageIdentity {
     throw new TypeError(`${label}.version must be a string`);
   }
   const match = stableVersionPattern.exec(manifest.version);
-  if (match === null || match[1] === undefined || match[2] === undefined || match[3] === undefined) {
+  if (match === null || match[0] !== manifest.version || match[1] === undefined || match[2] === undefined || match[3] === undefined) {
     throw new TypeError(`${label}.version must be a stable semantic version`);
   }
   const versionParts = [BigInt(match[1]), BigInt(match[2]), BigInt(match[3])] as const;
@@ -78,11 +79,28 @@ export function selectNpmStage(input: Readonly<{
   currentManifest: string;
   eventName: string;
   previousManifest?: string;
+  releaseTag?: string;
 }>): NpmStageSelection {
   const current = packageIdentity(input.currentManifest, "current package.json");
+  if (input.releaseTag !== undefined && input.eventName !== "workflow_dispatch") {
+    throw new TypeError("An explicit release tag requires workflow_dispatch");
+  }
   if (input.eventName === "workflow_dispatch") {
+    let selected = current;
+    if (input.releaseTag !== undefined) {
+      if (!input.releaseTag.startsWith("v")) {
+        throw new TypeError("The requested release tag must be v followed by one stable semantic version");
+      }
+      selected = packageIdentity(JSON.stringify({
+        name: expectedPackageName,
+        version: input.releaseTag.slice(1),
+      }), "requested release tag");
+      if (compareVersions(selected, current) > 0) {
+        throw new TypeError("The requested release tag is newer than current main's package version");
+      }
+    }
     return {
-      currentVersion: current.version,
+      currentVersion: selected.version,
       reason: "manual-recovery",
       shouldStage: true,
     };
@@ -132,6 +150,7 @@ function parseCliOptions(args: readonly string[]): CliOptions {
     "--event",
     "--github-output",
     "--previous-manifest",
+    "--release-tag",
   ]);
   for (const name of values.keys()) {
     if (!allowed.has(name)) throw new TypeError(`Unknown npm stage selection argument ${name}`);
@@ -143,11 +162,13 @@ function parseCliOptions(args: readonly string[]): CliOptions {
     throw new TypeError("npm stage selection requires --current-manifest, --event, and --github-output");
   }
   const previousManifestPath = values.get("--previous-manifest");
+  const releaseTag = values.get("--release-tag");
   return {
     currentManifestPath,
     eventName,
     githubOutputPath,
     ...(previousManifestPath === undefined ? {} : { previousManifestPath }),
+    ...(releaseTag === undefined ? {} : { releaseTag }),
   };
 }
 
@@ -163,6 +184,7 @@ async function main(): Promise<void> {
     currentManifest,
     eventName: options.eventName,
     ...(previousManifest === undefined ? {} : { previousManifest }),
+    ...(options.releaseTag === undefined ? {} : { releaseTag: options.releaseTag }),
   });
   const output = [
     `current_version=${selection.currentVersion}`,
