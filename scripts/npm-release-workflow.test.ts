@@ -385,7 +385,7 @@ describe("npm release workflows", () => {
       readonly version?: unknown;
     };
     expect(manifest).toEqual(expect.objectContaining({
-      version: "0.19.2",
+      version: "0.19.3",
       description: "A knowledge base for coding agents, built from Markdown, backlinks, semantic search, and Git context.",
       keywords: [
         "knowledge-base",
@@ -492,7 +492,7 @@ describe("npm release workflows", () => {
       'expected_tarball_name="hraness-kb-$EXPECTED_VERSION.tgz"',
       'const expectedName = "@hraness/kb"',
       "const minimumFiles = 190",
-      "const maximumFiles = 210",
+      "const maximumFiles = 218",
       "packageRecord.files.length !== packageRecord.entryCount",
       "unpackedSize !== packageRecord.unpackedSize",
       'createHash("sha1")',
@@ -1365,6 +1365,103 @@ describe("npm release workflows", () => {
       await rm(root, { recursive: true, force: true });
     }
   });
+
+  test("the source/release and source-free parsers enforce the same 218-file ceiling", async () => {
+    const [workflow, smoke, manifestSource] = await Promise.all([
+      readFile(stageWorkflowUrl, "utf8"),
+      readFile(packageSmokeUrl, "utf8"),
+      readFile(manifestUrl, "utf8"),
+    ]);
+    const script = workflowStepScript(workflow, "Rebind downloaded package");
+    expect(script).toContain("const maximumFiles = 218;");
+    expect(smoke).toContain("const maximumPackageFiles = 218;");
+    const manifest = JSON.parse(manifestSource) as { readonly version: string };
+    const root = await mkdtemp(join(tmpdir(), "kb-stage-file-count-"));
+    const artifactDirectory = join(root, "kb-npm-stage");
+    const tarballName = `hraness-kb-${manifest.version}.tgz`;
+    const tarball = join(artifactDirectory, tarballName);
+    try {
+      await run([
+        process.execPath,
+        "run",
+        "./scripts/prepare-npm-package.ts",
+        artifactDirectory,
+      ], repository);
+      const originalInventory = await inspectPackageArtifact(tarball);
+      expect(originalInventory.fileCount).toBeLessThanOrEqual(218);
+      const [archive, metadataSource] = await Promise.all([
+        readFile(tarball),
+        readFile(join(artifactDirectory, "npm-pack.json"), "utf8"),
+      ]);
+      const tar = gunzipSync(archive);
+      const template = firstRegularHeader(tar);
+      let trailerOffset = 0;
+      while (trailerOffset + 512 <= tar.length) {
+        if (tar.subarray(trailerOffset, trailerOffset + 512).every((byte) => byte === 0)) break;
+        trailerOffset += 512 + Math.ceil(readTarOctal(tar, trailerOffset + 124) / 512) * 512;
+      }
+      expect(tar.length - trailerOffset).toBeGreaterThanOrEqual(1_024);
+      expect(tar.subarray(trailerOffset).every((byte) => byte === 0)).toBe(true);
+
+      for (const fileCount of [218, 219]) {
+        const metadata = JSON.parse(metadataSource) as Array<Record<string, unknown>>;
+        const record = metadata[0];
+        if (record === undefined || !Array.isArray(record.files)) {
+          throw new Error("Test npm-pack.json lacks its file inventory");
+        }
+        expect(record.files).toHaveLength(originalInventory.fileCount);
+        const headers: Buffer[] = [];
+        for (let index = originalInventory.fileCount; index < fileCount; index += 1) {
+          const path = `dist/package-file-count-boundary-${String(index)}.js`;
+          expect(originalInventory.files.some((file) => file.path === path)).toBe(false);
+          const header = Buffer.from(tar.subarray(template.offset, template.offset + 512));
+          header.fill(0, 0, 100);
+          header.write(`package/${path}`, 0, 100, "ascii");
+          header.write("0000644\0", 100, 8, "ascii");
+          header.write("00000000000\0", 124, 12, "ascii");
+          header[156] = 48;
+          header.fill(0, 157, 257);
+          header.fill(0, 345, 500);
+          writeHeaderChecksum(header, 0);
+          headers.push(header);
+          record.files.push({ mode: 0o644, path, size: 0 });
+        }
+        record.entryCount = fileCount;
+        await persistPackedTarMutation(
+          artifactDirectory,
+          tarballName,
+          Buffer.concat([tar.subarray(0, trailerOffset), ...headers, Buffer.alloc(1_024)]),
+          metadata,
+        );
+        if (fileCount === 218) {
+          const accepted = await inspectPackageArtifact(tarball);
+          expect(accepted.fileCount).toBe(218);
+          expect(accepted.unpackedBytes).toBe(originalInventory.unpackedBytes);
+        } else {
+          await expect(inspectPackageArtifact(tarball)).rejects.toThrow(
+            "Package file count 219 is outside the reviewed range 190-218",
+          );
+        }
+        const staged = await runWorkflowScript(script, {
+          EXPECTED_SOURCE_SHA: "a".repeat(40),
+          EXPECTED_TARBALL_NAME: tarballName,
+          EXPECTED_VERSION: manifest.version,
+          GITHUB_OUTPUT: join(root, "github-output.txt"),
+          RUNNER_TEMP: root,
+        });
+        if (fileCount === 218) {
+          if (staged.exitCode !== 0) {
+            throw new Error(`218-file package was rejected:\n${staged.stderr}${staged.stdout}`);
+          }
+        } else {
+          expect(staged.exitCode).not.toBe(0);
+          expect(staged.stderr).toContain("npm-pack.json has an invalid or excessive entryCount");
+        }
+      }
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
+  }, 120_000);
 
   test("the source/release and source-free parsers reject shared hostile USTAR fixtures", async () => {
     const workflow = await readFile(stageWorkflowUrl, "utf8");
