@@ -2133,8 +2133,8 @@ describe("canonical npm package identity", () => {
         sourcePackJson,
       });
       const verified = await verifyNpmPackageIdentity(validInput);
-      expect(verified.fileCount).toBe(204);
-      expect(verified.unpackedBytes).toBe(4_981_527);
+      expect(verified.fileCount).toBe(212);
+      expect(verified.unpackedBytes).toBe(5_008_356);
       expect(verified.sourceArchiveSha512).not.toBe(verified.registryArchiveSha512);
 
       const originalTar = gunzipSync(sourceBytes);
