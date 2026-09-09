@@ -1,7 +1,7 @@
 # Publish KB
 
 The canonical artifact contract starts at `0.19.4`; that first attempt stopped
-with a retained partial draft. The prepared `0.19.5` candidate is not installable
+with a retained partial draft. The prepared `0.19.6` candidate is not installable
 until its immutable release completes. Each successful release contains
 one checked package archive, its packing receipt, a source/run manifest,
 checksums, and signed GitHub provenance. npm is an optional mirror of those
@@ -139,7 +139,7 @@ gh workflow run npm-stage.yml --ref main -f publish_to_npm=true
 ```
 
 The default candidate is current main's package version. To mirror an earlier
-canonical release while GitHub is ahead, add `-f release_tag=v0.19.5`. The input
+canonical release while GitHub is ahead, add `-f release_tag=v0.19.6`. The input
 must be one exact stable tag no newer than current main's version; its source
 must be an ancestor of the workflow commit, and its version must still be newer
 than npm `latest`. Neither a Git branch with a matching name nor an unqualified

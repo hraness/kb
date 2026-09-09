@@ -19,7 +19,7 @@ const target = new URL("https://sub.example.com/account/page");
 const future = 4_102_444_800;
 
 describe("strict browser-like cookie filtering", () => {
-  test("patched Chromium provider treats an empty top-level site as unpartitioned", async () => {
+  test("pinned Chromium provider treats an empty top-level site as unpartitioned", async () => {
     const profile = mkdtempSync(join(tmpdir(), "hraness-kb-sweet-cookie-chromium-test-"));
     const cookieDatabase = join(profile, "Cookies");
     const database = new Database(cookieDatabase);
@@ -97,7 +97,7 @@ describe("strict browser-like cookie filtering", () => {
     }
   });
 
-  test("patched browser provider preserves host scope and excludes partitioned Firefox state", async () => {
+  test("pinned browser provider preserves host scope and excludes partitioned Firefox state", async () => {
     const profile = mkdtempSync(join(tmpdir(), "hraness-kb-sweet-cookie-test-"));
     const database = new Database(join(profile, "cookies.sqlite"));
     try {

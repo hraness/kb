@@ -55,7 +55,7 @@ missing:
 ```sh
 command -v kb >/dev/null 2>&1 || {
   command -v bun >/dev/null 2>&1 || exit 1
-  bun add --global --ignore-scripts https://github.com/hraness/kb/releases/download/v0.19.5/hraness-kb-0.19.5.tgz
+  bun add --global --ignore-scripts https://github.com/hraness/kb/releases/download/v0.19.6/hraness-kb-0.19.6.tgz
 }
 kb --help
 ```

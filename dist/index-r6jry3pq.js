@@ -18,7 +18,7 @@ import {
   inspectClipEnvironment,
   renderAdapterCapabilities,
   renderDoctorReport
-} from "./index-210486vj.js";
+} from "./index-n5618f1n.js";
 import {
   acquireBrowser,
   acquireCookieHttp,
