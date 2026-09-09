@@ -79,7 +79,7 @@ import {
   addNoteRelation,
   createNote,
   removeNoteRelation
-} from "./index-gxr0fctd.js";
+} from "./index-dbfcfrdp.js";
 import"./index-3rm7cz6h.js";
 import {
   validateSearchQuery

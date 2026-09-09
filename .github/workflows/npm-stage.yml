@@ -494,10 +494,17 @@ jobs:
             "api",
             `repos/${repository}/releases/tags/${priorTag}`,
           ], `immutable release ${priorTag}`));
-          const priorAssetsMatch = (assets, version) => {
+          const priorAssetsMatch = (assets, version, sourceSha) => {
+            const legacySources = {
+              "0.19.0": "2d6a17b5d6d0311b8d9199692919da9e97e584ab",
+              "0.19.1": "3590d3bfc6c4f3863d22b8f214c6c774a87e56a3",
+              "0.19.2": "ed79b87d0ac59064c2d3708b8090b29536b34455",
+            };
+            if (Object.hasOwn(legacySources, version)) {
+              return assets.length === 0 && sourceSha === legacySources[version];
+            }
             const parts = version.split(".").map(BigInt);
-            const historical = parts[0] === 0n && (parts[1] < 19n || (parts[1] === 19n && parts[2] <= 2n));
-            if (historical) return assets.length === 0;
+            if (parts[0] === 0n && (parts[1] < 19n || (parts[1] === 19n && parts[2] < 4n))) return false;
             const names = [`hraness-kb-${version}.tgz`, "npm-pack.json", "release-manifest.json", "SHA256SUMS", "provenance.jsonl"].sort();
             return assets.length === names.length
               && JSON.stringify(assets.map((asset) => asset?.name).sort()) === JSON.stringify(names)
@@ -515,7 +522,7 @@ jobs:
             || release?.author?.login !== "github-actions[bot]"
             || release?.author?.type !== "Bot"
             || !Array.isArray(release?.assets)
-            || !priorAssetsMatch(release.assets, priorTag.slice(1))
+            || !priorAssetsMatch(release.assets, priorTag.slice(1), tagIdentity.get("source"))
           ) {
             throw new Error(`npm latest ${latestValue} lacks its exact immutable GitHub Release`);
           }
@@ -795,7 +802,8 @@ jobs:
           const { readFileSync, statSync } = require("node:fs");
           const { gunzipSync } = require("node:zlib");
           const minimumFiles = 190;
-          const maximumFiles = 210;
+          const maximumFiles = 218;
+          const maximumEntries = 420;
           const minimumPackedBytes = 950_000;
           const maximumPackedBytes = 1_200_000;
           const minimumUnpackedBytes = 4_500_000;
@@ -940,7 +948,7 @@ jobs:
             throw new Error("Downloaded tarball differs from npm-pack.json SHA-1 or SHA-512");
           }
           const tar = gunzipSync(archiveBytes, {
-            maxOutputLength: maximumUnpackedBytes + maximumFiles * 1_024 + 1_024,
+            maxOutputLength: maximumUnpackedBytes + maximumEntries * 512 + 1_024,
           });
           const tarText = (header, start, length) => {
             const field = header.subarray(start, start + length);
@@ -1038,7 +1046,7 @@ jobs:
             }
             offset += padded;
             entries += 1;
-            if (entries > maximumFiles * 2) {
+            if (entries > maximumEntries) {
               throw new Error("Packed package.json tar contains too many entries");
             }
           }
@@ -1251,6 +1259,7 @@ jobs:
           )"
           gh api "repos/$GITHUB_REPOSITORY/compare/$prior_source...$DEFAULT_BRANCH" > "$prior_comparison_json"
           PRIOR_TAG="$prior_tag" \
+            PRIOR_SOURCE="$prior_source" \
             PRIOR_RELEASE_JSON="$prior_release_json" \
             PRIOR_COMPARISON_JSON="$prior_comparison_json" node <<'NODE'
           const { readFileSync } = require("node:fs");
@@ -1258,10 +1267,17 @@ jobs:
           const read = (name) => JSON.parse(readFileSync(process.env[name], "utf8"));
           const release = read("PRIOR_RELEASE_JSON");
           const comparison = read("PRIOR_COMPARISON_JSON");
-          const priorAssetsMatch = (assets, version) => {
+          const priorAssetsMatch = (assets, version, sourceSha) => {
+            const legacySources = {
+              "0.19.0": "2d6a17b5d6d0311b8d9199692919da9e97e584ab",
+              "0.19.1": "3590d3bfc6c4f3863d22b8f214c6c774a87e56a3",
+              "0.19.2": "ed79b87d0ac59064c2d3708b8090b29536b34455",
+            };
+            if (Object.hasOwn(legacySources, version)) {
+              return assets.length === 0 && sourceSha === legacySources[version];
+            }
             const parts = version.split(".").map(BigInt);
-            const historical = parts[0] === 0n && (parts[1] < 19n || (parts[1] === 19n && parts[2] <= 2n));
-            if (historical) return assets.length === 0;
+            if (parts[0] === 0n && (parts[1] < 19n || (parts[1] === 19n && parts[2] < 4n))) return false;
             const names = [`hraness-kb-${version}.tgz`, "npm-pack.json", "release-manifest.json", "SHA256SUMS", "provenance.jsonl"].sort();
             return assets.length === names.length
               && JSON.stringify(assets.map((asset) => asset?.name).sort()) === JSON.stringify(names)
@@ -1279,7 +1295,7 @@ jobs:
             || release?.author?.login !== "github-actions[bot]"
             || release?.author?.type !== "Bot"
             || !Array.isArray(release?.assets)
-            || !priorAssetsMatch(release.assets, priorTag.slice(1))
+            || !priorAssetsMatch(release.assets, priorTag.slice(1), process.env.PRIOR_SOURCE)
           ) throw new Error(`npm latest ${priorTag.slice(1)} lacks its exact immutable GitHub Release`);
           if (comparison?.status !== "ahead" && comparison?.status !== "identical") {
             throw new Error(`npm latest ${priorTag.slice(1)} is not reachable from current main`);

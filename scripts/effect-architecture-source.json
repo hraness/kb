@@ -1,0 +1,19 @@
+{
+  "schema": "effect-architecture-source/v1",
+  "edition": "1.5.0",
+  "mode": "vendored-development-source",
+  "canonicalRepository": "https://github.com/hraness/direct",
+  "sourceCommit": "01554f92f4cdaab633bd649e45188421b8c1ebaf",
+  "files": {
+    "scripts/check-effect-architecture.ts": "1d8828b92298ba1caabbc3a5158975a56bd4fde14e6df6894d2b5146bd14e33f",
+    "scripts/check-effect-architecture.test.ts": "08cc8386a5409113b4c7991c5e01982d82e2786302f291c1576298496caffb36"
+  },
+  "qualifiedToolchain": {
+    "bun": "1.3.14",
+    "typescript": "6.0.3",
+    "effect": "3.22.1",
+    "fast-check": "4.9.0"
+  },
+  "adaptation": "None; canonical engine and complete fixtures are byte-identical, including relative .js imports.",
+  "policy": "KB owns scripts/check-effect-policy.ts. Workflow and note publication retain distinct product-local programs and finite Promise roots; no sibling dependency or shared production runtime."
+}

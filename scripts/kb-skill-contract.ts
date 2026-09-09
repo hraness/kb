@@ -418,8 +418,8 @@ export function validateKbSkillContractResources(
       errors.push(`SKILL.md must link ${link}`);
     }
   }
-  if (!resources.skill.includes("bun add --global --ignore-scripts https://github.com/hraness/kb/releases/download/v0.19.3/hraness-kb-0.19.3.tgz")) {
-    errors.push("SKILL.md must retain the immutable 0.19.3 GitHub runtime pin");
+  if (!resources.skill.includes("bun add --global --ignore-scripts https://github.com/hraness/kb/releases/download/v0.19.4/hraness-kb-0.19.4.tgz")) {
+    errors.push("SKILL.md must retain the immutable 0.19.4 GitHub runtime pin");
   }
   for (const [name, contents, headings] of [
     ["customize.md", resources.customize, CUSTOMIZE_HEADINGS],

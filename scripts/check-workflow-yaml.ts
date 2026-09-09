@@ -410,7 +410,7 @@ function validatePendingStableReleaseClosure(command: string, label: string): vo
     'release?.author?.login !== "github-actions[bot]"',
     'release?.author?.type !== "Bot"',
     "!Array.isArray(release?.assets)",
-    "!priorAssetsMatch(release.assets, priorTag.slice(1))",
+    '!priorAssetsMatch(release.assets, priorTag.slice(1), tagIdentity.get("source"))',
     'comparison?.status !== "ahead" && comparison?.status !== "identical"',
   ]) {
     if (!command.includes(required)) {
@@ -521,7 +521,7 @@ function validateFinalStableReleaseClosure(command: string, label: string): void
     'release?.author?.login !== "github-actions[bot]"',
     'release?.author?.type !== "Bot"',
     "!Array.isArray(release?.assets)",
-    "!priorAssetsMatch(release.assets, priorTag.slice(1))",
+    "!priorAssetsMatch(release.assets, priorTag.slice(1), process.env.PRIOR_SOURCE)",
     'comparison?.status !== "ahead" && comparison?.status !== "identical"',
     'const terminal = JSON.parse(process.env.TERMINAL_LATEST ?? "null")',
     'if (typeof final !== "string" || terminal !== final)',
@@ -1031,7 +1031,7 @@ export function validateNpmStageWorkflow(source: string, label: string): void {
   }
   validateReviewedWorkflowSemantics(
     workflow,
-    "3e7cd8986cb161683ac0ab598f2d9819c1c6f9edaf4e2b69973ec2e827411fe0",
+    "8806e855b9dfa07ba2d93f6b705ab09a7e12f685cb01c6835201104dde0b4e39",
     label,
   );
 }

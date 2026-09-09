@@ -1,5 +1,5 @@
 import { createHash } from "node:crypto";
-import { execFileSync, spawnSync } from "node:child_process";
+import { execFileSync } from "node:child_process";
 import { lstat, mkdir, readFile, readdir, writeFile } from "node:fs/promises";
 import { readFileSync } from "node:fs";
 import { basename, join, resolve } from "node:path";
@@ -160,6 +160,13 @@ function command(program: string, args: readonly string[]): string {
   return execFileSync(program, [...args], { encoding: "utf8", timeout: 90_000, maxBuffer: 16 * 1024 * 1024, stdio: ["ignore", "pipe", "pipe"] }).trim();
 }
 
+function binaryAsset(id: number, expectedBytes: number): Buffer {
+  return execFileSync("gh", ["api", "--method", "GET", `/repos/${repository}/releases/assets/${id}`,
+    "-H", "Accept: application/octet-stream"], {
+    timeout: 90_000, maxBuffer: expectedBytes + 1, stdio: ["ignore", "pipe", "pipe"],
+  });
+}
+
 function api(path: string): unknown {
   return JSON.parse(command("gh", ["api", "--method", "GET", path])) as unknown;
 }
@@ -281,36 +288,112 @@ function verifyCurrentControls(manifest: ReleaseManifest): void {
   if (source.type !== "commit" || source.sha !== manifest.sourceSha || tag.tag !== manifest.tag) throw new Error("Release tag changed after verification");
 }
 
+export function uniqueReleaseId(pages: unknown, tag: string): number | undefined {
+  if (!Array.isArray(pages) || pages.length === 0 || pages.length > 1_000) {
+    throw new Error("Authenticated release inventory is malformed or exceeds its bound");
+  }
+  const identities = new Set<number>();
+  const matches: number[] = [];
+  for (const page of pages) {
+    if (!Array.isArray(page) || page.length > 100) throw new Error("Authenticated release page is malformed");
+    for (const value of page) {
+      const release = record(value, "Listed release");
+      const id = positive(release.id, "Listed release ID");
+      if (identities.has(id)) throw new Error("Authenticated release inventory repeats an ID");
+      identities.add(id);
+      if (typeof release.tag_name !== "string") throw new Error("Listed release tag is malformed");
+      if (release.tag_name === tag) matches.push(id);
+    }
+  }
+  if (matches.length > 1) throw new Error("Multiple GitHub releases claim the exact tag");
+  return matches[0];
+}
+
+export function publishVerifiedRelease(
+  directory: string,
+  manifest: ReleaseManifest,
+  assets: readonly AssetIdentity[],
+  run: (program: string, args: readonly string[]) => string = command,
+  authorize: () => void = () => verifyCurrentControls(manifest),
+  download: (id: number, expectedBytes: number) => Uint8Array = binaryAsset,
+): void {
+  const read = (path: string): unknown => JSON.parse(run("gh", ["api", "--method", "GET", path])) as unknown;
+  const discover = (): number | undefined => uniqueReleaseId(JSON.parse(run("gh", [
+    "api", "--method", "GET", `/repos/${repository}/releases?per_page=100`, "--paginate", "--slurp",
+  ])) as unknown, manifest.tag);
+  // GitHub's by-tag endpoint can return 404 for an existing draft. Enumerate
+  // authenticated releases and retain one exact ID throughout its lifecycle.
+  let releaseId = discover();
+  if (releaseId === undefined) {
+    authorize();
+    const response = run("gh", ["api", "--method", "POST", `/repos/${repository}/releases`, "--include",
+      "-f", `tag_name=${manifest.tag}`, "-f", `target_commitish=${manifest.sourceSha}`,
+      "-f", `name=KB ${manifest.tag}`, "-f", `body=${releaseBody(manifest)}`,
+      "-F", "draft=true", "-F", "prerelease=false", "-f", "make_latest=false"]);
+    const separator = response.search(/\r?\n\r?\n/u);
+    if (!/^HTTP\/(?:1\.1|2(?:\.0)?) 201(?: [^\r\n]*)?\r?\n/u.test(response) || separator < 0) {
+      throw new Error("Draft creation did not return an exact 201 receipt; reconcile provider state before retrying");
+    }
+    const created = record(JSON.parse(response.slice(separator).trim()) as unknown, "Created draft");
+    if (created.draft !== true || verifyProviderRelease(created, manifest, assets, true).length !== assets.length) {
+      throw new Error("Created draft response is not the exact empty draft");
+    }
+    // The list response may omit a successful creation. Its exact 201
+    // response owns the new ID; never rediscover or create again in this run.
+    releaseId = positive(created.id, "Created draft ID");
+  }
+  const releasePath = `/repos/${repository}/releases/${releaseId}`;
+  const readExact = (): unknown => {
+    const release = record(read(releasePath), "Exact release");
+    if (release.id !== releaseId) throw new Error("Release ID changed during publication");
+    return release;
+  };
+  const verifyRemoteBytes = (value: unknown): void => {
+    const release = record(value, "Complete release");
+    if (!Array.isArray(release.assets) || release.assets.length !== assets.length) throw new Error("Remote asset inventory is incomplete");
+    for (const value of release.assets) {
+      const asset = record(value, "Remote asset");
+      const expected = assets.find((candidate) => candidate.name === asset.name);
+      if (expected === undefined || expected.bytes <= 0 || expected.bytes > maximumFileBytes) throw new Error("Remote asset exceeds its admitted byte bound");
+      const bytes = download(positive(asset.id, "Remote asset ID"), expected.bytes);
+      if (bytes.length !== expected.bytes || hash(bytes) !== expected.sha256) throw new Error("Downloaded release asset differs from the admitted canonical bytes");
+    }
+  };
+  let release = readExact();
+  let missing = verifyProviderRelease(release, manifest, assets, true);
+  for (const name of missing) {
+    authorize();
+    run("gh", ["api", "--method", "POST", `https://uploads.github.com/repos/${repository}/releases/${releaseId}/assets?name=${encodeURIComponent(name)}`,
+      "--input", join(directory, name), "-H", "Content-Type: application/octet-stream",
+      "-H", `Content-Length: ${assets.find((asset) => asset.name === name)!.bytes}`]);
+    release = readExact();
+    missing = verifyProviderRelease(release, manifest, assets, true);
+  }
+  if (missing.length !== 0) throw new Error("Draft release is missing canonical assets");
+  release = readExact();
+  if (verifyProviderRelease(release, manifest, assets, true).length !== 0) throw new Error("Draft release became incomplete before publication");
+  if (record(release, "Release").draft === true) {
+    verifyRemoteBytes(release);
+    authorize();
+    run("gh", ["api", "--method", "PATCH", releasePath, "-F", "draft=false", "-f", "make_latest=true"]);
+  }
+  release = readExact();
+  verifyProviderRelease(release, manifest, assets, false);
+  verifyRemoteBytes(release);
+  const published = record(read(`/repos/${repository}/releases/tags/${manifest.tag}`), "Published release");
+  if (published.id !== releaseId) throw new Error("Published tag resolves to another release ID");
+  verifyProviderRelease(published, manifest, assets, false);
+  const latest = record(read(`/repos/${repository}/releases/latest`), "Latest release");
+  if (latest.id !== releaseId || latest.tag_name !== manifest.tag) throw new Error("Canonical release is not GitHub Latest");
+}
+
 async function publish(directory: string): Promise<void> {
   const manifest = await verifyReleaseFiles(directory);
   if (manifest.sourceSha !== process.env.VERIFIED_SOURCE_SHA || manifest.workflowSha !== process.env.WORKFLOW_SHA
     || manifest.tag !== process.env.VERIFIED_TAG || String(manifest.runId) !== process.env.GITHUB_RUN_ID
     || String(manifest.runAttempt) !== process.env.GITHUB_RUN_ATTEMPT) throw new Error("Release handoff differs from the authorized run outputs");
   verifyAttestations(directory, manifest);
-  const assets = await assetIdentities(directory);
-  const path = `/repos/${repository}/releases/tags/${manifest.tag}`;
-  const result = spawnSync("gh", ["api", "--method", "GET", path], { encoding: "utf8", timeout: 30_000, maxBuffer: 2 * 1024 * 1024 });
-  let release: unknown;
-  if (result.status === 0) release = JSON.parse(result.stdout) as unknown;
-  else if (result.status !== null && /HTTP 404/u.test(result.stderr)) {
-    verifyCurrentControls(manifest);
-    command("gh", ["release", "create", manifest.tag, "--repo", repository, "--verify-tag", "--target", manifest.sourceSha, "--draft", "--title", `KB ${manifest.tag}`, "--notes", releaseBody(manifest)]);
-    release = api(path);
-  } else throw new Error("Could not determine whether the exact GitHub Release exists");
-  let missing = verifyProviderRelease(release, manifest, assets, true);
-  for (const name of missing) {
-    verifyCurrentControls(manifest);
-    command("gh", ["release", "upload", manifest.tag, join(directory, name), "--repo", repository]);
-    release = api(path);
-    missing = verifyProviderRelease(release, manifest, assets, true);
-  }
-  if (missing.length !== 0) throw new Error("Draft release is missing canonical assets");
-  if (record(release, "Release").draft === true) {
-    verifyCurrentControls(manifest);
-    command("gh", ["release", "edit", manifest.tag, "--repo", repository, "--draft=false", "--latest"]);
-  }
-  verifyProviderRelease(api(path), manifest, assets, false);
-  if (record(api(`/repos/${repository}/releases/latest`), "Latest release").tag_name !== manifest.tag) throw new Error("Canonical release is not GitHub Latest");
+  publishVerifiedRelease(directory, manifest, await assetIdentities(directory));
 }
 
 async function download(directory: string, version: string): Promise<void> {

@@ -10,7 +10,7 @@ import {
 import { requiresOhAdoptionPreparerExport } from "./npm-package-identity.js";
 
 const packageName = "@hraness/kb";
-const maximumPackageFiles = 210;
+const maximumPackageFiles = 218;
 const maximumPackedBytes = 1_200_000;
 const maximumUnpackedBytes = 5_250_000;
 const importSpecifiers = [
@@ -376,7 +376,7 @@ async function verifyInstalledSkills(consumer: string): Promise<void> {
   ]);
   const versionParts = manifest.version.split(".").map(BigInt);
   const githubRelease = versionParts[0]! > 0n || versionParts[1]! > 19n
-    || (versionParts[1] === 19n && versionParts[2]! >= 3n);
+    || (versionParts[1] === 19n && versionParts[2]! >= 4n);
   const runtimePin = githubRelease
     ? `https://github.com/hraness/kb/releases/download/v${manifest.version}/hraness-kb-${manifest.version}.tgz`
     : `@hraness/kb@${manifest.version}`;

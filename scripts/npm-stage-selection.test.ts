@@ -75,19 +75,19 @@ describe("npm stage selection", () => {
     expect(selectNpmStage({
       currentManifest: manifest("0.20.0"),
       eventName: "workflow_dispatch",
-      releaseTag: "v0.19.3",
-    })).toEqual({ currentVersion: "0.19.3", reason: "manual-recovery", shouldStage: true });
+      releaseTag: "v0.19.4",
+    })).toEqual({ currentVersion: "0.19.4", reason: "manual-recovery", shouldStage: true });
     for (const releaseTag of [
-      "0.19.3", "refs/tags/v0.19.3", "v0.19.3\n", "v0.19.3-beta.1", "v00.19.3",
-      "v0.20.1", "v9007199254740992.0.0", "v0.19.3;echo x",
+      "0.19.4", "refs/tags/v0.19.4", "v0.19.4\n", "v0.19.4-beta.1", "v00.19.4",
+      "v0.20.1", "v9007199254740992.0.0", "v0.19.4;echo x",
     ]) {
       expect(() => selectNpmStage({
         currentManifest: manifest("0.20.0"), eventName: "workflow_dispatch", releaseTag,
       })).toThrow();
     }
     expect(() => selectNpmStage({
-      currentManifest: manifest("0.20.0"), previousManifest: manifest("0.19.3"),
-      eventName: "push", releaseTag: "v0.19.3",
+      currentManifest: manifest("0.20.0"), previousManifest: manifest("0.19.4"),
+      eventName: "push", releaseTag: "v0.19.4",
     })).toThrow("requires workflow_dispatch");
     const versionPart = fc.integer({ min: 0, max: 1_000_000 });
     fc.assert(fc.property(versionPart, versionPart, (a, b) => {

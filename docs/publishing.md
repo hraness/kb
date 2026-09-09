@@ -1,6 +1,6 @@
 # Publish KB
 
-GitHub Releases are canonical from `0.19.3`. Each immutable release contains
+GitHub Releases are canonical from `0.19.4`. Each immutable release contains
 one checked package archive, its packing receipt, a source/run manifest,
 checksums, and signed GitHub provenance. npm is an optional mirror of those
 exact archive bytes. An npm outage or pending npm promotion does not block a
@@ -69,9 +69,16 @@ public repository and owner IDs, the exact tagged source and workflow,
 GitHub-hosted execution, the tag push, and the originating run/attempt.
 Unsigned manifest fields or matching checksums alone never grant authority.
 
-Publication creates a draft, uploads only missing matching assets, verifies
+Publication discovers retained drafts in the authenticated release inventory
+and keeps the exact release ID for draft reads, uploads, and publication.
+New drafts retain the verified creation response's ID because the release list
+response may omit a successful creation.
+GitHub may return 404 for a draft looked up by tag; that response alone never
+authorizes creating another release. Publication uploads only missing matching assets, verifies
 provider asset names, sizes, SHA-256 digests, and Actions-bot creator
-`41898282`, then publishes an immutable Latest release. Current main,
+`41898282`, then downloads each exact asset ID and checks its bytes before
+publishing an immutable Latest release. It repeats the exact asset-byte readback
+after publication. Current main,
 annotated tag, source ancestry, and the complete helper/workflow closure are
 revalidated before each mutation. Existing matching state is reconciled;
 assets are never overwritten and releases are never deleted/recreated.
@@ -126,7 +133,7 @@ gh workflow run npm-stage.yml --ref main -f publish_to_npm=true
 ```
 
 The default candidate is current main's package version. To mirror an earlier
-canonical release while GitHub is ahead, add `-f release_tag=v0.19.3`. The input
+canonical release while GitHub is ahead, add `-f release_tag=v0.19.4`. The input
 must be one exact stable tag no newer than current main's version; its source
 must be an ancestor of the workflow commit, and its version must still be newer
 than npm `latest`. Neither a Git branch with a matching name nor an unqualified
@@ -152,8 +159,9 @@ is malformed. An unresolved intent newer than public npm `latest` prevents a
 second stage. Public promotion clears that intent; the prior npm version must
 still have its annotated tag, immutable Actions-created release, and source
 reachable from main. GitHub Latest may be newer than npm Latest. Historical
-zero-asset releases are accepted only through `0.19.2`; later releases require
-the five canonical assets.
+zero-asset releases are accepted only for the exact source-bound tags `v0.19.0`,
+`v0.19.1`, and `v0.19.2` recorded in the workflow. Other prior releases must be
+at least `0.19.4` and require the five canonical assets.
 
 npm promotion remains subject to its two-factor authentication requirement
 until npm approves a classification change. This is independent of canonical

@@ -383,7 +383,7 @@ describe("npm release workflows", () => {
       readonly version?: unknown;
     };
     expect(manifest).toEqual(expect.objectContaining({
-      version: "0.19.3",
+      version: "0.19.4",
       description: "A knowledge base for coding agents, built from Markdown, backlinks, semantic search, and Git context.",
       keywords: [
         "knowledge-base",
@@ -490,7 +490,10 @@ describe("npm release workflows", () => {
       'expected_tarball_name="hraness-kb-$EXPECTED_VERSION.tgz"',
       'const expectedName = "@hraness/kb"',
       "const minimumFiles = 190",
-      "const maximumFiles = 210",
+      "const maximumFiles = 218",
+      "const maximumEntries = 420",
+      "if (entries > maximumEntries)",
+      "maximumUnpackedBytes + maximumEntries * 512 + 1_024",
       "packageRecord.files.length !== packageRecord.entryCount",
       "unpackedSize !== packageRecord.unpackedSize",
       'createHash("sha1")',
@@ -803,7 +806,7 @@ describe("npm release workflows", () => {
           'case "$*" in',
           '  *"repos/hraness/kb/releases/tags/v0.19.0"*) cat "$MOCK_RELEASE_JSON" ;;',
           '  *"repos/hraness/kb/releases/latest"*) cat "$MOCK_LATEST_RELEASE_JSON" ;;',
-          '  *"repos/hraness/kb/compare/2222222222222222222222222222222222222222...main"*) cat "$MOCK_COMPARISON_JSON" ;;',
+          '  *"repos/hraness/kb/compare/2d6a17b5d6d0311b8d9199692919da9e97e584ab...main"*) cat "$MOCK_COMPARISON_JSON" ;;',
           '  *"/actions/workflows/344070109/runs?"*) cat "$MOCK_RUNS_JSON" ;;',
           '  *"/actions/runs/67890/jobs?"*) cat "$MOCK_CURRENT_JOBS_JSON" ;;',
           '  *"/actions/runs/12345/jobs?"*|*"/actions/runs/33269920554/jobs?"*) cat "$MOCK_JOBS_JSON" ;;',
@@ -818,7 +821,7 @@ describe("npm release workflows", () => {
         writeFile(
           tagIdentityPath,
           "1111111111111111111111111111111111111111\trefs/tags/v0.19.0\n" +
-            "2222222222222222222222222222222222222222\trefs/tags/v0.19.0^{}\n",
+            "2d6a17b5d6d0311b8d9199692919da9e97e584ab\trefs/tags/v0.19.0^{}\n",
         ),
         writeFile(releasePath, JSON.stringify(completeRelease)),
         writeFile(latestReleasePath, JSON.stringify(completeRelease)),
@@ -874,14 +877,14 @@ describe("npm release workflows", () => {
       const released = await runWorkflowScript(script, environment);
       expect(released.exitCode).toBe(0);
 
-      await writeFile(tagIdentityPath, "2222222222222222222222222222222222222222\trefs/tags/v0.19.0\n");
+      await writeFile(tagIdentityPath, "2d6a17b5d6d0311b8d9199692919da9e97e584ab\trefs/tags/v0.19.0\n");
       const lightweightTag = await runWorkflowScript(script, environment);
       expect(lightweightTag.exitCode).not.toBe(0);
       expect(lightweightTag.stderr).toContain("lacks one annotated Git tag");
       await writeFile(
         tagIdentityPath,
         "1111111111111111111111111111111111111111\trefs/tags/v0.19.0\n" +
-          "2222222222222222222222222222222222222222\trefs/tags/v0.19.0^{}\n",
+          "2d6a17b5d6d0311b8d9199692919da9e97e584ab\trefs/tags/v0.19.0^{}\n",
       );
 
       await writeFile(releasePath, JSON.stringify({ ...completeRelease, immutable: false }));
@@ -1100,13 +1103,41 @@ describe("npm release workflows", () => {
     }
   }, 30_000);
 
+  test("legacy release compatibility is source-bound and cannot admit an assetless canonical candidate", async () => {
+    const workflow = await readFile(stageWorkflowUrl, "utf8");
+    for (const step of ["Reject unresolved stable-stage intent", "Revalidate current main and stage exact package"]) {
+      const command = workflowStepScript(workflow, step);
+      const start = command.indexOf("const priorAssetsMatch = ") + "const priorAssetsMatch = ".length;
+      expect(start).toBeGreaterThan("const priorAssetsMatch = ".length);
+      let end = command.indexOf("{", start) + 1;
+      let depth = 1;
+      while (depth > 0 && end < command.length) {
+        if (command[end] === "{") depth += 1;
+        if (command[end] === "}") depth -= 1;
+        end += 1;
+      }
+      expect(depth).toBe(0);
+      const accepts = new Function(`return (${command.slice(start, end)});`)() as
+        (assets: readonly unknown[], version: string, sourceSha: string) => boolean;
+      const legacySource = "ed79b87d0ac59064c2d3708b8090b29536b34455";
+      expect(accepts([], "0.19.2", legacySource)).toBe(true);
+      expect(accepts([], "0.19.2", "b".repeat(40))).toBe(false);
+      expect(accepts([], "0.19.3", legacySource)).toBe(false);
+      expect(accepts([], "0.19.4", legacySource)).toBe(false);
+      const assets = ["hraness-kb-0.19.4.tgz", "npm-pack.json", "release-manifest.json", "SHA256SUMS", "provenance.jsonl"]
+        .map((name, index) => ({ name, id: index + 1, size: 10, state: "uploaded", digest: `sha256:${"a".repeat(64)}` }));
+      expect(accepts(assets, "0.19.4", "b".repeat(40))).toBe(true);
+      expect(accepts(assets.slice(1), "0.19.4", "b".repeat(40))).toBe(false);
+    }
+  });
+
   test("the terminal stage boundary freshly closes npm, Git tag, and GitHub Release state", async () => {
     const workflow = await readFile(stageWorkflowUrl, "utf8");
     const script = workflowStepScript(workflow, "Revalidate current main and stage exact package");
     const directory = await mkdtemp(join(tmpdir(), "kb-final-stage-boundary-"));
     const binaryDirectory = join(directory, "bin");
     const expectedSourceSha = "a".repeat(40);
-    const priorSourceSha = "b".repeat(40);
+    const priorSourceSha = "2d6a17b5d6d0311b8d9199692919da9e97e584ab";
     const completeRelease = {
       assets: [],
       author: { id: 41898282, login: "github-actions[bot]", type: "Bot" },
@@ -1192,6 +1223,7 @@ describe("npm release workflows", () => {
       const runBoundary = async (options: Readonly<{
         candidateTagPresent?: boolean;
         canonicalSourceSha?: string;
+        legacySourceSha?: string;
         comparisonStatus?: string;
         release?: Readonly<Record<string, unknown>>;
         terminalLatest?: string;
@@ -1218,7 +1250,7 @@ describe("npm release workflows", () => {
           writeFile(digestPath, digest),
           writeFile(
             tagIdentityPath,
-            `${"c".repeat(40)}\trefs/tags/v0.19.0\n${priorSourceSha}\trefs/tags/v0.19.0^{}\n`,
+            `${"c".repeat(40)}\trefs/tags/v0.19.0\n${options.legacySourceSha ?? priorSourceSha}\trefs/tags/v0.19.0^{}\n`,
           ),
           writeFile(releasePath, JSON.stringify(release)),
           writeFile(latestReleasePath, JSON.stringify(release)),
@@ -1254,7 +1286,7 @@ describe("npm release workflows", () => {
           MOCK_NPM_COUNT_FILE: npmCountPath,
           MOCK_NPM_TERMINAL: options.terminalLatest ?? "0.19.0",
           MOCK_PRIOR_TAG_DRIFT: options.terminalPriorTagDrift === true ? "true" : "false",
-          MOCK_PRIOR_SOURCE: priorSourceSha,
+          MOCK_PRIOR_SOURCE: options.legacySourceSha ?? priorSourceSha,
           MOCK_RELEASE_JSON: releasePath,
           MOCK_SOURCE_SHA: expectedSourceSha,
           MOCK_TAG_IDENTITY: tagIdentityPath,
@@ -1286,6 +1318,11 @@ describe("npm release workflows", () => {
       const delayedMirror = await runBoundary({ canonicalSourceSha: "e".repeat(40) });
       expect(delayedMirror.result.exitCode).toBe(0);
       expect(delayedMirror.commandLog).toContain("npm stage publish");
+
+      const legacySourceDrift = await runBoundary({ legacySourceSha: "b".repeat(40) });
+      expect(legacySourceDrift.result.exitCode).not.toBe(0);
+      expect(legacySourceDrift.result.stderr).toContain("lacks its exact immutable GitHub Release");
+      expect(legacySourceDrift.commandLog).not.toContain("npm stage publish");
 
       const candidateCollision = await runBoundary({ candidateTagPresent: false });
       expect(candidateCollision.result.exitCode).not.toBe(0);
@@ -1372,6 +1409,157 @@ describe("npm release workflows", () => {
       await rm(root, { recursive: true, force: true });
     }
   });
+
+  test("the source/release and source-free parsers enforce independent 218-file and 420-entry ceilings", async () => {
+    const [workflow, smoke, manifestSource] = await Promise.all([
+      readFile(stageWorkflowUrl, "utf8"),
+      readFile(packageSmokeUrl, "utf8"),
+      readFile(manifestUrl, "utf8"),
+    ]);
+    const script = workflowStepScript(workflow, "Rebind downloaded package");
+    expect(script).toContain("const maximumFiles = 218;");
+    expect(script).toContain("const maximumEntries = 420;");
+    expect(script).toContain("maximumUnpackedBytes + maximumEntries * 512 + 1_024");
+    expect(smoke).toContain("const maximumPackageFiles = 218;");
+    const manifest = JSON.parse(manifestSource) as { readonly version: string };
+    const root = await mkdtemp(join(tmpdir(), "kb-stage-file-count-"));
+    const artifactDirectory = join(root, "kb-npm-stage");
+    const tarballName = `hraness-kb-${manifest.version}.tgz`;
+    const tarball = join(artifactDirectory, tarballName);
+    try {
+      await run([
+        process.execPath,
+        "run",
+        "./scripts/prepare-npm-package.ts",
+        artifactDirectory,
+      ], repository);
+      const originalInventory = await inspectPackageArtifact(tarball);
+      expect(originalInventory.fileCount).toBeLessThanOrEqual(218);
+      const [archive, metadataSource] = await Promise.all([
+        readFile(tarball),
+        readFile(join(artifactDirectory, "npm-pack.json"), "utf8"),
+      ]);
+      const tar = gunzipSync(archive);
+      const template = firstRegularHeader(tar);
+      let trailerOffset = 0;
+      while (trailerOffset + 512 <= tar.length) {
+        if (tar.subarray(trailerOffset, trailerOffset + 512).every((byte) => byte === 0)) break;
+        trailerOffset += 512 + Math.ceil(readTarOctal(tar, trailerOffset + 124) / 512) * 512;
+      }
+      expect(tar.length - trailerOffset).toBeGreaterThanOrEqual(1_024);
+      expect(tar.subarray(trailerOffset).every((byte) => byte === 0)).toBe(true);
+
+      for (const fileCount of [218, 219]) {
+        const metadata = JSON.parse(metadataSource) as Array<Record<string, unknown>>;
+        const record = metadata[0];
+        if (record === undefined || !Array.isArray(record.files)) {
+          throw new Error("Test npm-pack.json lacks its file inventory");
+        }
+        expect(record.files).toHaveLength(originalInventory.fileCount);
+        const headers: Buffer[] = [];
+        for (let index = originalInventory.fileCount; index < fileCount; index += 1) {
+          const path = `dist/package-file-count-boundary-${String(index)}.js`;
+          expect(originalInventory.files.some((file) => file.path === path)).toBe(false);
+          const header = Buffer.from(tar.subarray(template.offset, template.offset + 512));
+          header.fill(0, 0, 100);
+          header.write(`package/${path}`, 0, 100, "ascii");
+          header.write("0000644\0", 100, 8, "ascii");
+          header.write("00000000000\0", 124, 12, "ascii");
+          header[156] = 48;
+          header.fill(0, 157, 257);
+          header.fill(0, 345, 500);
+          writeHeaderChecksum(header, 0);
+          headers.push(header);
+          record.files.push({ mode: 0o644, path, size: 0 });
+        }
+        record.entryCount = fileCount;
+        await persistPackedTarMutation(
+          artifactDirectory,
+          tarballName,
+          Buffer.concat([tar.subarray(0, trailerOffset), ...headers, Buffer.alloc(1_024)]),
+          metadata,
+        );
+        if (fileCount === 218) {
+          const accepted = await inspectPackageArtifact(tarball);
+          expect(accepted.fileCount).toBe(218);
+          expect(accepted.unpackedBytes).toBe(originalInventory.unpackedBytes);
+        } else {
+          await expect(inspectPackageArtifact(tarball)).rejects.toThrow(
+            "Package file count 219 is outside the reviewed range 190-218",
+          );
+        }
+        const staged = await runWorkflowScript(script, {
+          EXPECTED_SOURCE_SHA: "a".repeat(40),
+          EXPECTED_TARBALL_NAME: tarballName,
+          EXPECTED_VERSION: manifest.version,
+          GITHUB_OUTPUT: join(root, "github-output.txt"),
+          RUNNER_TEMP: root,
+        });
+        if (fileCount === 218) {
+          if (staged.exitCode !== 0) {
+            throw new Error(`218-file package was rejected:\n${staged.stderr}${staged.stdout}`);
+          }
+        } else {
+          expect(staged.exitCode).not.toBe(0);
+          expect(staged.stderr).toContain("npm-pack.json has an invalid or excessive entryCount");
+        }
+      }
+
+      // npm metadata counts regular files; raw USTAR additionally counts directories.
+      // Each variant starts from the original archive and metadata, not the 219-file mutation.
+      for (const entryCount of [420, 421]) {
+        const metadata = JSON.parse(metadataSource) as Array<Record<string, unknown>>;
+        const headers: Buffer[] = [];
+        for (let index = originalInventory.entryCount; index < entryCount; index += 1) {
+          const path = `dist/package-entry-count-boundary-${String(index)}`;
+          expect(originalInventory.entries.some((entry) => entry.path === path)).toBe(false);
+          const header = Buffer.from(tar.subarray(template.offset, template.offset + 512));
+          header.fill(0, 0, 100);
+          header.write(`package/${path}`, 0, 100, "ascii");
+          header.write("0000755\0", 100, 8, "ascii");
+          header.write("00000000000\0", 124, 12, "ascii");
+          header[156] = 53;
+          header.fill(0, 157, 257);
+          header.fill(0, 345, 500);
+          writeHeaderChecksum(header, 0);
+          headers.push(header);
+        }
+        await persistPackedTarMutation(
+          artifactDirectory,
+          tarballName,
+          Buffer.concat([tar.subarray(0, trailerOffset), ...headers, Buffer.alloc(1_024)]),
+          metadata,
+        );
+        if (entryCount === 420) {
+          const accepted = await inspectPackageArtifact(tarball);
+          expect(accepted.entryCount).toBe(420);
+          expect(accepted.fileCount).toBe(originalInventory.fileCount);
+          expect(accepted.unpackedBytes).toBe(originalInventory.unpackedBytes);
+        } else {
+          await expect(inspectPackageArtifact(tarball)).rejects.toThrow(
+            "Package entry count 421 is outside the reviewed range 190-420",
+          );
+        }
+        const staged = await runWorkflowScript(script, {
+          EXPECTED_SOURCE_SHA: "a".repeat(40),
+          EXPECTED_TARBALL_NAME: tarballName,
+          EXPECTED_VERSION: manifest.version,
+          GITHUB_OUTPUT: join(root, "github-output.txt"),
+          RUNNER_TEMP: root,
+        });
+        if (entryCount === 420) {
+          if (staged.exitCode !== 0) {
+            throw new Error(`420-entry package was rejected:\n${staged.stderr}${staged.stdout}`);
+          }
+        } else {
+          expect(staged.exitCode).not.toBe(0);
+          expect(staged.stderr).toContain("Packed package.json tar contains too many entries");
+        }
+      }
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
+  }, 120_000);
 
   test("the source/release and source-free parsers reject shared hostile USTAR fixtures", async () => {
     const workflow = await readFile(stageWorkflowUrl, "utf8");
@@ -1755,7 +1943,7 @@ describe("canonical npm package identity", () => {
         sourcePackJson,
       });
       const verified = await verifyNpmPackageIdentity(validInput);
-      expect(verified.fileCount).toBe(204);
+      expect(verified.fileCount).toBe(212);
       expect(verified.unpackedBytes).toBe(sourceInventory.unpackedBytes);
       expect(verified.sourceArchiveSha512).not.toBe(verified.registryArchiveSha512);
 
