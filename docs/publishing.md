@@ -1,6 +1,8 @@
 # Publish KB
 
-GitHub Releases are canonical from `0.19.4`. Each immutable release contains
+The canonical artifact contract starts at `0.19.4`; that first attempt stopped
+with a retained partial draft. The prepared `0.19.5` candidate is not installable
+until its immutable release completes. Each successful release contains
 one checked package archive, its packing receipt, a source/run manifest,
 checksums, and signed GitHub provenance. npm is an optional mirror of those
 exact archive bytes. An npm outage or pending npm promotion does not block a
@@ -78,7 +80,11 @@ authorizes creating another release. Publication uploads only missing matching a
 provider asset names, sizes, SHA-256 digests, and Actions-bot creator
 `41898282`, then downloads each exact asset ID and checks its bytes before
 publishing an immutable Latest release. It repeats the exact asset-byte readback
-after publication. Current main,
+after publication. Draft descriptors may use the exact versioned URL or a
+same-repository `untagged-` URL with exactly twenty lowercase hexadecimal digits
+and the exact asset name. Published descriptors require the versioned URL.
+These browser URLs never carry authenticated downloads; those use the exact
+GitHub API asset ID. Current main,
 annotated tag, source ancestry, and the complete helper/workflow closure are
 revalidated before each mutation. Existing matching state is reconciled;
 assets are never overwritten and releases are never deleted/recreated.
@@ -133,7 +139,7 @@ gh workflow run npm-stage.yml --ref main -f publish_to_npm=true
 ```
 
 The default candidate is current main's package version. To mirror an earlier
-canonical release while GitHub is ahead, add `-f release_tag=v0.19.4`. The input
+canonical release while GitHub is ahead, add `-f release_tag=v0.19.5`. The input
 must be one exact stable tag no newer than current main's version; its source
 must be an ancestor of the workflow commit, and its version must still be newer
 than npm `latest`. Neither a Git branch with a matching name nor an unqualified
@@ -178,3 +184,18 @@ dispatch. Leave that input empty normally. It records resolution for only the
 matching durable intent; it cannot clear another version or an unresolved
 provider write. This is not a claim that npm exposes or prevents an
 out-of-band concurrent stage.
+
+## Retained v0.19.4 publication failure
+
+[Release run 34353781377](https://github.com/hraness/kb/actions/runs/34353781377)
+verified source, packed bytes and attestation, then stopped after uploading
+`SHA256SUMS` to draft `385518557`. The descriptor used GitHub's temporary
+`untagged-ef6c1bd779e9dd4032bb` path; the original verifier required a published
+tag path even for a draft. Asset `552772852` is 256 bytes with SHA-256
+`7439c234c0a6d0166efef952e3d8ee76dfde2178934ffe8dcdebb84cd1dfe162`.
+
+Preserve that tag, draft, uploaded asset and original attested evidence. It is
+not an admitted public release and must not be retried under changed source,
+overwritten, relabeled or deleted. The `0.19.5` candidate applies the reviewed
+state-aware descriptor rule while retaining exact IDs, bytes, source and
+provenance admission. Its install examples remain conditional until publication.

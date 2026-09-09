@@ -125,6 +125,15 @@ export function releaseBody(manifest: ReleaseManifest): string {
 
 export type AssetIdentity = Readonly<{ name: string; bytes: number; sha256: string }>;
 
+function exactAssetBrowserUrl(value: unknown, name: string, tag: string, draft: boolean): boolean {
+  const prefix = `https://github.com/${repository}/releases/download/`;
+  if (value === `${prefix}${tag}/${name}`) return true;
+  if (!draft || typeof value !== "string" || !value.startsWith(`${prefix}untagged-`)
+    || !value.endsWith(`/${name}`)) return false;
+  const temporaryId = value.slice(`${prefix}untagged-`.length, -(`/${name}`.length));
+  return /^[a-f0-9]{20}$/u.test(temporaryId);
+}
+
 export function verifyProviderRelease(value: unknown, manifest: ReleaseManifest, assets: readonly AssetIdentity[], allowDraft: boolean): readonly string[] {
   const release = record(value, "GitHub Release");
   const author = record(release.author, "Release author");
@@ -142,7 +151,7 @@ export function verifyProviderRelease(value: unknown, manifest: ReleaseManifest,
     const expected = assets.find((candidate) => candidate.name === asset.name);
     if (expected === undefined || present.has(expected.name) || asset.size !== expected.bytes
       || asset.digest !== `sha256:${expected.sha256}` || asset.state !== "uploaded"
-      || asset.browser_download_url !== `https://github.com/${repository}/releases/download/${manifest.tag}/${expected.name}`
+      || !exactAssetBrowserUrl(asset.browser_download_url, expected.name, manifest.tag, release.draft === true)
       || asset.url !== `https://api.github.com/repos/${repository}/releases/assets/${String(asset.id)}`) {
       throw new Error("GitHub release has an unexpected, duplicate, or mismatched asset");
     }
