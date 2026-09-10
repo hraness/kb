@@ -625,7 +625,7 @@ async function inspectAgentBrowser(
   if (agentBrowserDirectory === null) return { deriveClient: false, profiles: [] };
   const executable = join(agentBrowserDirectory, "bin", "agent-browser.js");
   if (!exists(executable)) return { deriveClient: false, profiles: [] };
-  const directory = mkdtempSync(join(tmpdir(), "hraness-kb-doctor-"));
+  const directory = mkdtempSync(join(tmpdir(), "hraness-wordcell-doctor-"));
   const socketRoot = process.platform === "win32" ? tmpdir() : "/tmp";
   const socketDirectory = mkdtempSync(join(socketRoot, "jc-ab-doctor-"));
   chmodSync(directory, 0o700);
@@ -791,7 +791,7 @@ export async function inspectClipEnvironment(options: DoctorOptions = {}): Promi
   }
   for (const dependency of dependencies) {
     if (dependency.status === "unavailable") {
-      warnings.push(`${dependency.name} ${dependency.expectedVersion} is not installed; reinstall @hraness/kb with Bun.`);
+      warnings.push(`${dependency.name} ${dependency.expectedVersion} is not installed; reinstall @hraness/wordcell with Bun.`);
     } else if (dependency.status === "partial") {
       warnings.push(`${dependency.name} must resolve to ${dependency.expectedVersion} for this kb release.`);
     }
@@ -817,14 +817,14 @@ export async function inspectClipEnvironment(options: DoctorOptions = {}): Promi
       ...(pdfinfoPath === null ? ["pdfinfo"] : []),
       ...(pdftohtmlPath === null ? ["pdftohtml"] : []),
     ];
-    warnings.push(`Install Poppler's ${missing.join(" and ")} command${missing.length === 1 ? "" : "s"}; kb pdf requires both pdfinfo and pdftohtml.`);
+    warnings.push(`Install Poppler's ${missing.join(" and ")} command${missing.length === 1 ? "" : "s"}; wordcell pdf requires both pdfinfo and pdftohtml.`);
   } else if (pdfinfoVersion === null || pdftohtmlVersion === null) {
-    warnings.push("Poppler was found, but a PDF tool version could not be verified; kb pdf can attempt ingestion with a degraded tool report.");
+    warnings.push("Poppler was found, but a PDF tool version could not be verified; wordcell pdf can attempt ingestion with a degraded tool report.");
   }
   if (tesseractPath === null) {
-    warnings.push("Install Tesseract to transcribe text in scans and screenshots; kb pdf still preserves native text and images without OCR.");
+    warnings.push("Install Tesseract to transcribe text in scans and screenshots; wordcell pdf still preserves native text and images without OCR.");
   } else if (tesseractVersion === null) {
-    warnings.push("Tesseract was found, but its version could not be verified; kb pdf can attempt OCR with a degraded tool report.");
+    warnings.push("Tesseract was found, but its version could not be verified; wordcell pdf can attempt OCR with a degraded tool report.");
   }
   if (search.keywordOnly.status !== "ready") {
     warnings.push("QMD keyword-only search is not ready; exact Markdown search remains available.");
@@ -839,19 +839,19 @@ export async function inspectClipEnvironment(options: DoctorOptions = {}): Promi
   ) {
     warnings.push(`Install Homebrew SQLite with \`brew install sqlite\`; semantic and hybrid vector retrieval are unavailable.${keywordFallback}`);
   } else if (runtime === "node" && search.semanticPrerequisites.sqlite.status !== "ready") {
-    warnings.push(`Reinstall @hraness/kb with Node so better-sqlite3 ${expectedBetterSqliteVersion} and its native binding are available.${keywordFallback}`);
+    warnings.push(`Reinstall @hraness/wordcell with Node so better-sqlite3 ${expectedBetterSqliteVersion} and its native binding are available.${keywordFallback}`);
   }
   if (search.semanticPrerequisites.sqliteVec.status !== "ready") {
     const nativePackage = search.semanticPrerequisites.sqliteVec.nativePackageName;
     warnings.push(nativePackage === null
       ? `sqlite-vec ${expectedSqliteVecVersion} has no native package for ${platform}-${architecture}; semantic and hybrid vector retrieval are unavailable.${keywordFallback}`
-      : `Reinstall @hraness/kb so sqlite-vec ${expectedSqliteVecVersion} and ${nativePackage} ${expectedSqliteVecVersion} are installed; semantic and hybrid vector retrieval are unavailable.${keywordFallback}`);
+      : `Reinstall @hraness/wordcell so sqlite-vec ${expectedSqliteVecVersion} and ${nativePackage} ${expectedSqliteVecVersion} are installed; semantic and hybrid vector retrieval are unavailable.${keywordFallback}`);
   }
   if (search.semanticPrerequisites.embeddingRuntime.status !== "ready") {
     const nativePackage = search.semanticPrerequisites.embeddingRuntime.nativePackageName;
     warnings.push(nativePackage === null
       ? `node-llama-cpp ${expectedNodeLlamaCppVersion} has no prebuilt package for ${platform}-${architecture}; semantic and hybrid vector retrieval require a compatible local embedding runtime.${keywordFallback}`
-      : `Reinstall @hraness/kb with Bun so node-llama-cpp ${expectedNodeLlamaCppVersion} and ${nativePackage} ${expectedNodeLlamaCppVersion} with its native binary are installed; semantic and hybrid vector retrieval are not ready.${keywordFallback}`);
+      : `Reinstall @hraness/wordcell with Bun so node-llama-cpp ${expectedNodeLlamaCppVersion} and ${nativePackage} ${expectedNodeLlamaCppVersion} with its native binary are installed; semantic and hybrid vector retrieval are not ready.${keywordFallback}`);
   }
 
   return {
@@ -900,7 +900,7 @@ export function renderDoctorReport(report: DoctorReport): string {
     ? `unsupported for ${report.search.platform}-${report.search.architecture}`
     : `${embeddingRuntime.nativePackageName} ${embeddingRuntime.nativeInstalledVersion ?? "not installed"}; native binary ${embeddingRuntime.nativeBinaryPresent === true ? "present" : "not found"}`;
   const lines = [
-    "KB environment",
+    "Wordcell environment",
     `Bun: ${report.bun.status} (${report.bun.currentVersion}; expected ${report.bun.expectedVersion})`,
     ...report.dependencies.map(versionSummary),
     `agent-browser derive-client: ${report.deriveClient.status}`,

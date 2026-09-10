@@ -9,139 +9,139 @@
     "moduleResolution": "Bundler",
     "moduleDetection": "force",
     "paths": {
-      "@hraness/kb": [
+      "@hraness/wordcell": [
         "./src/index.ts"
       ],
-      "@hraness/kb/agent-context": [
+      "@hraness/wordcell/agent-context": [
         "./src/agent-context.ts"
       ],
-      "@hraness/kb/agent-guide-audit": [
+      "@hraness/wordcell/agent-guide-audit": [
         "./src/agent-guide-audit.ts"
       ],
-      "@hraness/kb/attachments": [
+      "@hraness/wordcell/attachments": [
         "./src/attachments.ts"
       ],
-      "@hraness/kb/authoring": [
+      "@hraness/wordcell/authoring": [
         "./src/authoring.ts"
       ],
-      "@hraness/kb/benchmark": [
+      "@hraness/wordcell/benchmark": [
         "./src/benchmark.ts"
       ],
-      "@hraness/kb/browser-profiles": [
+      "@hraness/wordcell/browser-profiles": [
         "./src/clip/browser-profiles.ts"
       ],
-      "@hraness/kb/capture": [
+      "@hraness/wordcell/capture": [
         "./src/capture.ts"
       ],
-      "@hraness/kb/cli": [
+      "@hraness/wordcell/cli": [
         "./src/cli.ts"
       ],
-      "@hraness/kb/clip/acquire": [
+      "@hraness/wordcell/clip/acquire": [
         "./src/clip/acquire.ts"
       ],
-      "@hraness/kb/clip/args": [
+      "@hraness/wordcell/clip/args": [
         "./src/clip/args.ts"
       ],
-      "@hraness/kb/clip/bounded-byte-buffer": [
+      "@hraness/wordcell/clip/bounded-byte-buffer": [
         "./src/clip/bounded-byte-buffer.ts"
       ],
-      "@hraness/kb/clip/bundle-reader": [
+      "@hraness/wordcell/clip/bundle-reader": [
         "./src/clip/bundle-reader.ts"
       ],
-      "@hraness/kb/clip/cli": [
+      "@hraness/wordcell/clip/cli": [
         "./src/clip/cli.ts"
       ],
-      "@hraness/kb/clip/cookies": [
+      "@hraness/wordcell/clip/cookies": [
         "./src/clip/cookies.ts"
       ],
-      "@hraness/kb/clip/doctor": [
+      "@hraness/wordcell/clip/doctor": [
         "./src/clip/doctor.ts"
       ],
-      "@hraness/kb/clip/jobs": [
+      "@hraness/wordcell/clip/jobs": [
         "./src/clip/jobs.ts"
       ],
-      "@hraness/kb/clip/network": [
+      "@hraness/wordcell/clip/network": [
         "./src/clip/network.ts"
       ],
-      "@hraness/kb/clip/network-proxy": [
+      "@hraness/wordcell/clip/network-proxy": [
         "./src/clip/network-proxy.ts"
       ],
-      "@hraness/kb/clip/persist": [
+      "@hraness/wordcell/clip/persist": [
         "./src/clip/persist.ts"
       ],
-      "@hraness/kb/clip/refresh": [
+      "@hraness/wordcell/clip/refresh": [
         "./src/clip/refresh.ts"
       ],
-      "@hraness/kb/clip/terminal": [
+      "@hraness/wordcell/clip/terminal": [
         "./src/clip/terminal.ts"
       ],
-      "@hraness/kb/evaluation": [
+      "@hraness/wordcell/evaluation": [
         "./src/evaluation.ts"
       ],
-      "@hraness/kb/evaluation-builder": [
+      "@hraness/wordcell/evaluation-builder": [
         "./src/evaluation-builder.ts"
       ],
-      "@hraness/kb/evaluation-kb": [
+      "@hraness/wordcell/evaluation-kb": [
         "./src/evaluation-kb.ts"
       ],
-      "@hraness/kb/git": [
+      "@hraness/wordcell/git": [
         "./src/git.ts"
       ],
-      "@hraness/kb/graph": [
+      "@hraness/wordcell/graph": [
         "./src/graph.ts"
       ],
-      "@hraness/kb/navigation": [
+      "@hraness/wordcell/navigation": [
         "./src/navigation.ts"
       ],
-      "@hraness/kb/pdf": [
+      "@hraness/wordcell/pdf": [
         "./src/pdf.ts"
       ],
-      "@hraness/kb/percolate": [
+      "@hraness/wordcell/percolate": [
         "./src/percolate.ts"
       ],
-      "@hraness/kb/portfolio": [
+      "@hraness/wordcell/portfolio": [
         "./src/portfolio.ts"
       ],
-      "@hraness/kb/query": [
+      "@hraness/wordcell/query": [
         "./src/query.ts"
       ],
-      "@hraness/kb/repository-memory": [
+      "@hraness/wordcell/repository-memory": [
         "./src/repository-memory.ts"
       ],
-      "@hraness/kb/sdk": [
+      "@hraness/wordcell/sdk": [
         "./src/sdk.ts"
       ],
-      "@hraness/kb/search": [
+      "@hraness/wordcell/search": [
         "./src/search.ts"
       ],
-      "@hraness/kb/search-rules": [
+      "@hraness/wordcell/search-rules": [
         "./src/search-rules.ts"
       ],
-      "@hraness/kb/semantic": [
+      "@hraness/wordcell/semantic": [
         "./src/semantic.ts"
       ],
-      "@hraness/kb/source-inbox": [
+      "@hraness/wordcell/source-inbox": [
         "./src/source-inbox.ts"
       ],
-      "@hraness/kb/untrusted-content": [
+      "@hraness/wordcell/untrusted-content": [
         "./src/untrusted-content.ts"
       ],
-      "@hraness/kb/url-intelligence": [
+      "@hraness/wordcell/url-intelligence": [
         "./src/url-intelligence.ts"
       ],
-      "@hraness/kb/workflow": [
+      "@hraness/wordcell/workflow": [
         "./src/workflow.ts"
       ],
-      "@hraness/kb/workflows": [
+      "@hraness/wordcell/workflows": [
         "./src/workflows/index.ts"
       ],
-      "@hraness/kb/workflows/decision-context": [
+      "@hraness/wordcell/workflows/decision-context": [
         "./src/workflows/decision-context.ts"
       ],
-      "@hraness/kb/workflows/explain-change": [
+      "@hraness/wordcell/workflows/explain-change": [
         "./src/workflows/explain-change.ts"
       ],
-      "@hraness/kb/workflows/plan-radar": [
+      "@hraness/wordcell/workflows/plan-radar": [
         "./src/workflows/plan-radar.ts"
       ]
     },

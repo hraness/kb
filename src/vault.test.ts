@@ -24,7 +24,7 @@ import {
 const roots: string[] = [];
 
 function fixture(): string {
-  const root = mkdtempSync(join(tmpdir(), "hraness-kb-vault-test-"));
+  const root = mkdtempSync(join(tmpdir(), "hraness-wordcell-vault-test-"));
   roots.push(root);
   mkdirSync(join(root, "notes"));
   writeFileSync(

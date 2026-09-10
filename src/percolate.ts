@@ -185,7 +185,7 @@ export type PercolationResultV2 = {
 export type PercolationResult = PercolationResultV2;
 
 /**
- * @deprecated Historical JSON envelope emitted by `kb percolate --json`,
+ * @deprecated Historical JSON envelope emitted by `wordcell percolate --json`,
  * retained through 0.19.x and removable no earlier than 0.20.0.
  */
 export type PercolationCliOutputV1 = {

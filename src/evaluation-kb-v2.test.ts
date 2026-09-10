@@ -346,7 +346,7 @@ async function productionBridgeFixture(): Promise<Readonly<{
   readonly contextId: string;
   readonly registry: ReturnType<typeof buildEvaluationEvidenceRegistry>;
 }>> {
-  const repository = await mkdtemp(join(tmpdir(), "hraness-kb-v2-production-bridge-"));
+  const repository = await mkdtemp(join(tmpdir(), "hraness-wordcell-v2-production-bridge-"));
   temporaryRoots.push(repository);
   const root = join(repository, "kb");
   await mkdir(join(root, "notes"), { recursive: true });

@@ -44,7 +44,7 @@ import { scanVault, type VaultSnapshot } from "./vault.js";
 const CHILD_ARGUMENT = "--kb-evaluation-measurement-child-v2";
 const PROTOCOL = "kb-evaluation-measurement-child-v2";
 const PROTOCOL_VERSION = 1;
-const WORK_DIRECTORY_PREFIX = "hraness-kb-evaluation-measurement-";
+const WORK_DIRECTORY_PREFIX = "hraness-wordcell-evaluation-measurement-";
 const PREPARATION_MARKER = ".incremental-prepared-v2.json";
 const DEFAULT_TIMEOUT_MS = 10 * 60_000;
 const MAX_TIMEOUT_MS = 30 * 60_000;

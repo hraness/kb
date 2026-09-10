@@ -240,7 +240,7 @@ afterEach(() => {
 });
 
 function temporaryRoot(): string {
-  const root = mkdtempSync(join(tmpdir(), "hraness-kb-capture-persist-"));
+  const root = mkdtempSync(join(tmpdir(), "hraness-wordcell-capture-persist-"));
   temporaryRoots.push(root);
   return root;
 }

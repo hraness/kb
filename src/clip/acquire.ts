@@ -253,7 +253,7 @@ async function runAgentBrowserBatch(
 
 /** Discover Chrome profiles without opening a browser or reading cookie values. */
 export async function discoverChromeProfiles(timeoutMs = 15_000): Promise<readonly ChromeProfile[]> {
-  const directory = mkdtempSync(join(tmpdir(), "hraness-kb-profiles-"));
+  const directory = mkdtempSync(join(tmpdir(), "hraness-wordcell-profiles-"));
   chmodSync(directory, 0o700);
   let socketDirectory: string | null = null;
   try {

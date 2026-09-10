@@ -9,66 +9,66 @@ import {
 } from "./package-artifact.js";
 import { requiresOhAdoptionPreparerExport } from "./npm-package-identity.js";
 
-const packageName = "@hraness/kb";
+const packageName = "@hraness/wordcell";
 const maximumPackageFiles = 218;
 const maximumPackedBytes = 1_200_000;
 const maximumUnpackedBytes = 5_250_000;
 const importSpecifiers = [
-  "@hraness/kb",
-  "@hraness/kb/agent-context",
-  "@hraness/kb/agent-guide-audit",
-  "@hraness/kb/attachments",
-  "@hraness/kb/authoring",
-  "@hraness/kb/benchmark",
-  "@hraness/kb/browser-profiles",
-  "@hraness/kb/capture",
-  "@hraness/kb/cli",
-  "@hraness/kb/clip/acquire",
-  "@hraness/kb/clip/args",
-  "@hraness/kb/clip/bounded-byte-buffer",
-  "@hraness/kb/clip/bundle-reader",
-  "@hraness/kb/clip/cli",
-  "@hraness/kb/clip/cookies",
-  "@hraness/kb/clip/doctor",
-  "@hraness/kb/clip/jobs",
-  "@hraness/kb/clip/network",
-  "@hraness/kb/clip/network-proxy",
-  "@hraness/kb/clip/persist",
-  "@hraness/kb/clip/refresh",
-  "@hraness/kb/clip/terminal",
-  "@hraness/kb/evaluation",
-  "@hraness/kb/evaluation-builder",
-  "@hraness/kb/evaluation-kb",
-  "@hraness/kb/git",
-  "@hraness/kb/graph",
-  "@hraness/kb/navigation",
-  "@hraness/kb/pdf",
-  "@hraness/kb/percolate",
-  "@hraness/kb/portfolio",
-  "@hraness/kb/query",
-  "@hraness/kb/repository-memory",
-  "@hraness/kb/sdk",
-  "@hraness/kb/search",
-  "@hraness/kb/search-rules",
-  "@hraness/kb/semantic",
-  "@hraness/kb/source-inbox",
-  "@hraness/kb/untrusted-content",
-  "@hraness/kb/url-intelligence",
-  "@hraness/kb/workflow",
-  "@hraness/kb/workflows",
-  "@hraness/kb/workflows/decision-context",
-  "@hraness/kb/workflows/explain-change",
-  "@hraness/kb/workflows/plan-radar",
+  "@hraness/wordcell",
+  "@hraness/wordcell/agent-context",
+  "@hraness/wordcell/agent-guide-audit",
+  "@hraness/wordcell/attachments",
+  "@hraness/wordcell/authoring",
+  "@hraness/wordcell/benchmark",
+  "@hraness/wordcell/browser-profiles",
+  "@hraness/wordcell/capture",
+  "@hraness/wordcell/cli",
+  "@hraness/wordcell/clip/acquire",
+  "@hraness/wordcell/clip/args",
+  "@hraness/wordcell/clip/bounded-byte-buffer",
+  "@hraness/wordcell/clip/bundle-reader",
+  "@hraness/wordcell/clip/cli",
+  "@hraness/wordcell/clip/cookies",
+  "@hraness/wordcell/clip/doctor",
+  "@hraness/wordcell/clip/jobs",
+  "@hraness/wordcell/clip/network",
+  "@hraness/wordcell/clip/network-proxy",
+  "@hraness/wordcell/clip/persist",
+  "@hraness/wordcell/clip/refresh",
+  "@hraness/wordcell/clip/terminal",
+  "@hraness/wordcell/evaluation",
+  "@hraness/wordcell/evaluation-builder",
+  "@hraness/wordcell/evaluation-kb",
+  "@hraness/wordcell/git",
+  "@hraness/wordcell/graph",
+  "@hraness/wordcell/navigation",
+  "@hraness/wordcell/pdf",
+  "@hraness/wordcell/percolate",
+  "@hraness/wordcell/portfolio",
+  "@hraness/wordcell/query",
+  "@hraness/wordcell/repository-memory",
+  "@hraness/wordcell/sdk",
+  "@hraness/wordcell/search",
+  "@hraness/wordcell/search-rules",
+  "@hraness/wordcell/semantic",
+  "@hraness/wordcell/source-inbox",
+  "@hraness/wordcell/untrusted-content",
+  "@hraness/wordcell/url-intelligence",
+  "@hraness/wordcell/workflow",
+  "@hraness/wordcell/workflows",
+  "@hraness/wordcell/workflows/decision-context",
+  "@hraness/wordcell/workflows/explain-change",
+  "@hraness/wordcell/workflows/plan-radar",
 ];
 const baselineRequiredNamedExports = {
-  "@hraness/kb/clip/bundle-reader": ["readCaptureBundle", "verifyCaptureBundle"],
-  "@hraness/kb/clip/jobs": ["createCaptureJob", "openCaptureJobStore", "updateCaptureJob"],
-  "@hraness/kb/clip/refresh": ["diffCaptureBundle"],
-  "@hraness/kb/portfolio": ["openKnowledgePortfolio", "parsePortfolioRegistry", "parseQualifiedDocumentUri"],
-  "@hraness/kb/search-rules": ["parseSearchRules", "prioritizeSearchHits"],
-  "@hraness/kb/untrusted-content": ["createUntrustedToolResult", "projectUntrustedJson"],
+  "@hraness/wordcell/clip/bundle-reader": ["readCaptureBundle", "verifyCaptureBundle"],
+  "@hraness/wordcell/clip/jobs": ["createCaptureJob", "openCaptureJobStore", "updateCaptureJob"],
+  "@hraness/wordcell/clip/refresh": ["diffCaptureBundle"],
+  "@hraness/wordcell/portfolio": ["openKnowledgePortfolio", "parsePortfolioRegistry", "parseQualifiedDocumentUri"],
+  "@hraness/wordcell/search-rules": ["parseSearchRules", "prioritizeSearchHits"],
+  "@hraness/wordcell/untrusted-content": ["createUntrustedToolResult", "projectUntrustedJson"],
 } as const;
-const binNames = ["kb", "kb-evaluation-builder"];
+const binNames = ["wordcell", "kb", "wordcell-evaluation-builder"];
 // Match the repository's qualified compiler/declaration tuple. Bun's wildcard
 // Node type dependency can otherwise select incompatible declarations.
 const verificationToolchain = Object.freeze({
@@ -79,7 +79,7 @@ const verificationToolchain = Object.freeze({
 });
 const verificationPackages = Object.entries(verificationToolchain)
   .map(([name, version]) => `${name}@${version}`);
-const skillNames = ["kb"] as const;
+const skillNames = ["wordcell"] as const;
 const metadataSearchToolFiles = [
   "src/clip/metadata-search-tool/Cargo.lock",
   "src/clip/metadata-search-tool/Cargo.toml",
@@ -87,15 +87,15 @@ const metadataSearchToolFiles = [
   "src/clip/metadata-search-tool/src/main.rs",
 ] as const;
 const requiredPackageFiles = [
-  "DISCLOSURE",
   "LICENSE",
   "README.md",
   "dist/cli.js",
+  "dist/kb-alias.js",
   "dist/evaluation-builder.js",
   "package.json",
-  "skills/kb/AGENTS.md",
-  "skills/kb/SKILL.md",
-  "skills/kb/agents/openai.yaml",
+  "skills/wordcell/AGENTS.md",
+  "skills/wordcell/SKILL.md",
+  "skills/wordcell/agents/openai.yaml",
 ] as const;
 
 type PackageInput = Readonly<{
@@ -194,7 +194,7 @@ async function verifyExactNpmPackMetadata(
     throw new Error("npm-pack.json must contain exactly one package");
   }
   const result = record(value[0], "npm pack result");
-  const expectedFilename = `hraness-kb-${packageVersion}.tgz`;
+  const expectedFilename = `hraness-wordcell-${packageVersion}.tgz`;
   if (
     stringField(result, "id", "npm pack result") !== `${packageName}@${packageVersion}`
     || stringField(result, "name", "npm pack result") !== packageName
@@ -202,7 +202,7 @@ async function verifyExactNpmPackMetadata(
     || stringField(result, "filename", "npm pack result") !== expectedFilename
     || basename(archive) !== expectedFilename
   ) {
-    throw new Error("npm pack identity does not match the exact KB archive");
+    throw new Error("npm pack identity does not match the exact Wordcell archive");
   }
   const entryCount = integerField(result, "entryCount", "npm pack result");
   const packedBytes = integerField(result, "size", "npm pack result");
@@ -212,7 +212,7 @@ async function verifyExactNpmPackMetadata(
     || packedBytes !== inventory.packedBytes
     || unpackedBytes !== inventory.unpackedBytes
   ) {
-    throw new Error("npm pack metrics do not match the exact KB archive");
+    throw new Error("npm pack metrics do not match the exact Wordcell archive");
   }
   if (!Array.isArray(result.bundled) || result.bundled.length !== 0) {
     throw new Error("npm pack unexpectedly bundles dependencies");
@@ -258,7 +258,7 @@ async function verifyExactNpmPackMetadata(
     stringField(result, "integrity", "npm pack result") !== actualIntegrity
     || stringField(result, "shasum", "npm pack result") !== actualShasum
   ) {
-    throw new Error("npm pack SHA-1 or SHA-512 does not match the exact KB archive");
+    throw new Error("npm pack SHA-1 or SHA-512 does not match the exact Wordcell archive");
   }
 }
 
@@ -357,7 +357,7 @@ async function verifyInstalledSkills(consumer: string): Promise<void> {
     consumer,
     "node_modules",
     "@hraness",
-    "kb",
+    "wordcell",
   );
   const installedRoot = join(
     installedPackageRoot,
@@ -405,25 +405,25 @@ async function verifyInstalledSkills(consumer: string): Promise<void> {
     throw new Error("installed package version is missing");
   }
   const [skill, metadata] = await Promise.all([
-    readFile(join(installedRoot, "kb", "SKILL.md"), "utf8"),
-    readFile(join(installedRoot, "kb", "agents", "openai.yaml"), "utf8"),
+    readFile(join(installedRoot, "wordcell", "SKILL.md"), "utf8"),
+    readFile(join(installedRoot, "wordcell", "agents", "openai.yaml"), "utf8"),
   ]);
   const versionParts = manifest.version.split(".").map(BigInt);
   const githubRelease = versionParts[0]! > 0n || versionParts[1]! > 19n
     || (versionParts[1] === 19n && versionParts[2]! >= 4n);
   const runtimePin = githubRelease
-    ? `https://github.com/hraness/kb/releases/download/v${manifest.version}/hraness-kb-${manifest.version}.tgz`
-    : `@hraness/kb@${manifest.version}`;
+    ? `https://github.com/hraness/wordcell/releases/download/v${manifest.version}/hraness-wordcell-${manifest.version}.tgz`
+    : `@hraness/wordcell@${manifest.version}`;
   if (!skill.includes(runtimePin)) {
-    throw new Error("installed KB skill immutable runtime pin does not match the package version");
+    throw new Error("installed Wordcell skill immutable runtime pin does not match the package version");
   }
-  if (!metadata.includes("$kb")) {
-    throw new Error("installed KB skill metadata must invoke $kb explicitly");
+  if (!metadata.includes("$wordcell")) {
+    throw new Error("installed Wordcell skill metadata must invoke $wordcell explicitly");
   }
 }
 
 async function verifyInstalledMetadataSearchTool(consumer: string): Promise<void> {
-  const installedPackage = join(consumer, "node_modules", "@hraness", "kb");
+  const installedPackage = join(consumer, "node_modules", "@hraness", "wordcell");
   for (const relativePath of metadataSearchToolFiles) {
     const sourcePath = join(repository, relativePath);
     const installedPath = join(installedPackage, relativePath);
@@ -445,7 +445,7 @@ async function verifyInstalledPackagePolicy(consumer: string): Promise<Readonly<
   readonly fileCount: number;
   readonly unpackedBytes: number;
 }>> {
-  const installedPackage = join(consumer, "node_modules", "@hraness", "kb");
+  const installedPackage = join(consumer, "node_modules", "@hraness", "wordcell");
   type PackageIdentity = {
     readonly contentPolicy?: { readonly class?: unknown };
     readonly description?: unknown;
@@ -479,8 +479,8 @@ async function verifyInstalledPackagePolicy(consumer: string): Promise<Readonly<
   ) {
     throw new Error("installed package identity does not match the source package");
   }
-  if (manifest.contentPolicy?.class !== "dual-use") {
-    throw new Error("installed package must retain contentPolicy.class=dual-use");
+  if (Object.hasOwn(manifest, "contentPolicy") || Object.hasOwn(sourceManifest, "contentPolicy")) {
+    throw new Error("installed package must carry no npm content-policy declaration");
   }
   if (manifest.engines?.bun !== ">=1.3.14") {
     throw new Error("installed package must require Bun >=1.3.14");
@@ -501,12 +501,11 @@ async function verifyInstalledPackagePolicy(consumer: string): Promise<Readonly<
   }
   for (const path of files) {
     if (
-      path !== "DISCLOSURE"
-      && path !== "LICENSE"
+      path !== "LICENSE"
       && path !== "README.md"
       && path !== "package.json"
       && !path.startsWith("dist/")
-      && !path.startsWith("skills/kb/")
+      && !path.startsWith("skills/wordcell/")
       && !path.startsWith("src/")
     ) {
       throw new Error(`installed package contains an unexpected path: ${path}`);
@@ -525,13 +524,6 @@ async function verifyInstalledPackagePolicy(consumer: string): Promise<Readonly<
     throw new Error(
       `installed package has ${String(unpackedBytes)} unpacked bytes; maximum is ${String(maximumUnpackedBytes)}`,
     );
-  }
-  const [sourceDisclosure, installedDisclosure] = await Promise.all([
-    readFile(join(repository, "DISCLOSURE")),
-    readFile(join(installedPackage, "DISCLOSURE")),
-  ]);
-  if (!sourceDisclosure.equals(installedDisclosure)) {
-    throw new Error("installed dual-use disclosure differs from the source disclosure");
   }
   return { fileCount: files.length, unpackedBytes };
 }
@@ -587,7 +579,7 @@ try {
   const requiresOhAdoptionPreparer = requiresOhAdoptionPreparerExport(sourceManifest.version);
   const requiredNamedExports = requiresOhAdoptionPreparer
     ? {
-        "@hraness/kb": ["createOhAdoptionPreparerV1"],
+        "@hraness/wordcell": ["createOhAdoptionPreparerV1"],
         ...baselineRequiredNamedExports,
       }
     : baselineRequiredNamedExports;
@@ -637,12 +629,12 @@ try {
     await run([join(npmConsumer, "node_modules", ".bin", binName), "--help"], npmConsumer);
   }
   await run([
-    join(consumer, "node_modules", ".bin", "kb"),
+    join(consumer, "node_modules", ".bin", "wordcell"),
     "url-metadata",
     "--help",
   ], consumer);
   await run([
-    join(npmConsumer, "node_modules", ".bin", "kb"),
+    join(npmConsumer, "node_modules", ".bin", "wordcell"),
     "url-metadata",
     "--help",
   ], npmConsumer);
@@ -677,21 +669,21 @@ for (const specifier of ${JSON.stringify(importSpecifiers)}) {
     `import * as surface${String(index)} from ${JSON.stringify(specifier)};`
   ).join("\n")}
 ${requiresOhAdoptionPreparer
-  ? 'import { createOhAdoptionPreparerV1 } from "@hraness/kb";'
+  ? 'import { createOhAdoptionPreparerV1 } from "@hraness/wordcell";'
   : ""}
-import { readCaptureBundle, verifyCaptureBundle } from "@hraness/kb/clip/bundle-reader";
-import { createCaptureJob, openCaptureJobStore, updateCaptureJob } from "@hraness/kb/clip/jobs";
-import { diffCaptureBundle } from "@hraness/kb/clip/refresh";
-import { openKnowledgePortfolio, parsePortfolioRegistry, parseQualifiedDocumentUri } from "@hraness/kb/portfolio";
-import { parseSearchRules, prioritizeSearchHits } from "@hraness/kb/search-rules";
-import { createUntrustedToolResult, projectUntrustedJson } from "@hraness/kb/untrusted-content";
+import { readCaptureBundle, verifyCaptureBundle } from "@hraness/wordcell/clip/bundle-reader";
+import { createCaptureJob, openCaptureJobStore, updateCaptureJob } from "@hraness/wordcell/clip/jobs";
+import { diffCaptureBundle } from "@hraness/wordcell/clip/refresh";
+import { openKnowledgePortfolio, parsePortfolioRegistry, parseQualifiedDocumentUri } from "@hraness/wordcell/portfolio";
+import { parseSearchRules, prioritizeSearchHits } from "@hraness/wordcell/search-rules";
+import { createUntrustedToolResult, projectUntrustedJson } from "@hraness/wordcell/untrusted-content";
 
 const rules = parseSearchRules({ schemaVersion: 1, aliases: {}, priorityRules: [] });
 const registry = parsePortfolioRegistry({
   contract: "hraness.kb-portfolio/v1",
   schemaVersion: 1,
   vaults: [{
-    owner: "hraness", id: "kb", repository: "hraness/kb", checkout: "kb", root: "kb",
+    owner: "hraness", id: "kb", repository: "hraness/wordcell", checkout: "kb", root: "kb",
     role: "repository", visibility: "public", parserVersion: 1,
   }],
 });
@@ -708,7 +700,7 @@ void [${importSpecifiers.map((_specifier, index) =>
     `surface${String(index)}`
   ).join(", ")}];\n`;
   await writeFile(join(consumer, "index.ts"), consumerSource);
-  await writeFile(join(consumer, "tsconfig.bundler.json"), "{\n  \"compilerOptions\": {\n    \"target\": \"ES2023\",\n    \"lib\": [\n      \"ES2023\",\n      \"DOM\",\n      \"DOM.Iterable\"\n    ],\n    \"types\": [\n      \"bun\",\n      \"node\"\n    ],\n    \"strict\": true,\n    \"noEmit\": true,\n    \"skipLibCheck\": false,\n    \"module\": \"Preserve\",\n    \"moduleResolution\": \"Bundler\"\n  },\n  \"include\": [\n    \"index.ts\"\n  ]\n}");
+  await writeFile(join(consumer, "tsconfig.bundler.json"), "{\n  \"compilerOptions\": {\n    \"target\": \"ES2023\",\n    \"lib\": [\n      \"ES2023\",\n      \"DOM\",\n      \"DOM.Iterable\"\n    ],\n    \"types\": [\n      \"bun\",\n      \"node\"\n    ],\n    \"strict\": true,\n    \"noEmit\": true,\n    \"skipLibCheck\": false,\n    \"erasableSyntaxOnly\": true,\n    \"module\": \"Preserve\",\n    \"moduleResolution\": \"Bundler\"\n  },\n  \"include\": [\n    \"index.ts\"\n  ]\n}");
   await logConsumerToolchain(consumer);
   await run([process.execPath, "x", "tsc", "-p", "./tsconfig.bundler.json"], consumer);
 

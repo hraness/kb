@@ -43,7 +43,7 @@ function note(path: string, content = `# ${path}\n`): Note {
 
 function indexIdentity(model = "hf:example/model.gguf#revision-a"): SemanticIndexIdentity {
   return {
-    producer: { package: "@hraness/kb", schema: 1 },
+    producer: { package: "@hraness/wordcell", schema: 1 },
     indexer: { package: "@tobilu/qmd", version: "2.5.3" },
     collection: {
       name: "kb",
@@ -117,7 +117,7 @@ async function makeFifo(path: string): Promise<boolean> {
 
 describe("semantic writer lease", () => {
   test("serializes fresh and warm writers across real processes", async () => {
-    const temporary = await mkdtemp(join(tmpdir(), "hraness-kb-lease-"));
+    const temporary = await mkdtemp(join(tmpdir(), "hraness-wordcell-lease-"));
     const database = join(temporary, "index.sqlite");
     const events = join(temporary, "events.txt");
     try {
@@ -156,7 +156,7 @@ describe("semantic writer lease", () => {
   }, 10_000);
 
   test("recovers a real dead owner and releases after an operation error", async () => {
-    const temporary = await mkdtemp(join(tmpdir(), "hraness-kb-lease-"));
+    const temporary = await mkdtemp(join(tmpdir(), "hraness-wordcell-lease-"));
     const database = join(temporary, "index.sqlite");
     const events = join(temporary, "events.txt");
     try {
@@ -188,7 +188,7 @@ describe("semantic writer lease", () => {
   }, 10_000);
 
   test("bounds malformed owner metadata and rejects a symlinked lease target", async () => {
-    const temporary = await mkdtemp(join(tmpdir(), "hraness-kb-lease-"));
+    const temporary = await mkdtemp(join(tmpdir(), "hraness-wordcell-lease-"));
     const database = join(temporary, "index.sqlite");
     const lease = semanticWriterLeasePath(database);
     const outside = join(temporary, "outside");
@@ -218,7 +218,7 @@ describe("semantic writer lease", () => {
   });
 
   test("canonicalizes parent aliases and rejects linked database files", async () => {
-    const temporary = await mkdtemp(join(tmpdir(), "hraness-kb-lease-alias-"));
+    const temporary = await mkdtemp(join(tmpdir(), "hraness-wordcell-lease-alias-"));
     const realDirectory = join(temporary, "real");
     const aliasDirectory = join(temporary, "alias");
     const database = join(realDirectory, "index.sqlite");
@@ -262,7 +262,7 @@ describe("semantic writer lease", () => {
   });
 
   test("serializes existing and fresh database basename case aliases", async () => {
-    const temporary = await mkdtemp(join(tmpdir(), "hraness-kb-case-alias-"));
+    const temporary = await mkdtemp(join(tmpdir(), "hraness-wordcell-case-alias-"));
     const lower = join(temporary, "index.sqlite");
     const upper = join(temporary, "INDEX.sqlite");
     const root = join(temporary, "vault");
@@ -326,7 +326,7 @@ describe("semantic writer lease", () => {
   });
 
   test("rejects database and cache metadata FIFOs without waiting for a writer", async () => {
-    const temporary = await mkdtemp(join(tmpdir(), "hraness-kb-fifo-"));
+    const temporary = await mkdtemp(join(tmpdir(), "hraness-wordcell-fifo-"));
     const databaseFifo = join(temporary, "database.sqlite");
     try {
       if (!await makeFifo(databaseFifo)) return;
@@ -365,7 +365,7 @@ describe("semantic writer lease", () => {
   });
 
   test("rejects cache and vault overlap in either direction", async () => {
-    const temporary = await mkdtemp(join(tmpdir(), "hraness-kb-overlap-"));
+    const temporary = await mkdtemp(join(tmpdir(), "hraness-wordcell-overlap-"));
     const root = join(temporary, "vault");
     await mkdir(root);
     try {
@@ -383,7 +383,7 @@ describe("semantic writer lease", () => {
   });
 
   test("keeps incompatible semantic index identities in different reader generations", async () => {
-    const temporary = await mkdtemp(join(tmpdir(), "hraness-kb-projection-identity-"));
+    const temporary = await mkdtemp(join(tmpdir(), "hraness-wordcell-projection-identity-"));
     const root = join(temporary, "vault");
     const database = join(temporary, "index.sqlite");
     const notes = [note("note.md", "# Stable source\n")];
@@ -442,7 +442,7 @@ describe("semantic writer lease", () => {
   });
 
   test("refuses an unowned snapshot directory before recursive cleanup", async () => {
-    const temporary = await mkdtemp(join(tmpdir(), "hraness-kb-projection-owner-"));
+    const temporary = await mkdtemp(join(tmpdir(), "hraness-wordcell-projection-owner-"));
     const root = join(temporary, "vault");
     const database = join(temporary, "index.sqlite");
     const notes = [note("note.md")];
@@ -470,7 +470,7 @@ describe("semantic writer lease", () => {
   });
 
   test("verifies every cached note and refuses repair while that generation is read", async () => {
-    const temporary = await mkdtemp(join(tmpdir(), "hraness-kb-projection-verify-"));
+    const temporary = await mkdtemp(join(tmpdir(), "hraness-wordcell-projection-verify-"));
     const root = join(temporary, "vault");
     const database = join(temporary, "index.sqlite");
     const notes = [note("notes/note.md", "# Verified source\n")];
@@ -526,7 +526,7 @@ describe("semantic writer lease", () => {
   });
 
   test("rejects a symlinked projection cache before materializing notes", async () => {
-    const temporary = await mkdtemp(join(tmpdir(), "hraness-kb-projection-"));
+    const temporary = await mkdtemp(join(tmpdir(), "hraness-wordcell-projection-"));
     const root = join(temporary, "vault");
     const database = join(temporary, "index.sqlite");
     const outside = join(temporary, "outside");
@@ -557,7 +557,7 @@ describe("semantic writer lease", () => {
   });
 
   test("rejects notes that changed after projection validation before writing cache state", async () => {
-    const temporary = await mkdtemp(join(tmpdir(), "hraness-kb-projection-"));
+    const temporary = await mkdtemp(join(tmpdir(), "hraness-wordcell-projection-"));
     const root = join(temporary, "vault");
     const database = join(temporary, "index.sqlite");
     await mkdir(root);
@@ -580,7 +580,7 @@ describe("semantic writer lease", () => {
   });
 
   test("counts reader metadata without imposing that cap on top-level notes", async () => {
-    const temporary = await mkdtemp(join(tmpdir(), "hraness-kb-projection-"));
+    const temporary = await mkdtemp(join(tmpdir(), "hraness-wordcell-projection-"));
     const root = join(temporary, "vault");
     const database = join(temporary, "index.sqlite");
     await mkdir(root);

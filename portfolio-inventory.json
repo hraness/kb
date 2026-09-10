@@ -1,26 +1,26 @@
 {
   "contract": "hraness.portfolio-inventory/v1",
   "formatVersion": 1,
-  "repository": "hraness/kb",
+  "repository": "hraness/wordcell",
   "components": [
     {
       "kind": "package",
-      "name": "@hraness/kb",
+      "name": "@hraness/wordcell",
       "path": ".",
       "visibility": "public",
-      "version": "0.19.6"
+      "version": "0.20.0"
     }
   ],
   "dependencies": [
     {
-      "from": "@hraness/kb",
+      "from": "@hraness/wordcell",
       "scope": "runtime",
       "specifier": "github:hraness/oh#v0.2.0",
       "to": "@hraness/oh",
       "sourceRepository": "hraness/oh"
     },
     {
-      "from": "@hraness/kb",
+      "from": "@hraness/wordcell",
       "scope": "runtime",
       "specifier": "git+https://github.com/hraness/qmd.git#aa993dceb3ef8cfb71d470554ca437570f5a2b3c",
       "to": "@tobilu/qmd",
@@ -31,9 +31,9 @@
   "brands": [],
   "publications": [
     {
-      "component": "@hraness/kb",
-      "packageName": "@hraness/kb",
-      "repository": "hraness/kb"
+      "component": "@hraness/wordcell",
+      "packageName": "@hraness/wordcell",
+      "repository": "hraness/wordcell"
     }
   ]
 }

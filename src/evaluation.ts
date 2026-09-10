@@ -464,7 +464,7 @@ export function parseRetrievalEvaluationCorpus(inputValue: unknown): RetrievalEv
 
 export type EvaluationRawHit = {
   readonly documentId: string;
-  /** Raw rank assigned by the retriever before KB evaluation. */
+  /** Raw rank assigned by the retriever before Wordcell evaluation. */
   readonly rank: number;
   readonly score?: number;
   readonly evidence?: unknown;

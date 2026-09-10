@@ -66,7 +66,7 @@ async function fixture(): Promise<{
   readonly temporary: string;
   readonly root: string;
 }> {
-  const temporary = await mkdtemp(join(tmpdir(), "hraness-kb-sdk-"));
+  const temporary = await mkdtemp(join(tmpdir(), "hraness-wordcell-sdk-"));
   const root = join(temporary, "kb");
   await mkdir(join(root, "notes"), { recursive: true });
   await writeFile(join(root, "index.md"), "# Knowledge base\n", "utf8");
@@ -95,7 +95,7 @@ async function fixture(): Promise<{
       "title: Browser Memory",
       "tags: [capture]",
       "status: active",
-      "repository_scopes: [packages/KB]",
+      "repository_scopes: [packages/Wordcell]",
       "---",
       "# Browser Memory",
       "",

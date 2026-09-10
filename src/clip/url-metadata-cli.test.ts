@@ -28,7 +28,7 @@ describe("URL metadata CLI", () => {
     expect(metadataSearchBinaryPath("C:\\public\\kb", "win32")).toEndWith(
       "src/clip/metadata-search-tool/target/release/kb-url-metadata-search.exe",
     );
-    expect(urlMetadataUsage).toContain("kb url-metadata tool build");
+    expect(urlMetadataUsage).toContain("wordcell url-metadata tool build");
     expect(urlMetadataUsage).not.toContain("cargo build");
     expect(urlMetadataUsage).not.toContain("packages/kb/src");
   });

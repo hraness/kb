@@ -1,8 +1,8 @@
-export const pdfUsage = `kb pdf — save a local or public remote PDF as an auditable Markdown bundle
+export const pdfUsage = `wordcell pdf — save a local or public remote PDF as an auditable Markdown bundle
 
 Usage:
-  kb pdf <file-or-url> [--output <directory>] [--slug <slug>] [--annotations <json>] [--force] [--json]
-  kb pdf save <file-or-url> [capture options]
+  wordcell pdf <file-or-url> [--output <directory>] [--slug <slug>] [--annotations <json>] [--force] [--json]
+  wordcell pdf save <file-or-url> [capture options]
 
 Capture options:
   --output <directory>          Bundle parent (default: KB_PDF_OUTPUT or kb/articles)
@@ -93,7 +93,7 @@ function byteSize(value: string, name: string, maximum: number): number | string
     : `${name} must be between 1 byte and ${maximum} bytes`;
 }
 
-/** Parse the delegated `kb pdf` surface without touching the filesystem. */
+/** Parse the delegated `wordcell pdf` surface without touching the filesystem. */
 export function parsePdfArguments(
   rawArguments: readonly string[],
   environment: Readonly<Record<string, string | undefined>> = {},
@@ -172,7 +172,7 @@ export function parsePdfArguments(
 
   const input = positional[0];
   if (input === undefined || positional.length !== 1) {
-    return { ok: false, message: "kb pdf requires exactly one PDF path or public URL" };
+    return { ok: false, message: "wordcell pdf requires exactly one PDF path or public URL" };
   }
   if (input.length > 64 * 1024) {
     return { ok: false, message: "PDF input exceeds the 65536 code-unit limit" };

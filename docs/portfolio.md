@@ -92,7 +92,7 @@ Visibility is a registry classification. Operating-system permissions and worksp
 Search the shared vaults under one workspace:
 
 ```sh
-kb portfolio search "durable agent memory" \
+wordcell portfolio search "durable agent memory" \
   --registry ./kb-portfolio.json \
   --workspace /srv/knowledge \
   --shared \
@@ -103,7 +103,7 @@ kb portfolio search "durable agent memory" \
 Select private or personal vaults by exact key:
 
 ```sh
-kb portfolio search "release rationale" \
+wordcell portfolio search "release rationale" \
   --registry ./kb-portfolio.json \
   --workspace /srv/knowledge \
   --vault example/product-history \
@@ -116,7 +116,7 @@ The supported modes are `hybrid`, `exact`, `keyword`, and `semantic`. Add `--jso
 A query that is a canonical qualified URI routes directly to its named selected vault and uses exact retrieval:
 
 ```sh
-kb portfolio search "kb://example/product-history/018f4b20-7c95-7af2-a11f-89011baf1137" \
+wordcell portfolio search "kb://example/product-history/018f4b20-7c95-7af2-a11f-89011baf1137" \
   --registry ./kb-portfolio.json \
   --workspace /srv/knowledge \
   --vault example/product-history
@@ -131,7 +131,7 @@ Portfolio search uses the `partial` failure policy by default. A selected vault 
 Add `--require-all` when every selected vault must resolve, open, and execute its search:
 
 ```sh
-kb portfolio search "release rationale" \
+wordcell portfolio search "release rationale" \
   --registry ./kb-portfolio.json \
   --workspace /srv/knowledge \
   --shared \
@@ -169,7 +169,7 @@ title: Durable agent memory
 # Durable agent memory
 ```
 
-`document_id` is a lowercase ASCII ID of at most 128 bytes. It may contain letters, digits, dots, underscores, and hyphens. Ordinary notes created through `kb note create` or `createNote` receive a UUID v4 when the caller does not provide an ID.
+`document_id` is a lowercase ASCII ID of at most 128 bytes. It may contain letters, digits, dots, underscores, and hyphens. Ordinary notes created through `wordcell note create` or `createNote` receive a UUID v4 when the caller does not provide an ID.
 
 An idempotent create preserves an existing valid ID. It leaves a legacy note without an ID unchanged, and it rejects an explicit ID that conflicts with the existing note. Add IDs to legacy notes through a reviewed Markdown edit rather than treating an idempotent create as a migration.
 
@@ -210,7 +210,7 @@ Cross-vault relations do not create inferred backlinks, reciprocal assertions, o
 Run a report-only audit across the shared selection:
 
 ```sh
-kb portfolio audit \
+wordcell portfolio audit \
   --registry ./kb-portfolio.json \
   --workspace /srv/knowledge \
   --shared
@@ -219,7 +219,7 @@ kb portfolio audit \
 Audit exact vaults when the review includes private material:
 
 ```sh
-kb portfolio audit \
+wordcell portfolio audit \
   --registry ./kb-portfolio.json \
   --workspace /srv/knowledge \
   --vault example/product-history \
@@ -327,11 +327,11 @@ The default is `ordering: "relevance"`, which leaves configured priority rules i
 On the CLI, `--rules` enables leading aliases. Add `--priority` to request priority ordering:
 
 ```sh
-kb search "@active parser" --root ./kb \
+wordcell search "@active parser" --root ./kb \
   --rules ./search-rules.json \
   --priority
 
-kb portfolio search "@active parser" \
+wordcell portfolio search "@active parser" \
   --registry ./kb-portfolio.json \
   --workspace /srv/knowledge \
   --shared \

@@ -15,5 +15,5 @@
     "fast-check": "4.9.0"
   },
   "adaptation": "None; canonical engine and complete fixtures are byte-identical, including relative .js imports.",
-  "policy": "KB owns scripts/check-effect-policy.ts. Workflow and note publication retain distinct product-local programs and finite Promise roots; no sibling dependency or shared production runtime."
+  "policy": "Wordcell owns scripts/check-effect-policy.ts. Workflow and note publication retain distinct product-local programs and finite Promise roots; no sibling dependency or shared production runtime."
 }

@@ -1,34 +1,34 @@
 # Capture web content
 
-`kb clip` saves public and signed-in web content as an auditable Markdown bundle. It combines bounded structured adapters, HTTP extraction, browser rendering, a read-only Archive.today fallback, localized assets, and explicit completeness metadata.
+`wordcell clip` saves public and signed-in web content as an auditable Markdown bundle. It combines bounded structured adapters, HTTP extraction, browser rendering, a read-only Archive.today fallback, localized assets, and explicit completeness metadata.
 
 ## Check local capabilities
 
 Run the diagnostics before using local search, browser state, PDF ingestion, or video capture:
 
 ```sh
-kb doctor
-kb adapters
+wordcell doctor
+wordcell adapters
 ```
 
-`kb doctor --json` reports the installed runtime, QMD and static semantic-search
+`wordcell doctor --json` reports the installed runtime, QMD and static semantic-search
 prerequisites, extraction dependencies, browser support, profile display names,
 yt-dlp, ffmpeg, Poppler (`pdfinfo` and `pdftohtml`), and Tesseract. The semantic
 report distinguishes model-free keyword readiness from SQLite and sqlite-vec
 vector prerequisites; it does not inspect or download the embedding model. The
-Poppler pair is required by `kb pdf`; Tesseract adds local OCR for scans and
+Poppler pair is required by `wordcell pdf`; Tesseract adds local OCR for scans and
 screenshots.
-`kb adapters --json` returns the current platform capability matrix.
+`wordcell adapters --json` returns the current platform capability matrix.
 
 ## Capture or inspect a page
 
 ```sh
-kb clip https://example.com/article
-kb inspect https://example.com/article
-kb inspect https://example.com/article --json
+wordcell clip https://example.com/article
+wordcell inspect https://example.com/article
+wordcell inspect https://example.com/article --json
 ```
 
-The default route tries stable public structured data when available, bounded HTTP extraction, and a rendered browser when the platform or result requires one. If those routes produce no usable representation, KB may make one read-only lookup for the exact URL through Archive.today's fixed `archive.ph/newest/` route. An authentication, paywall, CAPTCHA, access-control, or rate-limit response disables that fallback instead of using an archive to bypass the current source's controls. KB never submits the URL for archiving, retries through aliases, or lets archived HTML displace a complete or partial Hacker News or Bluesky structured capture. It validates the source through the public-network boundary before disclosure, shares one deadline across validation and provider requests, and binds every snapshot and redirect to the exact source. An archived result is rescored and always reported as `partial`; it keeps the original canonical URL and records the timestamped snapshot as its acquisition URL. Inspection returns the selected Markdown and capture report without writing artifacts.
+The default route tries stable public structured data when available, bounded HTTP extraction, and a rendered browser when the platform or result requires one. If those routes produce no usable representation, Wordcell may make one read-only lookup for the exact URL through Archive.today's fixed `archive.ph/newest/` route. An authentication, paywall, CAPTCHA, access-control, or rate-limit response disables that fallback instead of using an archive to bypass the current source's controls. Wordcell never submits the URL for archiving, retries through aliases, or lets archived HTML displace a complete or partial Hacker News or Bluesky structured capture. It validates the source through the public-network boundary before disclosure, shares one deadline across validation and provider requests, and binds every snapshot and redirect to the exact source. An archived result is rescored and always reported as `partial`; it keeps the original canonical URL and records the timestamped snapshot as its acquisition URL. Inspection returns the selected Markdown and capture report without writing artifacts.
 
 By default, a capture writes `kb/articles/<slug>/`:
 
@@ -48,17 +48,17 @@ Set `KB_CLIP_OUTPUT` to change the default output root, or pass `--output <direc
 ## Inspect and verify a saved bundle
 
 ```sh
-kb capture show kb/articles/example
-kb capture show kb/articles/example --verify-assets
-kb capture verify kb/articles/example
-kb capture verify kb/articles/example --verify-assets --json
+wordcell capture show kb/articles/example
+wordcell capture show kb/articles/example --verify-assets
+wordcell capture verify kb/articles/example
+wordcell capture verify kb/articles/example --verify-assets --json
 ```
 
 `show` reads the document, compares its v4 byte count and digest when present, and prints its Markdown as untrusted data. `verify` reports integrity without printing the document in its text output. Add `--verify-assets` to either command to read and hash every listed asset. A mismatch or an unavailable authoritative document digest returns exit status 3.
 
 The JSON forms preserve the same disclosure boundary: `show --json` includes the stored Markdown as explicitly untrusted inspection data, while `verify --json` returns only integrity metadata and issues. Verification JSON omits both the Markdown and retained source HTML so an integrity check does not accidentally disclose captured content.
 
-Schema v4 records `document.path`, `document.bytes`, and `document.sha256` in `capture.json`. The lowercase SHA-256 digest covers the exact credential-redacted, newline-terminated Markdown bytes that KB writes. It does not cover `capture.json`, source HTML, or assets. Each asset has a separate byte count and SHA-256 digest. Schema versions one through three report document integrity as `unavailable` because they do not contain the v4 document record; `verify` does not present that state as success.
+Schema v4 records `document.path`, `document.bytes`, and `document.sha256` in `capture.json`. The lowercase SHA-256 digest covers the exact credential-redacted, newline-terminated Markdown bytes that Wordcell writes. It does not cover `capture.json`, source HTML, or assets. Each asset has a separate byte count and SHA-256 digest. Schema versions one through three report document integrity as `unavailable` because they do not contain the v4 document record; `verify` does not present that state as success.
 
 When asset verification is requested, a listed asset that is absent is an integrity mismatch rather than an operational reader crash. It produces an `asset-integrity` issue and exit status 3, like a digest or byte-count mismatch. Structural alias, link, confinement, and resource-budget failures remain operational errors because the reader cannot safely characterize the requested bytes.
 
@@ -67,26 +67,26 @@ Bundle inspection keeps the canonical root open, rejects linked or aliased path 
 Source HTML remains opt-in when you read a bundle:
 
 ```sh
-kb capture show kb/articles/example --include-source-html
+wordcell capture show kb/articles/example --include-source-html
 ```
 
-This flag has an effect only when the capture used `--evidence source` or `--evidence all`. KB removes active subtrees and form state, redacts credential-shaped values, and stores the result as inert HTML. Treat the retained text as hostile data, not instructions. It can still contain private content or text intended to influence an agent.
+This flag has an effect only when the capture used `--evidence source` or `--evidence all`. Wordcell removes active subtrees and form state, redacts credential-shaped values, and stores the result as inert HTML. Treat the retained text as hostile data, not instructions. It can still contain private content or text intended to influence an agent.
 
 ## Use Git for capture history
 
 Commit retained capture bundles to Git, then compare the current Markdown document with an earlier revision:
 
 ```sh
-kb capture diff kb/articles/example
-kb capture diff /path/to/repository/kb/articles/example --repo /path/to/repository --ref main
-kb capture diff kb/articles/example --repo . --ref main --json
+wordcell capture diff kb/articles/example
+wordcell capture diff /path/to/repository/kb/articles/example --repo /path/to/repository --ref main
+wordcell capture diff kb/articles/example --repo . --ref main --json
 ```
 
-The bundle must be inside the selected repository. The default reference is `HEAD`; `--ref` accepts a bounded branch, tag, or commit name, not a revision expression such as `HEAD~1`. KB validates the work tree and ref separately, so a bad repository or ref is not mislabeled as a missing file. The command reports `changed`, `unchanged`, or `missing-at-ref` for the exact Markdown path and emits a bounded Git diff when it changed. It rereads and matches the capture digest after diff generation, rejecting a concurrent change instead of pairing one digest with another snapshot's diff. It does not compare the manifest, source HTML, or assets. Run `kb capture verify` separately when integrity matters. Git is the capture version history; KB does not maintain a second content-history database.
+The bundle must be inside the selected repository. The default reference is `HEAD`; `--ref` accepts a bounded branch, tag, or commit name, not a revision expression such as `HEAD~1`. Wordcell validates the work tree and ref separately, so a bad repository or ref is not mislabeled as a missing file. The command reports `changed`, `unchanged`, or `missing-at-ref` for the exact Markdown path and emits a bounded Git diff when it changed. It rereads and matches the capture digest after diff generation, rejecting a concurrent change instead of pairing one digest with another snapshot's diff. It does not compare the manifest, source HTML, or assets. Run `wordcell capture verify` separately when integrity matters. Git is the capture version history; Wordcell does not maintain a second content-history database.
 
 ## Track capture jobs programmatically
 
-Use the optional `@hraness/kb/clip/jobs` ledger when a service needs durable capture progress:
+Use the optional `@hraness/wordcell/clip/jobs` ledger when a service needs durable capture progress:
 
 ```ts
 import {
@@ -94,7 +94,7 @@ import {
   createCaptureJob,
   openCaptureJobStore,
   updateCaptureJob,
-} from "@hraness/kb/clip/jobs";
+} from "@hraness/wordcell/clip/jobs";
 
 const store = await openCaptureJobStore("/absolute/path/to/capture-jobs");
 let job = await createCaptureJob(store, { target: "https://example.com/article" });
@@ -115,18 +115,18 @@ The ledger redacts credential-shaped values and strips terminal controls from ta
 ## Select acquisition and scope
 
 ```sh
-kb clip https://example.com/article --mode http
-kb clip https://example.com/application --mode browser
-kb clip https://example.com/post --scope page
-kb clip https://example.com/post --scope thread
-kb clip https://example.com/discussion --scope comments
+wordcell clip https://example.com/article --mode http
+wordcell clip https://example.com/application --mode browser
+wordcell clip https://example.com/post --scope page
+wordcell clip https://example.com/post --scope thread
+wordcell clip https://example.com/discussion --scope comments
 ```
 
 `auto` is the normal acquisition mode. `http` disables browser fallback but retains the final read-only archive lookup. `browser` requires rendered state and does not query Archive.today. Saved HTML can be imported without browser automation:
 
 ```sh
-kb clip https://example.com/article --html "$KB_SAVED_HTML"
-kb clip https://example.com/article --html - < page.html
+wordcell clip https://example.com/article --html "$KB_SAVED_HTML"
+wordcell clip https://example.com/article --html - < page.html
 ```
 
 Default resource bounds are 30 seconds per request, process, or extraction operation; 500 scoped items; depth 16; 25 MB of HTML; 100 MB per asset; and 500 MB across assets. Browser observation also has fixed DOM and scroll ceilings. Reaching a bound is recorded and can downgrade a result to `partial`.
@@ -134,12 +134,12 @@ Default resource bounds are 30 seconds per request, process, or extraction opera
 ## Capture images, media, and evidence
 
 ```sh
-kb clip https://example.com/article --media none
-kb clip https://example.com/article --media images
-kb clip https://example.com/video --media all
-kb clip https://example.com/article --evidence source
-kb clip https://example.com/article --evidence screenshot
-kb clip https://example.com/article --evidence all
+wordcell clip https://example.com/article --media none
+wordcell clip https://example.com/article --media images
+wordcell clip https://example.com/video --media all
+wordcell clip https://example.com/article --evidence source
+wordcell clip https://example.com/article --evidence screenshot
+wordcell clip https://example.com/article --evidence all
 ```
 
 Image downloads are signature-checked, content-addressed, byte-bounded, and
@@ -160,8 +160,8 @@ Source evidence is sanitized into inert HTML with credential-shaped values redac
 If the page is already open, read the current tab without navigating it:
 
 ```sh
-kb clip current --browser-live
-kb clip current --cdp 9222
+wordcell clip current --browser-live
+wordcell clip current --cdp 9222
 ```
 
 For `--browser-live`, first enable Chrome's local debugging connection at `chrome://inspect/#remote-debugging` (Chrome 144+). If Chrome was launched with an explicit loopback debugging port, pass that numeric port to `--cdp` instead.
@@ -169,14 +169,14 @@ For `--browser-live`, first enable Chrome's local debugging connection at `chrom
 To open a URL with existing browser state, select a profile name or path. Path-backed profiles run from a temporary copy, so the source profile is unchanged:
 
 ```sh
-kb clip https://example.com/member/article --browser-profile "$KB_CAPTURE_PROFILE"
+wordcell clip https://example.com/member/article --browser-profile "$KB_CAPTURE_PROFILE"
 ```
 
 Cookie-backed HTTP capture is useful when the page does not require local storage, IndexedDB, or other browser-only state:
 
 ```sh
-kb clip https://example.com/member/article --cookie-source chrome --cookie-profile "Default"
-kb clip https://example.com/member/article --cookies-file "$KB_COOKIES_FILE"
+wordcell clip https://example.com/member/article --cookie-source chrome --cookie-profile "Default"
+wordcell clip https://example.com/member/article --cookies-file "$KB_COOKIES_FILE"
 ```
 
 Choose at most one browser session and one cookie input. A browser session may use a separate cookie input for later asset or media downloads because attached browser state is not exported.
@@ -213,7 +213,7 @@ A `complete` or `partial` capture exits with status 0. Authentication, blocked, 
   applications use rendered or saved-HTML capture. They do not gain a
   trustworthy item tree without a dedicated adapter.
 
-Platform markup and endpoints change. Run `kb adapters` for the installed version's current claims.
+Platform markup and endpoints change. Run `wordcell adapters` for the installed version's current claims.
 
 ## Backfill saved URL metadata
 
@@ -222,13 +222,13 @@ The URL metadata command enriches every external URL record under `articles/`, i
 Build the isolated Rust helper, then run the resumable backfill:
 
 ```sh
-kb url-metadata tool build
-kb url-metadata backfill --root .
+wordcell url-metadata tool build
+wordcell url-metadata backfill --root .
 ```
 
-The helper pins [`MikeLuu99/searxng-rust`](https://github.com/MikeLuu99/searxng-rust) at revision `f40a00ea67a857ee996e1caba1ebab3ee7a14a47`. Its crate is named `metadata-search-engine-rs`; it queries DuckDuckGo, Brave, Startpage, and Yahoo and combines their results. KB resolves those four fixed hosts through its public-network boundary, passes only the validated addresses to the helper, disables redirects, and runs the upstream engines serially. A bounded global allocator caps Rust-owned response buffers and parsed data at 128 MiB. Linux also applies a 256 MiB process data ceiling. macOS rejects a lowered `RLIMIT_DATA`, so it retains the allocator ceiling plus the parent's subprocess deadline and output bounds. KB passes requests over stdin to a private subprocess with ambient proxy and credential variables removed, bounds the subprocess deadline and output, parses the closed response itself, and does not use the upstream URL normalizer for saved identity.
+The helper pins [`MikeLuu99/searxng-rust`](https://github.com/MikeLuu99/searxng-rust) at revision `f40a00ea67a857ee996e1caba1ebab3ee7a14a47`. Its crate is named `metadata-search-engine-rs`; it queries DuckDuckGo, Brave, Startpage, and Yahoo and combines their results. Wordcell resolves those four fixed hosts through its public-network boundary, passes only the validated addresses to the helper, disables redirects, and runs the upstream engines serially. A bounded global allocator caps Rust-owned response buffers and parsed data at 128 MiB. Linux also applies a 256 MiB process data ceiling. macOS rejects a lowered `RLIMIT_DATA`, so it retains the allocator ceiling plus the parent's subprocess deadline and output bounds. Wordcell passes requests over stdin to a private subprocess with ambient proxy and credential variables removed, bounds the subprocess deadline and output, parses the closed response itself, and does not use the upstream URL normalizer for saved identity.
 
-This operation discloses each eligible source URL as an exact search query to those search engines. Archive discovery also discloses it to Archive.today. Before either request, KB resolves the source host through its public-network boundary and rejects credential-bearing URLs, private targets, and credential-shaped query parameters. Safe identity parameters such as Hacker News `item?id=` and YouTube `watch?v=` remain part of the exact query.
+This operation discloses each eligible source URL as an exact search query to those search engines. Archive discovery also discloses it to Archive.today. Before either request, Wordcell resolves the source host through its public-network boundary and rejects credential-bearing URLs, private targets, and credential-shaped query parameters. Safe identity parameters such as Hacker News `item?id=` and YouTube `watch?v=` remain part of the exact query.
 
 Only a result with the same conservative URL identity can supply the selected title or description. A timestamped Archive.today result must embed that same source identity before it can be recorded. Provider failures, partial engine coverage, throttling, and absence remain explicit in the sidecar. A zero-result record is `not-found` only after complete attempted coverage; any failed engine or archive lookup keeps the top-level result `partial`.
 

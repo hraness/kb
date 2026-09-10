@@ -37,7 +37,7 @@ function deferred<T = void>() {
 }
 
 describe("workflow definitions", () => {
-  test("captures default KB context, dependency results, and final output", () => {
+  test("captures default Wordcell context, dependency results, and final output", () => {
     const workflow = defineWorkflow<{ query: string }>("typed-research")
       .node({
         id: "search",

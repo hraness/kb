@@ -10,7 +10,7 @@ tags:
 
 # Repository agent context
 
-The root `AGENTS.md` is the repository's normative control plane. Its rules apply before deeper lookup. This is the canonical standalone `@hraness/kb` source repository; its runtime, CLI, package-owned skills, committed distribution, and public contracts are owned here.
+The root `AGENTS.md` is the repository's normative control plane. Its rules apply before deeper lookup. This is the canonical standalone `@hraness/wordcell` source repository; its runtime, CLI, package-owned skills, committed distribution, and public contracts are owned here.
 
 ## Authority and repository seams
 
@@ -24,4 +24,4 @@ Apply unreasonably robust programming when agent work is cheap. Keep invalid sta
 
 ## Writing and planning
 
-`WRITING.md` governs internal prose. `STYLE.md` adds the public prose contract. KB plans retain decisions, deviations, review findings, and reproducible evidence. Maintained notes own conclusions worth reusing after a plan reaches a terminal state.
+`WRITING.md` governs internal prose. `STYLE.md` adds the public prose contract. Wordcell plans retain decisions, deviations, review findings, and reproducible evidence. Maintained notes own conclusions worth reusing after a plan reaches a terminal state.

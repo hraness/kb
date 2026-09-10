@@ -1,18 +1,21 @@
-# Publish KB
+# Publish Wordcell
 
 The canonical artifact contract starts at `0.19.4`; that first attempt stopped
-with a retained partial draft. The prepared `0.19.6` candidate is not installable
-until its immutable release completes. Each successful release contains
+with a retained partial draft. Each successful release contains
 one checked package archive, its packing receipt, a source/run manifest,
-checksums, and signed GitHub provenance. npm is an optional mirror of those
-exact archive bytes. An npm outage or pending npm promotion does not block a
-GitHub release.
+checksums, and signed GitHub provenance. The same tag run then publishes those
+exact archive bytes to npm as `@hraness/wordcell` through OIDC trusted
+publishing. An npm outage does not undo a GitHub release; the npm job is
+retried on its own.
 
-The package remains `@hraness/kb`; SDK imports, `kb`,
-`kb-evaluation-builder`, and the public Agent Skill keep their names. Old npm
-versions and existing tags remain available. The historical npm-first
+Wordcell 0.20.0 renamed the product from KB. The package is `@hraness/wordcell`,
+the commands are `wordcell` and `wordcell-evaluation-builder` (`kb` remains a
+deprecated alias through 0.20.x), the public Agent Skill is `wordcell`, and the
+homepage is [wordcell.io](https://wordcell.io). The vault format keeps its
+`kb` names; see the README. Versions through 0.19.6 stay published under
+`@hraness/kb` with their tags and Releases. The historical npm-first
 procedure is preserved in
-[the 0.19.2 source](https://github.com/hraness/kb/blob/v0.19.2/docs/publishing.md).
+[the 0.19.2 source](https://github.com/hraness/wordcell/blob/v0.19.2/docs/publishing.md).
 
 ## Prepare a canonical release
 
@@ -53,7 +56,7 @@ Packing is local tooling, not registry publication.
 
 The handoff contains exactly:
 
-- `hraness-kb-<version>.tgz`
+- `hraness-wordcell-<version>.tgz`
 - `npm-pack.json`
 - `release-manifest.json`
 - `SHA256SUMS`
@@ -120,81 +123,88 @@ the particular optional capability has been reviewed. Installation does not
 initialize or modify a vault. See the [README](../README.md#install) for the
 command and runtime requirements.
 
-## Mirror an existing canonical release to npm
+## Publish the same bytes to npm
 
-The existing trusted publisher remains stage-only:
-`hraness/kb`, `.github/workflows/npm-stage.yml`, environment `npm-stage`, and
-`npm stage publish` permission. Keep the sole environment branch policy on
-selected branch `main` with type `branch`, administrator bypass disabled, no
-required deployment reviewers, and no secrets. Require publishing two-factor
-authentication and disallow traditional tokens. Preserve
-`contentPolicy.class=dual-use` and the root `DISCLOSURE`.
+The Release workflow's `publish_npm` job runs after the immutable GitHub
+Release is published. It is bound to the GitHub environment `npm-release`,
+whose sole deployment policy is tag pattern `v*` with administrator bypass
+disabled, no required deployment reviewers, and no secrets. The job holds only
+`actions: read`, `contents: read`, and `id-token: write`. It checks out no
+source and runs no repository code. It reauthorizes the current attempt and
+both owner actors against the active workflow and current main, downloads the
+attested artifact by its numeric artifact ID, rebinds every verified hash and
+the provenance bundle, and proves that the immutable Latest Release for the
+tag carries the exact archive digest and size.
 
-Dispatch the optional mirror from current `main` after the selected package version
-has its immutable canonical release. Its canonical source may precede the current
-workflow commit, but must remain an ancestor of it:
+Immediately before mutation it reads the exact registry version. An absent
+version publishes; a present version with the identical `dist.integrity` is an
+already-published rerun and succeeds without publishing; any other state fails
+closed. Public `latest` must be older than the candidate, and `--tag` is never
+passed, so pinned npm's monotonic default-tag guard stays active. The one
+mutation is:
 
 ```sh
-gh workflow run npm-stage.yml --ref main -f publish_to_npm=true
+npm publish <canonical-archive> \
+  --access public \
+  --ignore-scripts \
+  --json \
+  --provenance \
+  --registry=https://registry.npmjs.org
 ```
 
-The default candidate is current main's package version. To mirror an earlier
-canonical release while GitHub is ahead, add `-f release_tag=v0.19.6`. The input
-must be one exact stable tag no newer than current main's version; its source
-must be an ancestor of the workflow commit, and its version must still be newer
-than npm `latest`. Neither a Git branch with a matching name nor an unqualified
-ref can supply its source identity.
+It runs from a clean directory with empty user and global npm configuration
+files and no ambient `npm_config_tag`. npm 11.19 returns one receipt keyed by
+package name; the job requires its `id` and `integrity` to match the canonical
+archive.
 
-A default dispatch verifies the candidate without requesting OIDC. The
-explicitly opted-in staging job starts after verification. The read-only job
-verifies and downloads the canonical archive; it does not rebuild mirror
-bytes. It requires the exact completed successful canonical run, repeats the full source gate on current main, and runs the current package verifier against the tagged source and downloaded archive. It hands exactly the tarball,
-`npm-pack.json`, and `npm-package.sha256` to the terminal staging job.
+The dependent `admit_npm` job checks out the exact reviewed verifier closure,
+downloads the canonical archive and packing receipt through the GitHub API by
+asset ID, packs the registry version, compares complete content inventories
+with `scripts/npm-package-identity.ts`, installs the registry version in an
+isolated consumer, and verifies registry signatures, the publish attestation,
+and SLSA provenance bound to `refs/tags/v<version>` of `release.yml` with
+`scripts/npm-release-attestation.ts`.
 
-The clean consumer uses the verifier's exact, source-qualified TypeScript,
-Bun, and Node declaration versions, including an explicit Node declaration
-pin. Keep strict declaration checking enabled. Before compiling, the verifier
-records resolved versions and manifest and lock hashes so a dependency failure
-can be diagnosed without retaining private machine state. Updating this
-verification tuple does not change the canonical archive or its source identity.
+If `publish_npm` fails after the GitHub Release exists, inspect the exact
+registry state, then re-run the failed jobs of the same workflow run. The
+artifact-by-ID download and the idempotent registry check make that retry
+safe. Never re-push the tag or create another release.
 
-The terminal staging job holds only `actions: read`, `contents: read`, and `id-token: write`.
-It checks out no source and runs no repository code. Its first step
-reauthorizes the current attempt and both owner actors against the active
-workflow and current main. It independently verifies safe packed
-configuration, complete inventory, bounds, source, hashes, and clean default
-`latest`; a top-level `tag` override is rejected. Pinned npm's implicit default
-tag keeps its higher-version guard active.
+## Configure trusted publishing
 
-A successful version-bound intent step immediately precedes the mutation.
-Every retained attempt is inspected, including terminal writes whose job name
-is malformed. An unresolved intent newer than public npm `latest` prevents a
-second stage. Public promotion clears that intent; the prior npm version must
-still have its annotated tag, immutable Actions-created release, and source
-reachable from main. GitHub Latest may be newer than npm Latest. Historical
-zero-asset releases are accepted only for the exact source-bound tags `v0.19.0`,
-`v0.19.1`, and `v0.19.2` recorded in the workflow. Other prior releases must be
-at least `0.19.4` and require the five canonical assets.
+npm requires the package to exist before a trusted publisher can be bound.
+Establish the new coordinate with a separately reviewed prerelease bootstrap
+artifact, then configure trusted publishing before tagging the first stable
+release. Use exactly `0.20.0-bootstrap.1` with the `bootstrap` dist-tag and no
+`latest` tag. The first stable workflow accepts that one exact bootstrap state.
+Retain its exact
+source and archive evidence, and inspect its complete packed manifest and
+contents before the owner-authenticated publication. Do not publish a dummy
+package or manually publish the stable release archive: the stable
+`admit_npm` gate requires the exact tag workflow's OIDC provenance.
 
-npm promotion remains subject to its two-factor authentication requirement
-until npm approves a classification change. This is independent of canonical
-GitHub delivery. No npm password, OTP, recovery code, session cookie, or token
-belongs in Git, workflows, task files, or chat.
+The coordinator prepares and verifies the concrete bootstrap artifact before
+requesting the owner's interactive npm authentication. Preserve npm's current
+publication controls, including any exact-artifact approval it requires.
+Successful package creation does not waive those controls for later releases.
 
-## Recover an ambiguous npm stage
+Then configure the exact GitHub Actions identity once:
 
-Inspect the exact provider state before retrying. The trusted-publishing
-assertion cannot run `npm stage list`. If a candidate is rejected, reject that
-exact version through npm first, then use the exceptional
-`resolved_stage_version=<rejected-version>` input with the intentional mirror
-dispatch. Leave that input empty normally. It records resolution for only the
-matching durable intent; it cannot clear another version or an unresolved
-provider write. This is not a claim that npm exposes or prevents an
-out-of-band concurrent stage.
+```sh
+npm trust github @hraness/wordcell --repo hraness/wordcell --file release.yml --environment npm-release --allow-publish --yes
+npm trust list @hraness/wordcell --json
+```
+
+The relationship must name `hraness/wordcell`, the exact `release.yml`
+filename, the `npm-release` environment, and publish permission. Keep package
+publishing access on **Require two-factor authentication and disallow
+tokens**; do not add an npm token to GitHub. Later releases need no interactive
+step. No npm password, OTP, recovery code, session cookie, or token belongs in
+Git, workflows, task files, or chat.
 
 ## Retained v0.19.4 publication failure
 
-[Release run 34353781377](https://github.com/hraness/kb/actions/runs/34353781377)
+[Release run 34353781377](https://github.com/hraness/wordcell/actions/runs/34353781377)
 verified source, packed bytes and attestation, then stopped after uploading
 `SHA256SUMS` to draft `385518557`. The descriptor used GitHub's temporary
 `untagged-ef6c1bd779e9dd4032bb` path; the original verifier required a published
@@ -206,3 +216,19 @@ not an admitted public release and must not be retried under changed source,
 overwritten, relabeled or deleted. The `0.19.5` candidate applies the reviewed
 state-aware descriptor rule while retaining exact IDs, bytes, source and
 provenance admission. Its install examples remain conditional until publication.
+
+## Site publication datum
+
+The independent Next application in `site/` builds through its own frozen
+lockfile and is required by CI. Run `cd site && bun run check` before delivery;
+its README projection, source contracts, lint, types, production build, and
+HTTP runtime smoke test must pass. Vercel uses `site/` as the project root.
+
+`site/published-release.json` starts with `version` and `verificationRun` both
+null. The homepage then shows the first-release preparation state and offers
+no archive download. After the canonical GitHub release has passed public
+verification, set both fields to the exact stable Wordcell version and its
+successful `https://github.com/hraness/wordcell/actions/runs/<run-id>` URL.
+Never use a pre-rename kb archive or an unverified source version as that datum.
+Keep both fields null if publication or verification is incomplete. Regenerate
+the README projection and validate the site before deploying the update.

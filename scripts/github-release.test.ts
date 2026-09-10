@@ -10,10 +10,10 @@ import { parseReleaseManifest, publishVerifiedRelease, releaseBody, stableVersio
 const archive = Buffer.from("Synthetic packed-byte identity fixture; real USTAR admission is covered by package-artifact tests.");
 const digest = (bytes: Uint8Array, algorithm = "sha256") => createHash(algorithm).update(bytes).digest("hex");
 const manifest: ReleaseManifest = {
-  schema: "hraness-github-release-v1", repository: "hraness/kb", repositoryId: 1308971873,
-  package: "@hraness/kb", version: "0.19.4", tag: "v0.19.4", sourceSha: "a".repeat(40),
+  schema: "hraness-github-release-v1", repository: "hraness/wordcell", repositoryId: 1308971873,
+  package: "@hraness/wordcell", version: "0.19.4", tag: "v0.19.4", sourceSha: "a".repeat(40),
   workflow: ".github/workflows/release.yml", workflowSha: "b".repeat(40), runId: 123, runAttempt: 2,
-  archive: { name: "hraness-kb-0.19.4.tgz", bytes: archive.length, sha256: digest(archive), sha512: digest(archive, "sha512") },
+  archive: { name: "hraness-wordcell-0.19.4.tgz", bytes: archive.length, sha256: digest(archive), sha512: digest(archive, "sha512") },
 };
 
 test("manifest admits only exact bounded package, source, and run identity", () => {
@@ -68,11 +68,11 @@ test("artifact verification rejects changed bytes, checksums, extra paths, and s
 test("draft recovery only admits matching existing assets and published releases require all assets", () => {
   const assets = [{ name: manifest.archive.name, bytes: archive.length, sha256: manifest.archive.sha256 }];
   const release = {
-    id: 77, tag_name: manifest.tag, target_commitish: manifest.sourceSha, name: `KB ${manifest.tag}`, body: releaseBody(manifest), draft: true, prerelease: false,
+    id: 77, tag_name: manifest.tag, target_commitish: manifest.sourceSha, name: `Wordcell ${manifest.tag}`, body: releaseBody(manifest), draft: true, prerelease: false,
     immutable: false, author: { id: 41898282, login: "github-actions[bot]", type: "Bot" }, assets: [],
   };
   expect(verifyProviderRelease(release, manifest, assets, true)).toEqual([manifest.archive.name]);
-  const asset = { id: 88, name: manifest.archive.name, size: archive.length, digest: `sha256:${manifest.archive.sha256}`, state: "uploaded", browser_download_url: `https://github.com/hraness/kb/releases/download/${manifest.tag}/${manifest.archive.name}`, url: "https://api.github.com/repos/hraness/kb/releases/assets/88" };
+  const asset = { id: 88, name: manifest.archive.name, size: archive.length, digest: `sha256:${manifest.archive.sha256}`, state: "uploaded", browser_download_url: `https://github.com/hraness/wordcell/releases/download/${manifest.tag}/${manifest.archive.name}`, url: "https://api.github.com/repos/hraness/wordcell/releases/assets/88" };
   const complete = { ...release, assets: [asset] };
   expect(verifyProviderRelease(complete, manifest, assets, true)).toEqual([]);
   expect(verifyProviderRelease({ ...complete, draft: false, immutable: true }, manifest, assets, false)).toEqual([]);
@@ -83,17 +83,17 @@ test("draft recovery only admits matching existing assets and published releases
 });
 
 test("temporary draft asset URLs remain same-repository and never admit published assets", () => {
-  const temporaryUrl = "https://github.com/hraness/kb/releases/download/untagged-ef6c1bd779e9dd4032bb/SHA256SUMS";
+  const temporaryUrl = "https://github.com/hraness/wordcell/releases/download/untagged-ef6c1bd779e9dd4032bb/SHA256SUMS";
   const sha256 = "7439c234c0a6d0166efef952e3d8ee76dfde2178934ffe8dcdebb84cd1dfe162";
   const assets = [{ name: "SHA256SUMS", bytes: 256, sha256 }];
   const asset = { id: 552772852, name: "SHA256SUMS", size: 256, digest: `sha256:${sha256}`, state: "uploaded",
-    browser_download_url: temporaryUrl, url: "https://api.github.com/repos/hraness/kb/releases/assets/552772852" };
-  const draft = { id: 385518557, tag_name: manifest.tag, target_commitish: manifest.sourceSha, name: `KB ${manifest.tag}`,
+    browser_download_url: temporaryUrl, url: "https://api.github.com/repos/hraness/wordcell/releases/assets/552772852" };
+  const draft = { id: 385518557, tag_name: manifest.tag, target_commitish: manifest.sourceSha, name: `Wordcell ${manifest.tag}`,
     body: releaseBody(manifest), draft: true, immutable: false, prerelease: false,
     author: { id: 41898282, login: "github-actions[bot]", type: "Bot" }, assets: [asset] };
   expect(verifyProviderRelease(draft, manifest, assets, true)).toEqual([]);
   for (const url of [
-    temporaryUrl.replace("hraness/kb", "other/kb"), temporaryUrl.replace("SHA256SUMS", "npm-pack.json"),
+    temporaryUrl.replace("hraness/wordcell", "other/kb"), temporaryUrl.replace("SHA256SUMS", "npm-pack.json"),
     temporaryUrl.replace("ef6c1bd779e9dd4032bb", "ef6c1bd779e9dd4032b"),
     temporaryUrl.replace("ef6c1bd779e9dd4032bb", "EF6C1BD779E9DD4032BB"),
     `${temporaryUrl}?token=anything`, `${temporaryUrl}#fragment`, temporaryUrl.replace("untagged-", "refs/untagged-"),
@@ -102,16 +102,16 @@ test("temporary draft asset URLs remain same-repository and never admit publishe
     expect(() => verifyProviderRelease({ ...draft, draft: false, immutable: true }, manifest, assets, allowDraft)).toThrow();
   }
   fc.assert(fc.property(fc.array(fc.constantFrom(..."0123456789abcdef"), { minLength: 20, maxLength: 20 }), (digits) => {
-    const url = `https://github.com/hraness/kb/releases/download/untagged-${digits.join("")}/SHA256SUMS`;
+    const url = `https://github.com/hraness/wordcell/releases/download/untagged-${digits.join("")}/SHA256SUMS`;
     expect(verifyProviderRelease({ ...draft, assets: [{ ...asset, browser_download_url: url }] }, manifest, assets, true)).toEqual([]);
   }));
 });
 
 test("verified certificate and subject bind repository, source, workflow, hosted runner, and exact attempt", () => {
-  const uri = `https://github.com/hraness/kb/.github/workflows/release.yml@refs/tags/${manifest.tag}`;
+  const uri = `https://github.com/hraness/wordcell/.github/workflows/release.yml@refs/tags/${manifest.tag}`;
   const certificate = {
-    issuer: "https://token.actions.githubusercontent.com", runInvocationURI: "https://github.com/hraness/kb/actions/runs/123/attempts/2",
-    sourceRepositoryIdentifier: "1308971873", sourceRepositoryOwnerIdentifier: "307125679", sourceRepositoryOwnerURI: "https://github.com/hraness", sourceRepositoryURI: "https://github.com/hraness/kb",
+    issuer: "https://token.actions.githubusercontent.com", runInvocationURI: "https://github.com/hraness/wordcell/actions/runs/123/attempts/2",
+    sourceRepositoryIdentifier: "1308971873", sourceRepositoryOwnerIdentifier: "307125679", sourceRepositoryOwnerURI: "https://github.com/hraness", sourceRepositoryURI: "https://github.com/hraness/wordcell",
     sourceRepositoryDigest: manifest.sourceSha, sourceRepositoryRef: `refs/tags/${manifest.tag}`,
     buildSignerDigest: manifest.sourceSha, buildConfigDigest: manifest.sourceSha, buildSignerURI: uri, buildConfigURI: uri,
     runnerEnvironment: "github-hosted", buildTrigger: "push", sourceRepositoryVisibilityAtSigning: "public",
@@ -133,7 +133,7 @@ test("npm mirroring requires the exact completed successful canonical run", () =
     id: manifest.runId, run_attempt: manifest.runAttempt, workflow_id: 320004141, name: "Release", path: manifest.workflow,
     status: "completed", conclusion: "success", event: "push", head_branch: manifest.tag, head_sha: manifest.sourceSha,
     actor: { id: 894119, type: "User" }, triggering_actor: { id: 894119, type: "User" },
-    repository: { id: 1308971873, full_name: "hraness/kb", private: false },
+    repository: { id: 1308971873, full_name: "hraness/wordcell", private: false },
   };
   expect(() => verifyCanonicalRun(run, manifest)).not.toThrow();
   for (const change of [{ run_attempt: 1 }, { status: "in_progress" }, { conclusion: "failure" }, { head_sha: manifest.workflowSha }, { workflow_id: 1 }, { triggering_actor: { id: 1, type: "User" } }]) {
@@ -147,13 +147,13 @@ test("draft publication survives by-tag 404 through one retained release ID with
     .map((name) => ({ name, bytes: remoteBytes.length, sha256: digest(remoteBytes) }));
   const descriptor = (name: string, id: number) => ({
     id, name, size: remoteBytes.length, digest: `sha256:${digest(remoteBytes)}`, state: "uploaded",
-    browser_download_url: `https://github.com/hraness/kb/releases/download/untagged-ef6c1bd779e9dd4032bb/${name}`,
-    url: `https://api.github.com/repos/hraness/kb/releases/assets/${id}`,
+    browser_download_url: `https://github.com/hraness/wordcell/releases/download/untagged-ef6c1bd779e9dd4032bb/${name}`,
+    url: `https://api.github.com/repos/hraness/wordcell/releases/assets/${id}`,
   });
   const fixture = (existing: boolean, conflict = false, fault?: "bytes" | "id" | "published-bytes" | "creation-status" | "creation-identity") => {
     let created = existing;
     const release = {
-      id: 77, tag_name: manifest.tag, target_commitish: manifest.sourceSha, name: `KB ${manifest.tag}`,
+      id: 77, tag_name: manifest.tag, target_commitish: manifest.sourceSha, name: `Wordcell ${manifest.tag}`,
       body: conflict ? "a different original attempt" : releaseBody(manifest),
       draft: true, immutable: false, prerelease: false,
       author: { id: 41898282, login: "github-actions[bot]", type: "Bot" },
@@ -167,7 +167,7 @@ test("draft publication survives by-tag 404 through one retained release ID with
       const mutation = args[0] === "release" || args[2] === "POST" || args[2] === "PATCH";
       if (mutation && prior !== "authority") throw new Error("Mutation was not immediately reauthorized");
       const endpoint = args[3];
-      if (args[2] === "POST" && endpoint === "/repos/hraness/kb/releases") {
+      if (args[2] === "POST" && endpoint === "/repos/hraness/wordcell/releases") {
         if (created) throw new Error("Draft must never be recreated");
         created = true;
         expect(args).toContain(`target_commitish=${manifest.sourceSha}`);
@@ -181,7 +181,7 @@ test("draft publication survives by-tag 404 through one retained release ID with
         // The provider index intentionally never exposes a draft created here.
         return JSON.stringify([[{ id: 1, tag_name: "v0.1.0" }], existing ? [{ id: 77, tag_name: manifest.tag }] : []]);
       }
-      if (args[2] === "POST" && endpoint?.startsWith("https://uploads.github.com/repos/hraness/kb/releases/77/assets?name=")) {
+      if (args[2] === "POST" && endpoint?.startsWith("https://uploads.github.com/repos/hraness/wordcell/releases/77/assets?name=")) {
         expect(args).toContain("Content-Length: 10");
         expect(args).toContain("Content-Type: application/octet-stream");
         const name = new URL(endpoint).searchParams.get("name")!;
@@ -190,18 +190,18 @@ test("draft publication survives by-tag 404 through one retained release ID with
         if (fault === "id") release.id = 78;
         return "{}";
       }
-      if (args[2] === "PATCH" && endpoint === "/repos/hraness/kb/releases/77") {
+      if (args[2] === "PATCH" && endpoint === "/repos/hraness/wordcell/releases/77") {
         expect(args).toContain("draft=false");
         expect(args).toContain("make_latest=true");
         release.draft = false; release.immutable = true;
-        for (const asset of release.assets) asset.browser_download_url = `https://github.com/hraness/kb/releases/download/${manifest.tag}/${asset.name}`;
+        for (const asset of release.assets) asset.browser_download_url = `https://github.com/hraness/wordcell/releases/download/${manifest.tag}/${asset.name}`;
         return JSON.stringify(release);
       }
-      if (args[2] === "GET" && endpoint === `/repos/hraness/kb/releases/tags/${manifest.tag}` && release.draft) {
+      if (args[2] === "GET" && endpoint === `/repos/hraness/wordcell/releases/tags/${manifest.tag}` && release.draft) {
         draftTagRequests += 1;
         throw new Error("HTTP 404: GitHub hides drafts from by-tag lookup");
       }
-      if (args[2] === "GET" && ["/repos/hraness/kb/releases/77", `/repos/hraness/kb/releases/tags/${manifest.tag}`, "/repos/hraness/kb/releases/latest"].includes(endpoint ?? "")) return JSON.stringify(release);
+      if (args[2] === "GET" && ["/repos/hraness/wordcell/releases/77", `/repos/hraness/wordcell/releases/tags/${manifest.tag}`, "/repos/hraness/wordcell/releases/latest"].includes(endpoint ?? "")) return JSON.stringify(release);
       throw new Error(`Unexpected provider command ${args.join(" ")}`);
     };
     const download = (id: number, expectedBytes: number): Uint8Array => {
@@ -218,7 +218,7 @@ test("draft publication survives by-tag 404 through one retained release ID with
     expect(provider.draftTagRequests()).toBe(0);
     expect(provider.release.assets).toHaveLength(5);
     expect(provider.release.immutable).toBe(true);
-    expect(provider.calls.filter((call) => call.startsWith("api --method POST /repos/hraness/kb/releases "))).toHaveLength(existing ? 0 : 1);
+    expect(provider.calls.filter((call) => call.startsWith("api --method POST /repos/hraness/wordcell/releases "))).toHaveLength(existing ? 0 : 1);
     expect(provider.calls.filter((call) => call.startsWith("api --method POST https://uploads.github.com"))).toHaveLength(existing ? 4 : 5);
     expect(provider.calls.filter((call) => call.includes("--paginate"))).toHaveLength(1);
     expect(provider.calls.filter((call) => call.startsWith("download "))).toHaveLength(10);

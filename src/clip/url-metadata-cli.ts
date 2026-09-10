@@ -13,17 +13,17 @@ import {
 } from "./metadata-search-tool/runner.js";
 import { sanitizeTerminalText } from "./terminal.js";
 
-export const urlMetadataUsage = `kb url-metadata — backfill bounded metadata for saved URLs
+export const urlMetadataUsage = `wordcell url-metadata — backfill bounded metadata for saved URLs
 
 Usage:
-  kb url-metadata tool <build|check>
-  kb url-metadata backfill [--root <vault>] [--search-binary <path>] [--refresh]
+  wordcell url-metadata tool <build|check>
+  wordcell url-metadata backfill [--root <vault>] [--search-binary <path>] [--refresh]
     [--archive | --no-archive] [--delay-ms <milliseconds>]
     [--max-results <count>] [--timeout <milliseconds>] [--json]
 
 Build or validate the immutable metadata-search-engine-rs helper directly from
-an installed @hraness/kb package:
-  kb url-metadata tool build
+an installed @hraness/wordcell package:
+  wordcell url-metadata tool build
 `;
 
 type Output = {
@@ -193,7 +193,7 @@ function renderReport(report: UrlMetadataBackfillReport): string {
   ].join("\n") + "\n";
 }
 
-/** Dedicated entry point, delegated by the main `kb` CLI. */
+/** Dedicated entry point, delegated by the main `wordcell` CLI. */
 export async function main(
   rawArguments: readonly string[] = process.argv.slice(2),
   environment: Readonly<Record<string, string | undefined>> = process.env,

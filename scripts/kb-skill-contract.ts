@@ -333,7 +333,7 @@ export type KbSkillContractResources = {
 };
 
 const CUSTOMIZE_HEADINGS = [
-  "Customize a KB setup",
+  "Customize a Wordcell setup",
   "Establish the boundary",
   "Inspect without mutation",
   "Interview in small batches",
@@ -353,7 +353,7 @@ const COMPANION_HEADINGS = [
   "Approval boundary",
   "Execution semantics",
   "Durable outputs and provenance",
-  "Verification and KB maintenance",
+  "Verification and Wordcell maintenance",
   "Composition boundary",
   "Review checklist",
 ] as const;
@@ -418,8 +418,8 @@ export function validateKbSkillContractResources(
       errors.push(`SKILL.md must link ${link}`);
     }
   }
-  if (!resources.skill.includes("bun add --global --ignore-scripts https://github.com/hraness/kb/releases/download/v0.19.6/hraness-kb-0.19.6.tgz")) {
-    errors.push("SKILL.md must retain the immutable 0.19.6 GitHub runtime pin");
+  if (!resources.skill.includes("bun add --global --ignore-scripts https://github.com/hraness/wordcell/releases/download/v0.20.0/hraness-wordcell-0.20.0.tgz")) {
+    errors.push("SKILL.md must retain the immutable 0.20.0 GitHub runtime pin");
   }
   for (const [name, contents, headings] of [
     ["customize.md", resources.customize, CUSTOMIZE_HEADINGS],
@@ -442,7 +442,7 @@ export function validateKbSkillContractResources(
   for (const required of [
     "Silence, a denial, or an ambiguous response is not approval.",
     "<explicit-skill-root>/<name>/SKILL.md",
-    "Do not run `kb doctor`, `kb init`, `kb index`, QMD",
+    "Do not run `wordcell doctor`, `wordcell init`, `wordcell index`, QMD",
     "The scaffold executor writes filesystem targets only.",
   ]) {
     if (!resources.customize.includes(required)) {

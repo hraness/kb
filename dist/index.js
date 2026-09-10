@@ -12,7 +12,7 @@ import {
 } from "./index-h170byqw.js";
 import {
   initVault
-} from "./index-mqx4nd6v.js";
+} from "./index-23z4zxgg.js";
 import {
   MAX_SOURCE_DISPOSITION_EVIDENCE,
   MAX_SOURCE_INBOX_CONNECTIONS,
@@ -21,6 +21,12 @@ import {
   MAX_SOURCE_INBOX_RESULTS,
   sourceInbox
 } from "./index-pj501bh1.js";
+import {
+  FrozenEvaluationSnapshotError,
+  knowledgeBaseEvaluationRetrieverIds,
+  openKnowledgeBaseEvaluation,
+  verifyFrozenEvaluationSnapshot
+} from "./index-bs0yf4pp.js";
 import {
   DEFAULT_PERCOLATION_LIMIT,
   DEFAULT_PERCOLATION_MIN_SUPPORT,
@@ -43,12 +49,6 @@ import {
   percolateVault
 } from "./index-nd6nynv2.js";
 import {
-  FrozenEvaluationSnapshotError,
-  knowledgeBaseEvaluationRetrieverIds,
-  openKnowledgeBaseEvaluation,
-  verifyFrozenEvaluationSnapshot
-} from "./index-xw9ac71d.js";
-import {
   DEFAULT_SEARCH_RESULTS,
   MAX_SEARCH_CANDIDATES,
   MAX_SEARCH_NOTE_REFERENCE_BYTES,
@@ -59,7 +59,7 @@ import {
   packSearchContext,
   packUntrustedSearchContext,
   validateKnowledgeBaseSearchHistory
-} from "./index-vxmf14m1.js";
+} from "./index-m7et4rz4.js";
 import"./index-adx6khj5.js";
 import {
   MAX_EMBEDDING_MODEL_BYTES,
@@ -85,7 +85,7 @@ import {
   searchSemanticVault,
   semanticDatabasePath,
   sha256EmbeddingModelFile
-} from "./index-5m2ydj5q.js";
+} from "./index-n05s3wsb.js";
 import"./index-4j3tt0c3.js";
 import {
   GitHistoryError,
@@ -154,14 +154,14 @@ import {
   normalizeRelationPredicate,
   noteRevision,
   removeNoteRelation
-} from "./index-dbfcfrdp.js";
+} from "./index-6sw24nvv.js";
 import"./index-3rm7cz6h.js";
 import {
   createRepresentativeRetrievalFixture,
   createSyntheticRankFusionFixture,
   evaluateRanking,
   evaluateRetrievalBenchmark
-} from "./index-qwgsmtsz.js";
+} from "./index-3ehtt59c.js";
 import {
   MAX_SEARCH_QUERY_BYTES,
   MAX_SEARCH_QUERY_TERMS,
@@ -169,13 +169,7 @@ import {
   fuseRankedCandidates,
   searchExactVault,
   validateSearchQuery
-} from "./index-gm9t95d9.js";
-import {
-  MAX_NAVIGATION_INDEXED_CONNECTIONS,
-  MAX_NAVIGATION_RETURNED_CONNECTIONS,
-  NavigationBudgetError,
-  navigateLinks
-} from "./index-d13v9ckt.js";
+} from "./index-why54q5p.js";
 import {
   MAX_QUERY_FILTERS,
   MAX_QUERY_FILTER_VALUES,
@@ -218,6 +212,12 @@ import {
   terminalPlanStatuses,
   validateRepositoryScopeSelection
 } from "./index-06c9ctr6.js";
+import {
+  MAX_NAVIGATION_INDEXED_CONNECTIONS,
+  MAX_NAVIGATION_RETURNED_CONNECTIONS,
+  NavigationBudgetError,
+  navigateLinks
+} from "./index-d13v9ckt.js";
 import {
   AgentContextRepositoryPathError,
   RepositoryScopeError,

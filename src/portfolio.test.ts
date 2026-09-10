@@ -204,7 +204,7 @@ function dependencies(
 
 describe("knowledge portfolio", () => {
   test("federates real read-only knowledge-base sessions through the registry boundary", async () => {
-    const temporary = await mkdtemp(join(tmpdir(), "hraness-kb-portfolio-e2e-"));
+    const temporary = await mkdtemp(join(tmpdir(), "hraness-wordcell-portfolio-e2e-"));
     const registryPath = join(temporary, "kb-portfolio.json");
     for (const id of ["alpha", "beta"]) {
       const root = join(temporary, `${id}-checkout`, "kb");

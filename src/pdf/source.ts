@@ -102,7 +102,7 @@ export async function preparePdfSource(
   assertPdfSignature(result.bytes);
 
   const makeTemporaryDirectory = dependencies.makeTemporaryDirectory
-    ?? (() => mkdtempSync(join(tmpdir(), "hraness-kb-pdf-source-")));
+    ?? (() => mkdtempSync(join(tmpdir(), "hraness-wordcell-pdf-source-")));
   const removeDirectory = dependencies.removeDirectory
     ?? ((path: string) => rmSync(path, { recursive: true, force: true }));
   const directory = makeTemporaryDirectory();

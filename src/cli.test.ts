@@ -1268,7 +1268,7 @@ describe("kb vault commands", () => {
   });
 
   test("initializes, refreshes, checks, graphs, and derives backlinks without editing notes", async () => {
-    const temporary = await mkdtemp(join(tmpdir(), "hraness-kb-cli-"));
+    const temporary = await mkdtemp(join(tmpdir(), "hraness-wordcell-cli-"));
     const vault = join(temporary, "vault");
     try {
       const initOutput = captureOutput();
@@ -1381,7 +1381,7 @@ describe("kb vault commands", () => {
   });
 
   test("authors notes and typed relationships, then percolates evidence end to end", async () => {
-    const temporary = await mkdtemp(join(tmpdir(), "hraness-kb-cli-graph-"));
+    const temporary = await mkdtemp(join(tmpdir(), "hraness-wordcell-cli-graph-"));
     const vault = join(temporary, "vault");
     try {
       expect(await main(["init", vault], captureOutput().output)).toBe(0);
@@ -1616,7 +1616,7 @@ describe("kb vault commands", () => {
   });
 
   test("fails check on missing durable attachments with structured evidence", async () => {
-    const root = await mkdtemp(join(tmpdir(), "hraness-kb-cli-attachments-"));
+    const root = await mkdtemp(join(tmpdir(), "hraness-wordcell-cli-attachments-"));
     try {
       await writeFile(join(root, "index.md"), "# Index\n", "utf8");
       await mkdir(join(root, "notes"), { recursive: true });
@@ -1664,7 +1664,7 @@ describe("kb vault commands", () => {
   });
 
   test("lists recent undisposed captures through the advisory inbox", async () => {
-    const root = await mkdtemp(join(tmpdir(), "hraness-kb-cli-inbox-"));
+    const root = await mkdtemp(join(tmpdir(), "hraness-wordcell-cli-inbox-"));
     try {
       await writeFile(join(root, "index.md"), "# Index\n", "utf8");
       await mkdir(join(root, "articles", "pending"), { recursive: true });
@@ -1714,7 +1714,7 @@ describe("kb vault commands", () => {
   });
 
   test("fails checks on authored relationship issues even when the catalog is optional", async () => {
-    const temporary = await mkdtemp(join(tmpdir(), "hraness-kb-cli-relations-"));
+    const temporary = await mkdtemp(join(tmpdir(), "hraness-wordcell-cli-relations-"));
     try {
       await writeFile(join(temporary, "index.md"), "# Index\n", "utf8");
       await mkdir(join(temporary, "notes"), { recursive: true });
@@ -1762,7 +1762,7 @@ describe("kb vault commands", () => {
   });
 
   test("explains collision-safe concept IDs in terminal percolation output", async () => {
-    const temporary = await mkdtemp(join(tmpdir(), "hraness-kb-cli-concept-collision-"));
+    const temporary = await mkdtemp(join(tmpdir(), "hraness-wordcell-cli-concept-collision-"));
     try {
       await writeFile(join(temporary, "index.md"), "# Index\n", "utf8");
       await mkdir(join(temporary, "notes"), { recursive: true });
@@ -1797,7 +1797,7 @@ describe("kb vault commands", () => {
   });
 
   test("uses structure-only scans for graph queries and endpoint-scoped scans for percolation", async () => {
-    const temporary = await mkdtemp(join(tmpdir(), "hraness-kb-cli-scan-mode-"));
+    const temporary = await mkdtemp(join(tmpdir(), "hraness-wordcell-cli-scan-mode-"));
     try {
       await writeFile(join(temporary, "index.md"), "# Index\n", "utf8");
       await mkdir(join(temporary, "notes"), { recursive: true });
@@ -2019,7 +2019,7 @@ describe("kb vault commands", () => {
   });
 
   test("loads strict search rules and makes priority ordering explicit", async () => {
-    const temporary = await mkdtemp(join(tmpdir(), "hraness-kb-search-rules-cli-"));
+    const temporary = await mkdtemp(join(tmpdir(), "hraness-wordcell-search-rules-cli-"));
     const rulesPath = join(temporary, "rules.json");
     const observed: unknown[] = [];
     try {
@@ -2100,7 +2100,7 @@ describe("kb vault commands", () => {
   });
 
   test("runs an injected frozen-corpus evaluator and emits the complete raw report", async () => {
-    const temporary = await mkdtemp(join(tmpdir(), "hraness-kb-evaluate-cli-"));
+    const temporary = await mkdtemp(join(tmpdir(), "hraness-wordcell-evaluate-cli-"));
     const manifest = join(temporary, "corpus.json");
     try {
       await writeFile(manifest, JSON.stringify({
@@ -2200,7 +2200,7 @@ describe("kb vault commands", () => {
   });
 
   test("binds semantic evaluation to verified model bytes and detects mutation", async () => {
-    const temporary = await mkdtemp(join(tmpdir(), "hraness-kb-evaluate-model-"));
+    const temporary = await mkdtemp(join(tmpdir(), "hraness-wordcell-evaluate-model-"));
     const manifest = join(temporary, "corpus.json");
     const modelFile = join(temporary, "private-model.gguf");
     const arguments_ = [
@@ -2631,7 +2631,7 @@ describe("kb vault commands", () => {
   });
 
   test("keeps process-level JSON parseable while a dependency writes model progress", async () => {
-    const temporary = await mkdtemp(join(tmpdir(), "hraness-kb-cli-process-"));
+    const temporary = await mkdtemp(join(tmpdir(), "hraness-wordcell-cli-process-"));
     try {
       const cliUrl = pathToFileURL(join(import.meta.dir, "cli.ts")).href;
       const script = join(temporary, "strict-json.ts");
@@ -2732,7 +2732,7 @@ describe("kb vault commands", () => {
   });
 
   test("reports broken links as check failures and sanitizes thrown terminal text", async () => {
-    const temporary = await mkdtemp(join(tmpdir(), "hraness-kb-cli-"));
+    const temporary = await mkdtemp(join(tmpdir(), "hraness-wordcell-cli-"));
     try {
       await writeFile(join(temporary, "index.md"), "# Index\n", "utf8");
       await writeFile(join(temporary, "note.md"), "# Note\n\n[[missing]]\n", "utf8");
@@ -2802,7 +2802,7 @@ describe("kb agent context commands", () => {
   });
 
   test("resolves inherited guides and reciprocal hubs without loading hub prose", async () => {
-    const temporary = await mkdtemp(join(tmpdir(), "hraness-kb-context-cli-"));
+    const temporary = await mkdtemp(join(tmpdir(), "hraness-wordcell-context-cli-"));
     const repository = join(temporary, "repository");
     const vault = join(repository, "kb");
     try {
@@ -2834,7 +2834,7 @@ describe("kb agent context commands", () => {
         "",
       ].join("\n"));
       await writeFile(join(vault, "index.md"), [
-        "# KB",
+        "# Wordcell",
         "",
         "<!-- kb:catalog:start -->",
         "<!-- kb:catalog:end -->",

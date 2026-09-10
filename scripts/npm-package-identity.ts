@@ -8,7 +8,7 @@ import {
   type PackageArtifactInventory,
 } from "./package-artifact.js";
 
-const packageName = "@hraness/kb";
+const packageName = "@hraness/wordcell";
 const npmRegistry = "https://registry.npmjs.org";
 const stableVersionPattern = /^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$/u;
 const maximumStableVersionPart = BigInt(Number.MAX_SAFE_INTEGER);
@@ -135,7 +135,7 @@ function expectedFilename(name: string, version: string): string {
     throw new Error(`Expected package name must be ${packageName}, received ${name}`);
   }
   stableVersionParts(version);
-  return `hraness-kb-${version}.tgz`;
+  return `hraness-wordcell-${version}.tgz`;
 }
 
 function canonicalRegistryTarball(name: string, version: string): string {
@@ -247,7 +247,7 @@ async function verifyPackArtifact(
     || identity.id !== `${expectedName}@${expectedVersion}`
     || identity.version !== expectedVersion
     || identity.filename !== filename
-    || !/^hraness-kb-(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.tgz$/u.test(identity.filename)
+    || !/^hraness-wordcell-(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.tgz$/u.test(identity.filename)
   ) {
     throw new Error(`${label} npm pack identity does not match ${expectedName}@${expectedVersion}`);
   }

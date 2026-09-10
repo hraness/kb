@@ -87,7 +87,7 @@ export function evaluationImplementationArtifactSha256V2(
 /**
  * Prove that the files loaded for execution are from the corpus commit and match
  * the candidate-locked descriptor. The returned branded artifact is the only
- * runtime binding accepted by the KB v2 adapter.
+ * runtime binding accepted by the Wordcell v2 adapter.
  */
 export function verifyEvaluationImplementationArtifactV2(options: Readonly<{
   readonly corpus: RetrievalEvaluationCorpusV2;

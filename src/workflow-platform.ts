@@ -44,7 +44,11 @@ export function structuredOutputBytes(value: unknown, node: string) {
 
 /** Private phase marker: a native finally failure must override the body failure. */
 export class WorkflowListenerRemovalFailure {
-  constructor(readonly reason: unknown) {}
+  readonly reason: unknown;
+
+  constructor(reason: unknown) {
+    this.reason = reason;
+  }
 }
 
 export function workflowCancellation(signal: AbortSignal | undefined) {

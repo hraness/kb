@@ -16,7 +16,6 @@ import {
   verifyNpmPackageIdentity,
 } from "./npm-package-identity.js";
 
-const stageWorkflowUrl = new URL("../.github/workflows/npm-stage.yml", import.meta.url);
 const releaseWorkflowUrl = new URL("../.github/workflows/release.yml", import.meta.url);
 const ciWorkflowUrl = new URL("../.github/workflows/ci.yml", import.meta.url);
 const manifestUrl = new URL("../package.json", import.meta.url);
@@ -27,7 +26,6 @@ const packageArtifactUrl = new URL("./package-artifact.ts", import.meta.url);
 const packageIdentityUrl = new URL("./npm-package-identity.ts", import.meta.url);
 const npmRegistry = "https://registry.npmjs.org";
 const repository = fileURLToPath(new URL("../", import.meta.url));
-const firstPublicSourceCommit = "58bd07b69dd40ad83bb2e49b5368adac75fb12fc";
 
 async function run(command: readonly string[], cwd: string): Promise<void> {
   const child = Bun.spawn([...command], { cwd, stderr: "inherit", stdout: "inherit" });
@@ -315,7 +313,7 @@ function packJson(
   return `${JSON.stringify([{
     bundled: [],
     entryCount: inventory.fileCount,
-    filename: `hraness-kb-${version}.tgz`,
+    filename: `hraness-wordcell-${version}.tgz`,
     files: files.map((file) => ({ mode: file.mode, path: file.path, size: file.size })),
     id: `${name}@${version}`,
     integrity: integrity(bytes),
@@ -338,7 +336,7 @@ function registryView(
       fileCount: inventory.fileCount,
       integrity: integrity(bytes),
       shasum: sha1(bytes),
-      tarball: `${npmRegistry}/${name}/-/kb-${version}.tgz`,
+      tarball: `${npmRegistry}/${name}/-/wordcell-${version}.tgz`,
       unpackedSize: inventory.unpackedBytes,
     },
     name,
@@ -383,7 +381,7 @@ describe("npm release workflows", () => {
       readonly version?: unknown;
     };
     expect(manifest).toEqual(expect.objectContaining({
-      version: "0.19.6",
+      version: "0.20.0",
       description: "A knowledge base for coding agents, built from Markdown, backlinks, semantic search, and Git context.",
       keywords: [
         "knowledge-base",
@@ -403,1209 +401,11 @@ describe("npm release workflows", () => {
     const opening = readme.slice(0, 1_500).replace(/\s+/gu, " ").toLowerCase();
     expect(opening).toContain(String(manifest.description).toLowerCase());
     for (const link of [
-      "[Install KB from GitHub Releases](https://github.com/hraness/kb/releases)",
-      "[KB source on GitHub](https://github.com/hraness/kb)",
-      "[KB overview](https://hraness.com/kb)",
+      "[Install Wordcell from GitHub Releases](https://github.com/hraness/wordcell/releases)",
+      "[Wordcell source on GitHub](https://github.com/hraness/wordcell)",
+      "[Wordcell overview](https://wordcell.io)",
     ]) expect(readme).toContain(link);
   });
-
-  test("keeps the exact terminal OIDC stage independent from repository code", async () => {
-    const workflow = await readFile(stageWorkflowUrl, "utf8");
-    const selectStart = workflow.indexOf("\n  select:\n");
-    const verifyStart = workflow.indexOf("\n  verify:\n");
-    const stageStart = workflow.indexOf("\n  stage:\n");
-    expect(selectStart).toBeGreaterThan(-1);
-    expect(verifyStart).toBeGreaterThan(selectStart);
-    expect(stageStart).toBeGreaterThan(verifyStart);
-    const selectJob = workflow.slice(selectStart, verifyStart);
-    const verifyJob = workflow.slice(verifyStart, stageStart);
-    const stageJob = workflow.slice(stageStart);
-
-    for (const required of [
-      "name: Select stable package version",
-      "permissions:\n      contents: read",
-      "should_stage: ${{ steps.selection.outputs.should_stage }}",
-      "BEFORE_SHA: ${{ github.event.before }}",
-      'expected_ref="refs/heads/$DEFAULT_BRANCH"',
-      'git merge-base --is-ancestor "$BEFORE_SHA" "$default_head"',
-      'git show "$BEFORE_SHA:package.json"',
-      'bun run ./scripts/npm-stage-selection.ts "${selection_args[@]}"',
-    ] as const) expect(selectJob).toContain(required);
-    expect(selectJob).not.toContain("id-token: write");
-
-    for (const required of [
-      "publish_to_npm:",
-      "resolved_stage_version:",
-      "required: false",
-      "default: false",
-      "type: boolean",
-    ] as const) expect(workflow).toContain(required);
-
-    for (const required of [
-      "name: Verify exact package",
-      "needs: select",
-      "if: needs.select.outputs.should_stage == 'true'",
-      "permissions:\n      contents: read",
-      "source_sha: ${{ steps.identity.outputs.source_sha }}",
-      "artifact_name: ${{ steps.artifact.outputs.artifact_name }}",
-      "package_version: ${{ steps.artifact.outputs.package_version }}",
-      "tarball_name: ${{ steps.artifact.outputs.tarball_name }}",
-      "bun install --frozen-lockfile --ignore-scripts",
-      "bun run check",
-      'scripts/github-release.ts download "$canonical_directory"',
-      "scripts/package-smoke.ts",
-      "npm-package.sha256",
-      "$GITHUB_SHA-$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT",
-      "Reviewed npm artifact must contain exactly three files",
-      "actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a",
-    ] as const) expect(verifyJob).toContain(required);
-    expect(verifyJob).not.toContain("id-token: write");
-    expect(verifyJob).not.toContain("npm stage publish");
-
-    for (const required of [
-      "name: Stage exact package v${{ needs.verify.outputs.package_version }}",
-      "if: inputs.publish_to_npm == true",
-      "environment: npm-stage",
-      "permissions:\n      actions: read\n      contents: read\n      id-token: write",
-      "Reauthorize current npm staging attempt",
-      'EXPECTED_WORKFLOW_ID: "344070109"',
-      'PUBLISH_TO_NPM: ${{ inputs.publish_to_npm }}',
-      'REF_PROTECTED: ${{ github.ref_protected }}',
-      "attempt.triggering_actor?.id !== actorId",
-      "Reject unresolved stable-stage intent",
-      "Completed npm-stage history exceeds the reviewed 100-run bound",
-      "already reserved stable stage",
-      "RESOLVED_STAGE_VERSION: ${{ inputs.resolved_stage_version }}",
-      "Record cleared stable-stage intent v${{ inputs.resolved_stage_version }}",
-      "Record exclusive stable-stage intent",
-      "jobs?filter=all&per_page=100",
-      "has a terminal write without one immediately preceding durable intent",
-      "has an unsealed generic stage job",
-      "jobId: 99146963354",
-      "Number.isSafeInteger(step?.number)",
-      "intents[0].number !== terminalWrites[0].number - 1",
-      "contains staging controls outside a version-bound stage job",
-      "actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c",
-      "Downloaded npm artifact must contain exactly the tarball, npm-pack.json, and npm-package.sha256",
-      'expected_tarball_name="hraness-kb-$EXPECTED_VERSION.tgz"',
-      'const expectedName = "@hraness/kb"',
-      "const minimumFiles = 190",
-      "const maximumFiles = 218",
-      "const maximumEntries = 420",
-      "if (entries > maximumEntries)",
-      "maximumUnpackedBytes + maximumEntries * 512 + 1_024",
-      "packageRecord.files.length !== packageRecord.entryCount",
-      "unpackedSize !== packageRecord.unpackedSize",
-      'createHash("sha1")',
-      'createHash("sha512")',
-      'createHash("sha256")',
-      'gunzipSync(archiveBytes',
-      'header.subarray(257, 265).equals(ustarSignature)',
-      "header[475] === 0 ? 130 : 155",
-      'Object.hasOwn(manifest, "tag")',
-      'JSON.stringify(Object.keys(publishConfig).sort()) !== JSON.stringify(["access", "registry"])',
-      'git init --quiet --bare "$current_main"',
-      '"https://github.com/$GITHUB_REPOSITORY.git"',
-      'EXPECTED_VERSION: ${{ needs.verify.outputs.package_version }}',
-      'release_tag="v$EXPECTED_VERSION"',
-      "git ls-remote --exit-code",
-      '"refs/heads/$DEFAULT_BRANCH"',
-      '"refs/tags/$release_tag"',
-      '"refs/tags/$prior_tag"',
-      '"refs/tags/$prior_tag^{}" > "$terminal_refs_output"',
-      "Final remote snapshot has malformed identity data",
-      "changed during final release-closure verification",
-      "Could not prove exact",
-      "lacks one annotated Git tag",
-      "lacks its exact immutable GitHub Release",
-      "is not reachable from current main",
-      'current_archive_sha256="$(sha256sum "$TARBALL"',
-      'current_metadata_sha256="$(sha256sum "$METADATA"',
-      'current_digest_sha256="$(sha256sum "$DIGEST"',
-      'npm stage publish "$TARBALL"',
-      "--ignore-scripts",
-      "--provenance",
-      "npm config get tag",
-      "Pinned npm's clean default publication tag is not latest",
-      '--globalconfig="$clean_global_config"',
-      '--userconfig="$clean_user_config"',
-      `--registry=${npmRegistry}`,
-    ] as const) expect(stageJob).toContain(required);
-    expect(workflow.match(/id-token: write/gu) ?? []).toHaveLength(1);
-    expect(stageJob).not.toContain("actions/checkout@");
-    expect(stageJob).not.toContain("setup-bun@");
-    expect(stageJob).not.toMatch(/\bbun\b/u);
-    expect(stageJob).not.toContain("./scripts/");
-    expect(stageJob.match(/npm stage publish/gu) ?? []).toHaveLength(1);
-    expect(stageJob.match(/lacks one annotated Git tag/gu) ?? []).toHaveLength(2);
-    expect(stageJob.match(/lacks its exact immutable GitHub Release/gu) ?? []).toHaveLength(2);
-    expect(stageJob.match(/is not reachable from current main/gu) ?? []).toHaveLength(2);
-    expect(stageJob).not.toContain("--tag latest");
-    const authorizationIndex = stageJob.indexOf("Reauthorize current npm staging attempt");
-    const setupIndex = stageJob.indexOf("actions/setup-node@");
-    const pendingStageIndex = stageJob.indexOf("Reject unresolved stable-stage intent");
-    const intentIndex = stageJob.lastIndexOf("Record exclusive stable-stage intent");
-    const fetchIndex = stageJob.indexOf('git --git-dir="$current_main" fetch');
-    const tagLookupIndex = stageJob.lastIndexOf("git ls-remote --exit-code");
-    const priorTagLookupIndex = stageJob.lastIndexOf("git ls-remote --tags");
-    const priorReleaseIndex = stageJob.lastIndexOf("releases/tags/$prior_tag");
-    const priorComparisonIndex = stageJob.lastIndexOf("compare/$prior_source...$DEFAULT_BRANCH");
-    const rehashIndex = stageJob.lastIndexOf('current_archive_sha256="$(sha256sum "$TARBALL"');
-    const finalFetchIndex = stageJob.lastIndexOf('git --git-dir="$current_main" fetch');
-    const latestLookup = 'npm view "@hraness/kb" dist-tags.latest';
-    const firstLatestIndex = stageJob.indexOf(latestLookup);
-    const finalLatestIndex = stageJob.indexOf(latestLookup, firstLatestIndex + 1);
-    const terminalLatestIndex = stageJob.lastIndexOf(latestLookup);
-    const stageIndex = stageJob.indexOf('npm stage publish "$TARBALL"');
-    expect(authorizationIndex).toBeGreaterThan(-1);
-    expect(authorizationIndex).toBeLessThan(setupIndex);
-    expect(pendingStageIndex).toBeGreaterThan(setupIndex);
-    expect(pendingStageIndex).toBeLessThan(stageIndex);
-    expect(fetchIndex).toBeGreaterThan(-1);
-    expect(fetchIndex).toBeLessThan(rehashIndex);
-    expect(rehashIndex).toBeLessThan(stageIndex);
-    expect(finalFetchIndex).toBeGreaterThan(rehashIndex);
-    expect(finalFetchIndex).toBeLessThan(finalLatestIndex);
-    expect(finalLatestIndex).toBeLessThan(priorTagLookupIndex);
-    expect(priorTagLookupIndex).toBeLessThan(priorReleaseIndex);
-    expect(priorReleaseIndex).toBeLessThan(priorComparisonIndex);
-    expect(priorComparisonIndex).toBeLessThan(terminalLatestIndex);
-    expect(terminalLatestIndex).toBeLessThan(tagLookupIndex);
-    expect(tagLookupIndex).toBeLessThan(stageIndex);
-    expect(finalLatestIndex).toBeLessThan(terminalLatestIndex);
-    expect(intentIndex).toBeGreaterThan(pendingStageIndex);
-    expect(intentIndex).toBeLessThan(stageIndex);
-    expect(workflow).not.toContain("secrets.NPM_TOKEN");
-    expect(workflow).not.toContain("NODE_AUTH_TOKEN");
-    expect(workflow).not.toMatch(/\bnpm publish\b/u);
-    expect(workflow).not.toContain("\n  push:");
-    expect(workflow).toContain("workflow_dispatch:");
-    expect(workflow).toContain("publish_to_npm:");
-  });
-
-  test("the staging job reauthorizes the exact attempt and rejects collaborator reruns", async () => {
-    const workflow = await readFile(stageWorkflowUrl, "utf8");
-    const stageJob = workflow.slice(workflow.indexOf("\n  stage:\n"));
-    const authorizationIndex = stageJob.indexOf("Reauthorize current npm staging attempt");
-    const setupIndex = stageJob.indexOf("actions/setup-node@");
-    const mutationIndex = stageJob.indexOf('npm stage publish "$TARBALL"');
-    expect(stageJob).toContain(
-      "permissions:\n      actions: read\n      contents: read\n      id-token: write",
-    );
-    expect(authorizationIndex).toBeGreaterThan(-1);
-    expect(authorizationIndex).toBeLessThan(setupIndex);
-    expect(setupIndex).toBeLessThan(mutationIndex);
-
-    const script = workflowStepScript(workflow, "Reauthorize current npm staging attempt");
-    const directory = await mkdtemp(join(tmpdir(), "kb-stage-attempt-"));
-    const binaryDirectory = join(directory, "bin");
-    const attemptPath = join(directory, "attempt.json");
-    const workflowPath = join(directory, "workflow.json");
-    const repositoryPath = join(directory, "repository.json");
-    const commandLog = join(directory, "gh.log");
-    const sourceSha = "a".repeat(40);
-    const attempt = {
-      id: 45678,
-      run_attempt: 2,
-      workflow_id: 344070109,
-      name: "Stage npm package",
-      path: ".github/workflows/npm-stage.yml",
-      event: "workflow_dispatch",
-      head_branch: "main",
-      head_sha: sourceSha,
-      status: "in_progress",
-      conclusion: null,
-      actor: { id: 894119, type: "User" },
-      triggering_actor: { id: 894119, type: "User" },
-      repository: {
-        id: 1308971873,
-        full_name: "hraness/kb",
-        private: false,
-      },
-    };
-
-    try {
-      await mkdir(binaryDirectory, { recursive: true });
-      await writeFile(
-        join(binaryDirectory, "gh"),
-        [
-          "#!/bin/bash",
-          "set -euo pipefail",
-          'printf \'%s\\n\' "$*" >> "$GH_COMMAND_LOG"',
-          'endpoint=""',
-          'for argument in "$@"; do endpoint="$argument"; done',
-          'case "$endpoint" in',
-          '  */actions/runs/*) cat "$MOCK_ATTEMPT_JSON" ;;',
-          '  */actions/workflows/*) cat "$MOCK_WORKFLOW_JSON" ;;',
-          '  /repos/hraness/kb) cat "$MOCK_REPOSITORY_JSON" ;;',
-          '  *) echo "unexpected gh endpoint: $endpoint" >&2; exit 2 ;;',
-          "esac",
-        ].join("\n"),
-      );
-      await chmod(join(binaryDirectory, "gh"), 0o755);
-      await Promise.all([
-        writeFile(attemptPath, JSON.stringify(attempt)),
-        writeFile(workflowPath, JSON.stringify({
-          id: 344070109,
-          name: "Stage npm package",
-          path: ".github/workflows/npm-stage.yml",
-          state: "active",
-        })),
-        writeFile(repositoryPath, JSON.stringify({
-          id: 1308971873,
-          full_name: "hraness/kb",
-          visibility: "public",
-          private: false,
-          default_branch: "main",
-        })),
-      ]);
-      const environment = {
-        PATH: `${binaryDirectory}:${process.env.PATH ?? ""}`,
-        GH_COMMAND_LOG: commandLog,
-        MOCK_ATTEMPT_JSON: attemptPath,
-        MOCK_WORKFLOW_JSON: workflowPath,
-        MOCK_REPOSITORY_JSON: repositoryPath,
-        RUNNER_TEMP: directory,
-        EXPECTED_ACTOR_ID: "894119",
-        EXPECTED_REPOSITORY: "hraness/kb",
-        EXPECTED_REPOSITORY_ID: "1308971873",
-        EXPECTED_SOURCE_SHA: sourceSha,
-        EXPECTED_WORKFLOW_ID: "344070109",
-        EXPECTED_WORKFLOW_NAME: "Stage npm package",
-        EXPECTED_WORKFLOW_PATH: ".github/workflows/npm-stage.yml",
-        PUBLISH_TO_NPM: "true",
-        REF_PROTECTED: "true",
-        GITHUB_RUN_ID: "45678",
-        GITHUB_RUN_ATTEMPT: "2",
-        GITHUB_EVENT_NAME: "workflow_dispatch",
-        GITHUB_ACTOR_ID: "894119",
-        GITHUB_REPOSITORY: "hraness/kb",
-        GITHUB_REPOSITORY_ID: "1308971873",
-        GITHUB_REF: "refs/heads/main",
-        GITHUB_SHA: sourceSha,
-      };
-      const admitted = await runWorkflowScript(script, environment);
-      expect(admitted.exitCode).toBe(0);
-      expect(await readFile(commandLog, "utf8")).toContain(
-        "actions/runs/45678/attempts/2",
-      );
-
-      await writeFile(attemptPath, JSON.stringify({
-        ...attempt,
-        triggering_actor: { id: 123456, type: "User" },
-      }));
-      const hostileRerun = await runWorkflowScript(script, environment);
-      expect(hostileRerun.exitCode).not.toBe(0);
-      expect(hostileRerun.stderr).toContain(
-        "Current npm staging attempt is not owner-authorized",
-      );
-
-      await writeFile(attemptPath, JSON.stringify({ ...attempt, head_sha: "b".repeat(40) }));
-      const sourceDrift = await runWorkflowScript(script, environment);
-      expect(sourceDrift.exitCode).not.toBe(0);
-      expect(sourceDrift.stderr).toContain(
-        "Current npm staging attempt is not owner-authorized",
-      );
-
-      const falseInput = await runWorkflowScript(script, {
-        ...environment,
-        PUBLISH_TO_NPM: "false",
-      });
-      expect(falseInput.exitCode).not.toBe(0);
-      expect(falseInput.stdout).toContain(
-        "Current npm staging attempt is not the explicit owner-authorized protected-main dispatch",
-      );
-    } finally {
-      await rm(directory, { recursive: true, force: true });
-    }
-  });
-
-  test("the source-free staging boundary accepts MAX_SAFE_INTEGER and rejects larger components", async () => {
-    const workflow = await readFile(stageWorkflowUrl, "utf8");
-    const script = workflowStepScript(workflow, "Bind artifact reference");
-    const sourceSha = "a".repeat(40);
-    const maximum = "9007199254740991";
-    const baseEnvironment = {
-      ARTIFACT_NAME: "",
-      EXPECTED_SOURCE_SHA: sourceSha,
-      EXPECTED_VERSION: "",
-      GITHUB_RUN_ATTEMPT: "3",
-      GITHUB_RUN_ID: "45678",
-    };
-    const maximumVersion = `${maximum}.${maximum}.${maximum}`;
-    const admitted = await runWorkflowScript(script, {
-      ...baseEnvironment,
-      ARTIFACT_NAME: `npm-package-${maximumVersion}-${sourceSha}-45678-3`,
-      EXPECTED_VERSION: maximumVersion,
-    });
-    expect(admitted.exitCode).toBe(0);
-
-    for (const unsafeVersion of [
-      "9007199254740992.0.0",
-      "0.9007199254740992.0",
-      "0.0.9007199254740992",
-    ]) {
-      const rejected = await runWorkflowScript(script, {
-        ...baseEnvironment,
-        ARTIFACT_NAME: `npm-package-${unsafeVersion}-${sourceSha}-45678-3`,
-        EXPECTED_VERSION: unsafeVersion,
-      });
-      expect(rejected.exitCode).not.toBe(0);
-      expect(rejected.stderr).toContain(
-        "Verified package version components exceed Number.MAX_SAFE_INTEGER",
-      );
-    }
-  });
-
-  test("a successful intent remains a durable lock across failed jobs and reruns", async () => {
-    const workflow = await readFile(stageWorkflowUrl, "utf8");
-    const script = workflowStepScript(workflow, "Reject unresolved stable-stage intent");
-    const directory = await mkdtemp(join(tmpdir(), "kb-stage-history-"));
-    const binaryDirectory = join(directory, "bin");
-    const currentJobsPath = join(directory, "current-jobs.json");
-    const runsPath = join(directory, "runs.json");
-    const jobsPath = join(directory, "jobs.json");
-    const tagIdentityPath = join(directory, "tag-identity.txt");
-    const releasePath = join(directory, "release.json");
-    const latestReleasePath = join(directory, "latest-release.json");
-    const comparisonPath = join(directory, "comparison.json");
-    const completeRelease = {
-      assets: [],
-      author: { id: 41898282, login: "github-actions[bot]", type: "Bot" },
-      draft: false,
-      id: 190,
-      immutable: true,
-      name: "KB v0.19.0",
-      prerelease: false,
-      tag_name: "v0.19.0",
-    } as const;
-    try {
-      await mkdir(binaryDirectory, { recursive: true });
-      await writeFile(
-        join(binaryDirectory, "npm"),
-        [
-          "#!/bin/bash",
-          "set -euo pipefail",
-          "printf '\"%s\"\\n' \"$MOCK_NPM_LATEST\"",
-        ].join("\n"),
-      );
-      await writeFile(
-        join(binaryDirectory, "git"),
-        [
-          "#!/bin/bash",
-          "set -euo pipefail",
-          '[[ "$*" == ls-remote\\ --tags* ]] || { echo "unexpected git request: $*" >&2; exit 2; }',
-          'cat "$MOCK_TAG_IDENTITY"',
-        ].join("\n"),
-      );
-      await writeFile(
-        join(binaryDirectory, "gh"),
-        [
-          "#!/bin/bash",
-          "set -euo pipefail",
-          'case "$*" in',
-          '  *"repos/hraness/kb/releases/tags/v0.19.0"*) cat "$MOCK_RELEASE_JSON" ;;',
-          '  *"repos/hraness/kb/releases/latest"*) cat "$MOCK_LATEST_RELEASE_JSON" ;;',
-          '  *"repos/hraness/kb/compare/2d6a17b5d6d0311b8d9199692919da9e97e584ab...main"*) cat "$MOCK_COMPARISON_JSON" ;;',
-          '  *"/actions/workflows/344070109/runs?"*) cat "$MOCK_RUNS_JSON" ;;',
-          '  *"/actions/runs/67890/jobs?"*) cat "$MOCK_CURRENT_JOBS_JSON" ;;',
-          '  *"/actions/runs/12345/jobs?"*|*"/actions/runs/33269920554/jobs?"*) cat "$MOCK_JOBS_JSON" ;;',
-          '  *) echo "unexpected gh request: $*" >&2; exit 2 ;;',
-          "esac",
-        ].join("\n"),
-      );
-      await Promise.all([
-        chmod(join(binaryDirectory, "npm"), 0o755),
-        chmod(join(binaryDirectory, "git"), 0o755),
-        chmod(join(binaryDirectory, "gh"), 0o755),
-        writeFile(
-          tagIdentityPath,
-          "1111111111111111111111111111111111111111\trefs/tags/v0.19.0\n" +
-            "2d6a17b5d6d0311b8d9199692919da9e97e584ab\trefs/tags/v0.19.0^{}\n",
-        ),
-        writeFile(releasePath, JSON.stringify(completeRelease)),
-        writeFile(latestReleasePath, JSON.stringify(completeRelease)),
-        writeFile(comparisonPath, JSON.stringify({ status: "ahead" })),
-        writeFile(runsPath, JSON.stringify({
-          total_count: 1,
-          workflow_runs: [{
-            id: 12345,
-            workflow_id: 344070109,
-            event: "workflow_dispatch",
-            head_branch: "main",
-            status: "completed",
-          }],
-        })),
-        writeFile(currentJobsPath, JSON.stringify({
-          total_count: 1,
-          jobs: [{
-            conclusion: null,
-            name: "Stage exact package v0.19.2",
-            steps: [],
-          }],
-        })),
-      ]);
-      const environment = {
-        PATH: `${binaryDirectory}:${process.env.PATH ?? ""}`,
-        EXPECTED_VERSION: "0.19.2",
-        EXPECTED_WORKFLOW_ID: "344070109",
-        GITHUB_REPOSITORY: "hraness/kb",
-        GITHUB_RUN_ID: "67890",
-        MOCK_CURRENT_JOBS_JSON: currentJobsPath,
-        MOCK_COMPARISON_JSON: comparisonPath,
-        MOCK_LATEST_RELEASE_JSON: latestReleasePath,
-        MOCK_NPM_LATEST: "0.19.0",
-        MOCK_RELEASE_JSON: releasePath,
-        MOCK_RUNS_JSON: runsPath,
-        MOCK_JOBS_JSON: jobsPath,
-        MOCK_TAG_IDENTITY: tagIdentityPath,
-        RESOLVED_STAGE_VERSION: "",
-      };
-
-      await writeFile(jobsPath, JSON.stringify({
-        total_count: 1,
-        jobs: [{
-          name: "Stage exact package v0.19.0",
-          conclusion: "success",
-          steps: [{
-            name: "Record exclusive stable-stage intent",
-            conclusion: "success",
-            number: 12,
-          }],
-        }],
-      }));
-      const released = await runWorkflowScript(script, environment);
-      expect(released.exitCode).toBe(0);
-
-      await writeFile(tagIdentityPath, "2d6a17b5d6d0311b8d9199692919da9e97e584ab\trefs/tags/v0.19.0\n");
-      const lightweightTag = await runWorkflowScript(script, environment);
-      expect(lightweightTag.exitCode).not.toBe(0);
-      expect(lightweightTag.stderr).toContain("lacks one annotated Git tag");
-      await writeFile(
-        tagIdentityPath,
-        "1111111111111111111111111111111111111111\trefs/tags/v0.19.0\n" +
-          "2d6a17b5d6d0311b8d9199692919da9e97e584ab\trefs/tags/v0.19.0^{}\n",
-      );
-
-      await writeFile(releasePath, JSON.stringify({ ...completeRelease, immutable: false }));
-      const mutableRelease = await runWorkflowScript(script, environment);
-      expect(mutableRelease.exitCode).not.toBe(0);
-      expect(mutableRelease.stderr).toContain("lacks its exact immutable GitHub Release");
-      await writeFile(releasePath, JSON.stringify(completeRelease));
-
-      await writeFile(comparisonPath, JSON.stringify({ status: "diverged" }));
-      const divergedRelease = await runWorkflowScript(script, environment);
-      expect(divergedRelease.exitCode).not.toBe(0);
-      expect(divergedRelease.stderr).toContain("is not reachable from current main");
-      await writeFile(comparisonPath, JSON.stringify({ status: "ahead" }));
-
-      await writeFile(jobsPath, JSON.stringify({
-        total_count: 1,
-        jobs: [{
-          name: "Stage exact package v0.19.1",
-          conclusion: "failure",
-          steps: [
-            { name: "Record exclusive stable-stage intent", conclusion: "success", number: 12 },
-            {
-              name: "Revalidate current main and stage exact package",
-              conclusion: "failure",
-              number: 13,
-            },
-          ],
-        }],
-      }));
-      const pending = await runWorkflowScript(script, environment);
-      expect(pending.exitCode).not.toBe(0);
-      expect(pending.stderr).toContain(
-        "run 12345 already reserved stable stage 0.19.1",
-      );
-
-      const rejectedInNpm = await runWorkflowScript(script, {
-        ...environment,
-        RESOLVED_STAGE_VERSION: "0.19.1",
-      });
-      expect(rejectedInNpm.exitCode).toBe(0);
-
-      await writeFile(jobsPath, JSON.stringify({
-        total_count: 2,
-        jobs: [{
-          name: "Stage exact package v0.19.2",
-          conclusion: "failure",
-          steps: [
-            {
-              name: "Record cleared stable-stage intent v0.19.1",
-              conclusion: "success",
-              number: 4,
-            },
-            { name: "Record exclusive stable-stage intent", conclusion: "skipped", number: 12 },
-          ],
-        }, {
-          name: "Stage exact package v0.19.1",
-          conclusion: "failure",
-          steps: [{
-            name: "Record exclusive stable-stage intent",
-            conclusion: "success",
-            number: 12,
-          }],
-        }],
-      }));
-      const durableResolution = await runWorkflowScript(script, environment);
-      expect(durableResolution.exitCode).toBe(0);
-
-      await writeFile(jobsPath, JSON.stringify({
-        total_count: 1,
-        jobs: [{ name: "Stage exact package", conclusion: "success", steps: [] }],
-      }));
-      const unboundHistory = await runWorkflowScript(script, environment);
-      expect(unboundHistory.exitCode).not.toBe(0);
-      expect(unboundHistory.stderr).toContain("has an unsealed generic stage job");
-
-      for (const terminalConclusion of ["failure", "cancelled", "timed_out"] as const) {
-        await writeFile(jobsPath, JSON.stringify({
-          total_count: 1,
-          jobs: [{
-            name: "Stage exact package v0.19.1",
-            conclusion: terminalConclusion,
-            steps: [{
-              name: "Revalidate current main and stage exact package",
-              conclusion: terminalConclusion,
-              number: 13,
-            }],
-          }],
-        }));
-        const unreservedMutation = await runWorkflowScript(script, environment);
-        expect(unreservedMutation.exitCode).not.toBe(0);
-        expect(unreservedMutation.stderr).toContain(
-          "has a terminal write without one immediately preceding durable intent",
-        );
-      }
-
-      await writeFile(jobsPath, JSON.stringify({
-        total_count: 1,
-        jobs: [{
-          name: "Renamed untrusted mutation job",
-          conclusion: "failure",
-          steps: [{
-            name: "Revalidate current main and stage exact package",
-            conclusion: "failure",
-            number: 13,
-          }],
-        }],
-      }));
-      const renamedMutation = await runWorkflowScript(script, environment);
-      expect(renamedMutation.exitCode).not.toBe(0);
-      expect(renamedMutation.stderr).toContain(
-        "has a terminal write without one immediately preceding durable intent",
-      );
-
-      await writeFile(jobsPath, JSON.stringify({
-        total_count: 1,
-        jobs: [{
-          name: "Stage exact package v0.19.1",
-          conclusion: "failure",
-          steps: [
-            {
-              name: "Revalidate current main and stage exact package",
-              conclusion: "failure",
-              number: 12,
-            },
-            { name: "Record exclusive stable-stage intent", conclusion: "success", number: 13 },
-          ],
-        }],
-      }));
-      const reversedIntent = await runWorkflowScript(script, environment);
-      expect(reversedIntent.exitCode).not.toBe(0);
-      expect(reversedIntent.stderr).toContain(
-        "has a terminal write without one immediately preceding durable intent",
-      );
-
-      await writeFile(jobsPath, JSON.stringify({
-        total_count: 1,
-        jobs: [{
-          name: "Stage exact package v0.19.1",
-          conclusion: "failure",
-          steps: [
-            { name: "Record exclusive stable-stage intent", conclusion: "success", number: 0 },
-            {
-              name: "Revalidate current main and stage exact package",
-              conclusion: "failure",
-              number: 1,
-            },
-          ],
-        }],
-      }));
-      const unsafeStepNumber = await runWorkflowScript(script, environment);
-      expect(unsafeStepNumber.exitCode).not.toBe(0);
-      expect(unsafeStepNumber.stderr).toContain(
-        "has a terminal write without one immediately preceding durable intent",
-      );
-
-      await Promise.all([
-        writeFile(runsPath, JSON.stringify({
-          total_count: 1,
-          workflow_runs: [{
-            id: 33269920554,
-            workflow_id: 344070109,
-            event: "workflow_dispatch",
-            head_branch: "main",
-            status: "completed",
-          }],
-        })),
-        writeFile(jobsPath, JSON.stringify({
-          total_count: 1,
-          jobs: [{
-            conclusion: "success",
-            head_sha: "e12d3fd05ffaa722ac1c43a8ecaa7d21fece679a",
-            id: 99146963354,
-            name: "Stage exact package",
-            run_attempt: 1,
-            status: "completed",
-            steps: [{
-              name: "Revalidate current main and stage exact package",
-              conclusion: "success",
-              number: 13,
-            }],
-          }],
-        })),
-      ]);
-      const sealedLegacyStage = await runWorkflowScript(script, environment);
-      expect(sealedLegacyStage.exitCode).toBe(0);
-
-      await Promise.all([
-        writeFile(runsPath, JSON.stringify({ total_count: 0, workflow_runs: [] })),
-        writeFile(currentJobsPath, JSON.stringify({
-          total_count: 2,
-          jobs: [{
-            conclusion: "failure",
-            name: "Stage exact package v0.19.1",
-            steps: [
-              { name: "Record exclusive stable-stage intent", conclusion: "success", number: 12 },
-              {
-                name: "Revalidate current main and stage exact package",
-                conclusion: "failure",
-                number: 13,
-              },
-            ],
-          }, {
-            conclusion: null,
-            name: "Stage exact package v0.19.2",
-            steps: [],
-          }],
-        })),
-      ]);
-      const sameRunRerun = await runWorkflowScript(script, environment);
-      expect(sameRunRerun.exitCode).not.toBe(0);
-      expect(sameRunRerun.stderr).toContain(
-        "run 67890 already reserved stable stage 0.19.1",
-      );
-    } finally {
-      await rm(directory, { recursive: true, force: true });
-    }
-  }, 30_000);
-
-  test("legacy release compatibility is source-bound and cannot admit an assetless canonical candidate", async () => {
-    const workflow = await readFile(stageWorkflowUrl, "utf8");
-    for (const step of ["Reject unresolved stable-stage intent", "Revalidate current main and stage exact package"]) {
-      const command = workflowStepScript(workflow, step);
-      const start = command.indexOf("const priorAssetsMatch = ") + "const priorAssetsMatch = ".length;
-      expect(start).toBeGreaterThan("const priorAssetsMatch = ".length);
-      let end = command.indexOf("{", start) + 1;
-      let depth = 1;
-      while (depth > 0 && end < command.length) {
-        if (command[end] === "{") depth += 1;
-        if (command[end] === "}") depth -= 1;
-        end += 1;
-      }
-      expect(depth).toBe(0);
-      const accepts = new Function(`return (${command.slice(start, end)});`)() as
-        (assets: readonly unknown[], version: string, sourceSha: string) => boolean;
-      const legacySource = "ed79b87d0ac59064c2d3708b8090b29536b34455";
-      expect(accepts([], "0.19.2", legacySource)).toBe(true);
-      expect(accepts([], "0.19.2", "b".repeat(40))).toBe(false);
-      expect(accepts([], "0.19.3", legacySource)).toBe(false);
-      expect(accepts([], "0.19.4", legacySource)).toBe(false);
-      const assets = ["hraness-kb-0.19.4.tgz", "npm-pack.json", "release-manifest.json", "SHA256SUMS", "provenance.jsonl"]
-        .map((name, index) => ({ name, id: index + 1, size: 10, state: "uploaded", digest: `sha256:${"a".repeat(64)}` }));
-      expect(accepts(assets, "0.19.4", "b".repeat(40))).toBe(true);
-      expect(accepts(assets.slice(1), "0.19.4", "b".repeat(40))).toBe(false);
-    }
-  });
-
-  test("the terminal stage boundary freshly closes npm, Git tag, and GitHub Release state", async () => {
-    const workflow = await readFile(stageWorkflowUrl, "utf8");
-    const script = workflowStepScript(workflow, "Revalidate current main and stage exact package");
-    const directory = await mkdtemp(join(tmpdir(), "kb-final-stage-boundary-"));
-    const binaryDirectory = join(directory, "bin");
-    const expectedSourceSha = "a".repeat(40);
-    const priorSourceSha = "2d6a17b5d6d0311b8d9199692919da9e97e584ab";
-    const completeRelease = {
-      assets: [],
-      author: { id: 41898282, login: "github-actions[bot]", type: "Bot" },
-      draft: false,
-      id: 190,
-      immutable: true,
-      name: "KB v0.19.0",
-      prerelease: false,
-      tag_name: "v0.19.0",
-    } as const;
-
-    try {
-      await mkdir(binaryDirectory, { recursive: true });
-      await Promise.all([
-        writeFile(
-          join(binaryDirectory, "git"),
-          [
-            "#!/bin/bash",
-            "set -euo pipefail",
-            'printf \'git %s\\n\' "$*" >> "$MOCK_COMMAND_LOG"',
-            'if [[ "$1" == check-ref-format || "$1" == init ]]; then exit 0; fi',
-            'if [[ "$1" == --git-dir=* && "$2" == fetch ]]; then exit 0; fi',
-            'if [[ "$1" == --git-dir=* && "$2" == rev-parse ]]; then printf \'%s\\n\' "$MOCK_SOURCE_SHA"; exit 0; fi',
-            'if [[ "$1" == ls-remote && "$2" == --tags ]]; then cat "$MOCK_TAG_IDENTITY"; exit 0; fi',
-            'if [[ "$1" == ls-remote && "$2" == --exit-code ]]; then',
-            '  printf \'%s\\trefs/heads/main\\n\' "$MOCK_TERMINAL_MAIN_SHA"',
-            '  if [[ "${MOCK_CANDIDATE_TAG_PRESENT:-false}" == true ]]; then',
-            '    printf \'%s\\trefs/tags/v0.19.1\\n\' "$MOCK_CANDIDATE_OBJECT_SHA"',
-            '    printf \'%s\\trefs/tags/v0.19.1^{}\\n\' "$MOCK_CANONICAL_SOURCE_SHA"',
-            "  fi",
-            '  if [[ "${MOCK_PRIOR_TAG_DRIFT:-false}" == true ]]; then',
-            '    printf \'%s\\trefs/tags/v0.19.0\\n\' "$MOCK_TERMINAL_PRIOR_OBJECT_SHA"',
-            '    printf \'%s\\trefs/tags/v0.19.0^{}\\n\' "$MOCK_TERMINAL_PRIOR_SOURCE_SHA"',
-            "  else",
-            '    cat "$MOCK_TAG_IDENTITY"',
-            "  fi",
-            "  exit 0",
-            "fi",
-            'echo "unexpected git request: $*" >&2',
-            "exit 3",
-          ].join("\n"),
-        ),
-        writeFile(
-          join(binaryDirectory, "npm"),
-          [
-            "#!/bin/bash",
-            "set -euo pipefail",
-            'printf \'npm %s\\n\' "$*" >> "$MOCK_COMMAND_LOG"',
-            'if [[ "$1" == view ]]; then',
-            '  count="$(cat "$MOCK_NPM_COUNT_FILE")"',
-            '  count=$((count + 1))',
-            '  printf \'%s\\n\' "$count" > "$MOCK_NPM_COUNT_FILE"',
-            '  if [[ "$count" -ge 3 ]]; then printf \'"%s"\\n\' "$MOCK_NPM_TERMINAL"; else printf \'"%s"\\n\' "$MOCK_NPM_LATEST"; fi',
-            "  exit 0",
-            "fi",
-            'if [[ "$1" == config && "$2" == get && "$3" == tag ]]; then printf \'latest\\n\'; exit 0; fi',
-            'if [[ "$1" == stage && "$2" == publish ]]; then exit 0; fi',
-            'echo "unexpected npm request: $*" >&2',
-            "exit 3",
-          ].join("\n"),
-        ),
-        writeFile(
-          join(binaryDirectory, "gh"),
-          [
-            "#!/bin/bash",
-            "set -euo pipefail",
-            'printf \'gh %s\\n\' "$*" >> "$MOCK_COMMAND_LOG"',
-            'case "$2" in',
-            '  repos/hraness/kb/releases/tags/v0.19.0) cat "$MOCK_RELEASE_JSON" ;;',
-            '  repos/hraness/kb/releases/latest) cat "$MOCK_LATEST_RELEASE_JSON" ;;',
-            '  "repos/hraness/kb/compare/${MOCK_PRIOR_SOURCE}...main") cat "$MOCK_COMPARISON_JSON" ;;',
-            '  *) echo "unexpected gh request: $*" >&2; exit 3 ;;',
-            "esac",
-          ].join("\n"),
-        ),
-      ]);
-      await Promise.all([
-        chmod(join(binaryDirectory, "git"), 0o755),
-        chmod(join(binaryDirectory, "npm"), 0o755),
-        chmod(join(binaryDirectory, "gh"), 0o755),
-      ]);
-
-      const runBoundary = async (options: Readonly<{
-        candidateTagPresent?: boolean;
-        canonicalSourceSha?: string;
-        legacySourceSha?: string;
-        comparisonStatus?: string;
-        release?: Readonly<Record<string, unknown>>;
-        terminalLatest?: string;
-        terminalMainSha?: string;
-        terminalPriorTagDrift?: boolean;
-      }> = {}) => {
-        const runDirectory = await mkdtemp(join(directory, "run-"));
-        const archive = Buffer.from("reviewed archive", "utf8");
-        const metadata = Buffer.from("reviewed metadata", "utf8");
-        const digest = Buffer.from("reviewed digest", "utf8");
-        const archivePath = join(runDirectory, "hraness-kb-0.19.1.tgz");
-        const metadataPath = join(runDirectory, "npm-pack.json");
-        const digestPath = join(runDirectory, "npm-package.sha256");
-        const tagIdentityPath = join(runDirectory, "tag-identity.txt");
-        const releasePath = join(runDirectory, "release.json");
-        const latestReleasePath = join(runDirectory, "latest-release.json");
-        const comparisonPath = join(runDirectory, "comparison.json");
-        const commandLog = join(runDirectory, "commands.log");
-        const npmCountPath = join(runDirectory, "npm-count.txt");
-        const release = options.release ?? completeRelease;
-        await Promise.all([
-          writeFile(archivePath, archive),
-          writeFile(metadataPath, metadata),
-          writeFile(digestPath, digest),
-          writeFile(
-            tagIdentityPath,
-            `${"c".repeat(40)}\trefs/tags/v0.19.0\n${options.legacySourceSha ?? priorSourceSha}\trefs/tags/v0.19.0^{}\n`,
-          ),
-          writeFile(releasePath, JSON.stringify(release)),
-          writeFile(latestReleasePath, JSON.stringify(release)),
-          writeFile(
-            comparisonPath,
-            JSON.stringify({ status: options.comparisonStatus ?? "ahead" }),
-          ),
-          writeFile(commandLog, ""),
-          writeFile(npmCountPath, "0\n"),
-        ]);
-        const result = await runWorkflowScript(script, {
-          PATH: `${binaryDirectory}:${process.env.PATH ?? ""}`,
-          DEFAULT_BRANCH: "main",
-          DIGEST: digestPath,
-          EXPECTED_ARCHIVE_SHA256: sha256(archive),
-          EXPECTED_DIGEST_SHA256: sha256(digest),
-          EXPECTED_METADATA_SHA256: sha256(metadata),
-          EXPECTED_SOURCE_SHA: expectedSourceSha,
-          EXPECTED_TAG_SOURCE_SHA: options.canonicalSourceSha ?? expectedSourceSha,
-          EXPECTED_VERSION: "0.19.1",
-          GH_TOKEN: "test-token",
-          GITHUB_REF: "refs/heads/main",
-          GITHUB_REPOSITORY: "hraness/kb",
-          GITHUB_SHA: expectedSourceSha,
-          METADATA: metadataPath,
-          MOCK_CANDIDATE_TAG_PRESENT: options.candidateTagPresent === false ? "false" : "true",
-          MOCK_CANDIDATE_OBJECT_SHA: "f".repeat(40),
-          MOCK_CANONICAL_SOURCE_SHA: options.canonicalSourceSha ?? expectedSourceSha,
-          MOCK_COMMAND_LOG: commandLog,
-          MOCK_COMPARISON_JSON: comparisonPath,
-          MOCK_LATEST_RELEASE_JSON: latestReleasePath,
-          MOCK_NPM_LATEST: "0.19.0",
-          MOCK_NPM_COUNT_FILE: npmCountPath,
-          MOCK_NPM_TERMINAL: options.terminalLatest ?? "0.19.0",
-          MOCK_PRIOR_TAG_DRIFT: options.terminalPriorTagDrift === true ? "true" : "false",
-          MOCK_PRIOR_SOURCE: options.legacySourceSha ?? priorSourceSha,
-          MOCK_RELEASE_JSON: releasePath,
-          MOCK_SOURCE_SHA: expectedSourceSha,
-          MOCK_TAG_IDENTITY: tagIdentityPath,
-          MOCK_TERMINAL_PRIOR_OBJECT_SHA: "d".repeat(40),
-          MOCK_TERMINAL_PRIOR_SOURCE_SHA: "e".repeat(40),
-          MOCK_TERMINAL_MAIN_SHA: options.terminalMainSha ?? expectedSourceSha,
-          RUNNER_TEMP: runDirectory,
-          TARBALL: archivePath,
-        });
-        return { commandLog: await readFile(commandLog, "utf8"), result };
-      };
-
-      const accepted = await runBoundary();
-      expect(accepted.result.exitCode).toBe(0);
-      const commands = accepted.commandLog.trim().split("\n");
-      const latestIndices = commands.flatMap((command, index) =>
-        command.startsWith("npm view @hraness/kb dist-tags.latest") ? [index] : []);
-      const releaseIndex = commands.findIndex((command) =>
-        command === "gh api repos/hraness/kb/releases/tags/v0.19.0");
-      const candidateTagIndex = commands.findIndex((command) =>
-        command.startsWith("git ls-remote --exit-code https://github.com/hraness/kb.git"));
-      const mutationIndex = commands.findIndex((command) => command.startsWith("npm stage publish"));
-      expect(latestIndices).toHaveLength(3);
-      expect(releaseIndex).toBeGreaterThan(latestIndices[1]!);
-      expect(latestIndices[2]!).toBeGreaterThan(releaseIndex);
-      expect(candidateTagIndex).toBeGreaterThan(latestIndices[2]!);
-      expect(mutationIndex).toBeGreaterThan(candidateTagIndex);
-
-      const delayedMirror = await runBoundary({ canonicalSourceSha: "e".repeat(40) });
-      expect(delayedMirror.result.exitCode).toBe(0);
-      expect(delayedMirror.commandLog).toContain("npm stage publish");
-
-      const legacySourceDrift = await runBoundary({ legacySourceSha: "b".repeat(40) });
-      expect(legacySourceDrift.result.exitCode).not.toBe(0);
-      expect(legacySourceDrift.result.stderr).toContain("lacks its exact immutable GitHub Release");
-      expect(legacySourceDrift.commandLog).not.toContain("npm stage publish");
-
-      const candidateCollision = await runBoundary({ candidateTagPresent: false });
-      expect(candidateCollision.result.exitCode).not.toBe(0);
-      expect(candidateCollision.result.stderr).toContain("changed after package verification");
-      expect(candidateCollision.commandLog).not.toContain("npm stage publish");
-
-      const npmDrift = await runBoundary({ terminalLatest: "0.19.1" });
-      expect(npmDrift.result.exitCode).not.toBe(0);
-      expect(npmDrift.result.stderr).toContain(
-        "Public npm latest changed during final release-closure verification",
-      );
-      expect(npmDrift.commandLog).not.toContain("npm stage publish");
-
-      const mainDrift = await runBoundary({ terminalMainSha: "d".repeat(40) });
-      expect(mainDrift.result.exitCode).not.toBe(0);
-      expect(mainDrift.result.stderr).toContain("Could not prove exact main");
-      expect(mainDrift.commandLog).not.toContain("npm stage publish");
-
-      const priorTagDrift = await runBoundary({ terminalPriorTagDrift: true });
-      expect(priorTagDrift.result.exitCode).not.toBe(0);
-      expect(priorTagDrift.result.stderr).toContain(
-        "Prior tag v0.19.0 changed during final release-closure verification",
-      );
-      expect(priorTagDrift.commandLog).not.toContain("npm stage publish");
-
-      const mutableRelease = await runBoundary({
-        release: { ...completeRelease, immutable: false },
-      });
-      expect(mutableRelease.result.exitCode).not.toBe(0);
-      expect(mutableRelease.result.stderr).toContain("lacks its exact immutable GitHub Release");
-      expect(mutableRelease.commandLog).not.toContain("npm stage publish");
-
-      const divergedRelease = await runBoundary({ comparisonStatus: "diverged" });
-      expect(divergedRelease.result.exitCode).not.toBe(0);
-      expect(divergedRelease.result.stderr).toContain("is not reachable from current main");
-      expect(divergedRelease.commandLog).not.toContain("npm stage publish");
-    } finally {
-      await rm(directory, { recursive: true, force: true });
-    }
-  }, 30_000);
-
-  test("the source-free staging boundary rejects npm's packed top-level tag override", async () => {
-    const workflow = await readFile(stageWorkflowUrl, "utf8");
-    const script = workflowStepScript(workflow, "Rebind downloaded package");
-    const manifest = JSON.parse(await readFile(manifestUrl, "utf8")) as { readonly version: string };
-    const root = await mkdtemp(join(tmpdir(), "kb-stage-packed-manifest-"));
-    const artifactDirectory = join(root, "kb-npm-stage");
-    const tarballName = `hraness-kb-${manifest.version}.tgz`;
-    const githubOutput = join(root, "github-output.txt");
-    try {
-      await run([
-        process.execPath,
-        "run",
-        "./scripts/prepare-npm-package.ts",
-        artifactDirectory,
-      ], repository);
-      const [archiveBytes, metadataBytes] = await Promise.all([
-        readFile(join(artifactDirectory, tarballName)),
-        readFile(join(artifactDirectory, "npm-pack.json")),
-      ]);
-      await writeFile(
-        join(artifactDirectory, "npm-package.sha256"),
-        `${sha256(archiveBytes)}  ${tarballName}\n${sha256(metadataBytes)}  npm-pack.json\n`,
-      );
-      const environment = {
-        EXPECTED_SOURCE_SHA: "a".repeat(40),
-        EXPECTED_TARBALL_NAME: tarballName,
-        EXPECTED_VERSION: manifest.version,
-        GITHUB_OUTPUT: githubOutput,
-        RUNNER_TEMP: root,
-      };
-      const accepted = await runWorkflowScript(script, environment);
-      if (accepted.exitCode !== 0) {
-        throw new Error(`Canonical packed manifest was rejected:\n${accepted.stderr}${accepted.stdout}`);
-      }
-
-      await injectPackedTopLevelTag(artifactDirectory, tarballName);
-      const rejected = await runWorkflowScript(script, environment);
-      expect(rejected.exitCode).not.toBe(0);
-      expect(rejected.stderr).toContain(
-        "Packed KB can publish only with the canonical npm registry and dist-tag policy",
-      );
-    } finally {
-      await rm(root, { recursive: true, force: true });
-    }
-  });
-
-  test("the source/release and source-free parsers enforce independent 218-file and 420-entry ceilings", async () => {
-    const [workflow, smoke, manifestSource] = await Promise.all([
-      readFile(stageWorkflowUrl, "utf8"),
-      readFile(packageSmokeUrl, "utf8"),
-      readFile(manifestUrl, "utf8"),
-    ]);
-    const script = workflowStepScript(workflow, "Rebind downloaded package");
-    expect(script).toContain("const maximumFiles = 218;");
-    expect(script).toContain("const maximumEntries = 420;");
-    expect(script).toContain("maximumUnpackedBytes + maximumEntries * 512 + 1_024");
-    expect(smoke).toContain("const maximumPackageFiles = 218;");
-    const manifest = JSON.parse(manifestSource) as { readonly version: string };
-    const root = await mkdtemp(join(tmpdir(), "kb-stage-file-count-"));
-    const artifactDirectory = join(root, "kb-npm-stage");
-    const tarballName = `hraness-kb-${manifest.version}.tgz`;
-    const tarball = join(artifactDirectory, tarballName);
-    try {
-      await run([
-        process.execPath,
-        "run",
-        "./scripts/prepare-npm-package.ts",
-        artifactDirectory,
-      ], repository);
-      const originalInventory = await inspectPackageArtifact(tarball);
-      expect(originalInventory.fileCount).toBeLessThanOrEqual(218);
-      const [archive, metadataSource] = await Promise.all([
-        readFile(tarball),
-        readFile(join(artifactDirectory, "npm-pack.json"), "utf8"),
-      ]);
-      const tar = gunzipSync(archive);
-      const template = firstRegularHeader(tar);
-      let trailerOffset = 0;
-      while (trailerOffset + 512 <= tar.length) {
-        if (tar.subarray(trailerOffset, trailerOffset + 512).every((byte) => byte === 0)) break;
-        trailerOffset += 512 + Math.ceil(readTarOctal(tar, trailerOffset + 124) / 512) * 512;
-      }
-      expect(tar.length - trailerOffset).toBeGreaterThanOrEqual(1_024);
-      expect(tar.subarray(trailerOffset).every((byte) => byte === 0)).toBe(true);
-
-      for (const fileCount of [218, 219]) {
-        const metadata = JSON.parse(metadataSource) as Array<Record<string, unknown>>;
-        const record = metadata[0];
-        if (record === undefined || !Array.isArray(record.files)) {
-          throw new Error("Test npm-pack.json lacks its file inventory");
-        }
-        expect(record.files).toHaveLength(originalInventory.fileCount);
-        const headers: Buffer[] = [];
-        for (let index = originalInventory.fileCount; index < fileCount; index += 1) {
-          const path = `dist/package-file-count-boundary-${String(index)}.js`;
-          expect(originalInventory.files.some((file) => file.path === path)).toBe(false);
-          const header = Buffer.from(tar.subarray(template.offset, template.offset + 512));
-          header.fill(0, 0, 100);
-          header.write(`package/${path}`, 0, 100, "ascii");
-          header.write("0000644\0", 100, 8, "ascii");
-          header.write("00000000000\0", 124, 12, "ascii");
-          header[156] = 48;
-          header.fill(0, 157, 257);
-          header.fill(0, 345, 500);
-          writeHeaderChecksum(header, 0);
-          headers.push(header);
-          record.files.push({ mode: 0o644, path, size: 0 });
-        }
-        record.entryCount = fileCount;
-        await persistPackedTarMutation(
-          artifactDirectory,
-          tarballName,
-          Buffer.concat([tar.subarray(0, trailerOffset), ...headers, Buffer.alloc(1_024)]),
-          metadata,
-        );
-        if (fileCount === 218) {
-          const accepted = await inspectPackageArtifact(tarball);
-          expect(accepted.fileCount).toBe(218);
-          expect(accepted.unpackedBytes).toBe(originalInventory.unpackedBytes);
-        } else {
-          await expect(inspectPackageArtifact(tarball)).rejects.toThrow(
-            "Package file count 219 is outside the reviewed range 190-218",
-          );
-        }
-        const staged = await runWorkflowScript(script, {
-          EXPECTED_SOURCE_SHA: "a".repeat(40),
-          EXPECTED_TARBALL_NAME: tarballName,
-          EXPECTED_VERSION: manifest.version,
-          GITHUB_OUTPUT: join(root, "github-output.txt"),
-          RUNNER_TEMP: root,
-        });
-        if (fileCount === 218) {
-          if (staged.exitCode !== 0) {
-            throw new Error(`218-file package was rejected:\n${staged.stderr}${staged.stdout}`);
-          }
-        } else {
-          expect(staged.exitCode).not.toBe(0);
-          expect(staged.stderr).toContain("npm-pack.json has an invalid or excessive entryCount");
-        }
-      }
-
-      // npm metadata counts regular files; raw USTAR additionally counts directories.
-      // Each variant starts from the original archive and metadata, not the 219-file mutation.
-      for (const entryCount of [420, 421]) {
-        const metadata = JSON.parse(metadataSource) as Array<Record<string, unknown>>;
-        const headers: Buffer[] = [];
-        for (let index = originalInventory.entryCount; index < entryCount; index += 1) {
-          const path = `dist/package-entry-count-boundary-${String(index)}`;
-          expect(originalInventory.entries.some((entry) => entry.path === path)).toBe(false);
-          const header = Buffer.from(tar.subarray(template.offset, template.offset + 512));
-          header.fill(0, 0, 100);
-          header.write(`package/${path}`, 0, 100, "ascii");
-          header.write("0000755\0", 100, 8, "ascii");
-          header.write("00000000000\0", 124, 12, "ascii");
-          header[156] = 53;
-          header.fill(0, 157, 257);
-          header.fill(0, 345, 500);
-          writeHeaderChecksum(header, 0);
-          headers.push(header);
-        }
-        await persistPackedTarMutation(
-          artifactDirectory,
-          tarballName,
-          Buffer.concat([tar.subarray(0, trailerOffset), ...headers, Buffer.alloc(1_024)]),
-          metadata,
-        );
-        if (entryCount === 420) {
-          const accepted = await inspectPackageArtifact(tarball);
-          expect(accepted.entryCount).toBe(420);
-          expect(accepted.fileCount).toBe(originalInventory.fileCount);
-          expect(accepted.unpackedBytes).toBe(originalInventory.unpackedBytes);
-        } else {
-          await expect(inspectPackageArtifact(tarball)).rejects.toThrow(
-            "Package entry count 421 is outside the reviewed range 190-420",
-          );
-        }
-        const staged = await runWorkflowScript(script, {
-          EXPECTED_SOURCE_SHA: "a".repeat(40),
-          EXPECTED_TARBALL_NAME: tarballName,
-          EXPECTED_VERSION: manifest.version,
-          GITHUB_OUTPUT: join(root, "github-output.txt"),
-          RUNNER_TEMP: root,
-        });
-        if (entryCount === 420) {
-          if (staged.exitCode !== 0) {
-            throw new Error(`420-entry package was rejected:\n${staged.stderr}${staged.stdout}`);
-          }
-        } else {
-          expect(staged.exitCode).not.toBe(0);
-          expect(staged.stderr).toContain("Packed package.json tar contains too many entries");
-        }
-      }
-    } finally {
-      await rm(root, { recursive: true, force: true });
-    }
-  }, 120_000);
-
-  test("the source/release and source-free parsers reject shared hostile USTAR fixtures", async () => {
-    const workflow = await readFile(stageWorkflowUrl, "utf8");
-    const script = workflowStepScript(workflow, "Rebind downloaded package");
-    const manifest = JSON.parse(await readFile(manifestUrl, "utf8")) as { readonly version: string };
-    const tarballName = `hraness-kb-${manifest.version}.tgz`;
-    for (const fixture of [
-      {
-        mutate: corruptPackedUstarVersion,
-        name: "version",
-        sourceError: "exact USTAR magic/version",
-        stageError: "Packed package.json tar header is invalid",
-      },
-      {
-        mutate: injectPackedExtendedPrefixTraversal,
-        name: "extended-prefix",
-        sourceError: "unsafe path",
-        stageError: "Packed package.json tar path is unsafe",
-      },
-    ] as const) {
-      const root = await mkdtemp(join(tmpdir(), `kb-stage-ustar-${fixture.name}-`));
-      const artifactDirectory = join(root, "kb-npm-stage");
-      const tarball = join(artifactDirectory, tarballName);
-      try {
-        await run([
-          process.execPath,
-          "run",
-          "./scripts/prepare-npm-package.ts",
-          artifactDirectory,
-        ], repository);
-        await fixture.mutate(artifactDirectory, tarballName);
-        await expect(inspectPackageArtifact(tarball)).rejects.toThrow(fixture.sourceError);
-        const rejected = await runWorkflowScript(script, {
-          EXPECTED_SOURCE_SHA: "a".repeat(40),
-          EXPECTED_TARBALL_NAME: tarballName,
-          EXPECTED_VERSION: manifest.version,
-          GITHUB_OUTPUT: join(root, "github-output.txt"),
-          RUNNER_TEMP: root,
-        });
-        expect(rejected.exitCode).not.toBe(0);
-        expect(rejected.stderr).toContain(fixture.stageError);
-      } finally {
-        await rm(root, { recursive: true, force: true });
-      }
-    }
-  }, 120_000);
 
   test("hostile actor or sender drift cannot reach the protected release workflow", async () => {
     const workflow = await readFile(releaseWorkflowUrl, "utf8");
@@ -1671,7 +471,7 @@ describe("npm release workflows", () => {
       triggering_actor: { id: 894119, type: "User" },
       repository: {
         id: 1308971873,
-        full_name: "hraness/kb",
+        full_name: "hraness/wordcell",
         private: false,
       },
     };
@@ -1689,7 +489,7 @@ describe("npm release workflows", () => {
           'case "$endpoint" in',
           '  */actions/runs/*) cat "$MOCK_ATTEMPT_JSON" ;;',
           '  */actions/workflows/*) cat "$MOCK_WORKFLOW_JSON" ;;',
-          '  /repos/hraness/kb) cat "$MOCK_REPOSITORY_JSON" ;;',
+          '  /repos/hraness/wordcell) cat "$MOCK_REPOSITORY_JSON" ;;',
           '  *) echo "unexpected gh endpoint: $endpoint" >&2; exit 2 ;;',
           "esac",
         ].join("\n"),
@@ -1705,7 +505,7 @@ describe("npm release workflows", () => {
         })),
         writeFile(repositoryPath, JSON.stringify({
           id: 1308971873,
-          full_name: "hraness/kb",
+          full_name: "hraness/wordcell",
           visibility: "public",
           private: false,
           default_branch: "main",
@@ -1719,7 +519,7 @@ describe("npm release workflows", () => {
         MOCK_REPOSITORY_JSON: repositoryPath,
         RUNNER_TEMP: directory,
         EXPECTED_ACTOR_ID: "894119",
-        EXPECTED_REPOSITORY: "hraness/kb",
+        EXPECTED_REPOSITORY: "hraness/wordcell",
         EXPECTED_REPOSITORY_ID: "1308971873",
         EXPECTED_WORKFLOW_ID: "320004141",
         EXPECTED_WORKFLOW_NAME: "Release",
@@ -1727,7 +527,7 @@ describe("npm release workflows", () => {
         GITHUB_RUN_ID: "67890",
         GITHUB_RUN_ATTEMPT: "3",
         GITHUB_EVENT_NAME: "push",
-        GITHUB_REPOSITORY: "hraness/kb",
+        GITHUB_REPOSITORY: "hraness/wordcell",
         GITHUB_REPOSITORY_ID: "1308971873",
         GITHUB_REF: "refs/tags/v0.20.0",
         VERIFIED_SOURCE_SHA: sourceSha,
@@ -1752,7 +552,7 @@ describe("npm release workflows", () => {
       await writeFile(attemptPath, JSON.stringify(attempt));
       await writeFile(repositoryPath, JSON.stringify({
         id: 1308971873,
-        full_name: "hraness/kb",
+        full_name: "hraness/wordcell",
         visibility: "private",
         private: true,
         default_branch: "main",
@@ -1800,7 +600,7 @@ describe("npm release workflows", () => {
         GH_COMMAND_LOG: commandLog,
         GITHUB_EVENT_NAME: "push",
         GITHUB_REF: "refs/tags/v0.20.0",
-        GITHUB_REPOSITORY: "hraness/kb",
+        GITHUB_REPOSITORY: "hraness/wordcell",
         GITHUB_SHA: sourceSha,
         MOCK_RELEASES: "",
         MOCK_SOURCE_SHA: sourceSha,
@@ -1846,12 +646,15 @@ describe("npm release workflows", () => {
     const workflow = parse(await readFile(releaseWorkflowUrl, "utf8")) as {
       jobs: Record<string, { needs?: unknown; permissions?: unknown; steps: Array<{ name?: string; uses?: string; run?: string }> }>;
     };
-    expect(Object.keys(workflow.jobs).sort()).toEqual(["attest", "authorize", "publish", "verify"]);
+    expect(Object.keys(workflow.jobs).sort()).toEqual(["admit_npm", "attest", "authorize", "publish", "publish_npm", "verify"]);
     expect(workflow.jobs.verify?.permissions).toEqual({ contents: "read" });
     expect(workflow.jobs.publish?.needs).toEqual(["verify", "attest"]);
+    expect(workflow.jobs.publish_npm?.needs).toEqual(["verify", "attest", "publish"]);
+    expect(workflow.jobs.admit_npm?.needs).toEqual(["verify", "publish_npm"]);
     expect(workflow.jobs.attest?.steps.some((step) => step.uses?.startsWith("actions/checkout@"))).toBe(false);
-    const commands = Object.values(workflow.jobs).flatMap((job) => job.steps.map((step) => step.run ?? "")).join("\n");
-    expect(commands).not.toMatch(/npm (?:view|publish|stage|audit)/u);
+    expect(workflow.jobs.publish_npm?.steps.some((step) => step.uses?.startsWith("actions/checkout@"))).toBe(false);
+    const canonicalCommands = ["authorize", "verify", "attest", "publish"].flatMap((name) => workflow.jobs[name]?.steps.map((step) => step.run ?? "") ?? []).join("\n");
+    expect(canonicalCommands).not.toMatch(/npm (?:view|publish|stage|audit)/u);
     expect(workflow.jobs.verify?.steps.find((step) => step.name === "Check tagged source")?.run).toBe("bun run check");
     expect(workflow.jobs.attest?.steps.findIndex((step) => step.name === "Reauthorize current release attempt")).toBe(0);
   });
@@ -1886,7 +689,7 @@ describe("canonical npm package identity", () => {
       readonly name: string;
       readonly version: string;
     };
-    const filename = `hraness-kb-${manifest.version}.tgz`;
+    const filename = `hraness-wordcell-${manifest.version}.tgz`;
     const work = await mkdtemp(join(tmpdir(), "kb-package-identity-test-"));
     try {
       const sourceDirectory = join(work, "source");
@@ -1943,7 +746,7 @@ describe("canonical npm package identity", () => {
         sourcePackJson,
       });
       const verified = await verifyNpmPackageIdentity(validInput);
-      expect(verified.fileCount).toBe(212);
+      expect(verified.fileCount).toBe(sourceInventory.fileCount);
       expect(verified.unpackedBytes).toBe(sourceInventory.unpackedBytes);
       expect(verified.sourceArchiveSha512).not.toBe(verified.registryArchiveSha512);
 
@@ -2007,61 +810,4 @@ describe("canonical npm package identity", () => {
     }
   }, 120_000);
 
-  test("current tools recover exact v0.17.1 source without historical helpers", async () => {
-    const work = await mkdtemp(join(tmpdir(), "kb-release-recovery-test-"));
-    try {
-      const sourceArchive = join(work, "v0.17.1-source.tar");
-      const sourceTree = join(work, "source");
-      const packageOutput = join(work, "package");
-      await mkdir(sourceTree);
-      await run(["git", "cat-file", "-e", `${firstPublicSourceCommit}^{commit}`], repository);
-      await run([
-        "git",
-        "archive",
-        "--format=tar",
-        `--output=${sourceArchive}`,
-        firstPublicSourceCommit,
-      ], repository);
-      await run(["tar", "-xf", sourceArchive, "-C", sourceTree], repository);
-      const manifest = JSON.parse(await readFile(join(sourceTree, "package.json"), "utf8")) as {
-        readonly name?: unknown;
-        readonly scripts?: Readonly<Record<string, unknown>>;
-        readonly version?: unknown;
-      };
-      expect(manifest.name).toBe("@hraness/kb");
-      expect(manifest.version).toBe("0.17.1");
-      expect(manifest.scripts?.prepack).toBe("bun run check");
-      await rm(join(sourceTree, "scripts"), { recursive: true });
-      expect(await readdir(sourceTree)).not.toContain("node_modules");
-      await run([
-        process.execPath,
-        "--no-env-file",
-        "--config=/dev/null",
-        "run",
-        fileURLToPath(packagePreparationUrl),
-        packageOutput,
-      ], sourceTree);
-      const filename = "hraness-kb-0.17.1.tgz";
-      expect(new Set(await readdir(packageOutput))).toEqual(new Set([filename, "npm-pack.json"]));
-      const inventory = await inspectPackageArtifact(join(packageOutput, filename));
-      expect(inventory.fileCount).toBe(200);
-      expect(inventory.unpackedBytes).toBe(4_860_250);
-      await run([
-        process.execPath,
-        "--no-env-file",
-        "--config=/dev/null",
-        "run",
-        fileURLToPath(packageSmokeUrl),
-        "--archive",
-        join(packageOutput, filename),
-        "--pack-json",
-        join(packageOutput, "npm-pack.json"),
-      ], sourceTree);
-      const finalSourceEntries = await readdir(sourceTree);
-      expect(finalSourceEntries).not.toContain("scripts");
-      expect(finalSourceEntries).not.toContain("node_modules");
-    } finally {
-      await rm(work, { force: true, recursive: true });
-    }
-  }, 300_000);
 });

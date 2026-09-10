@@ -16,7 +16,7 @@ import { sanitizeArtifactUrl } from "./persist.js";
 
 const archiveTodayDiscoveryOrigin = "https://archive.ph";
 const archiveTodayDiscoveryPrefix = `${archiveTodayDiscoveryOrigin}/newest/`;
-const defaultUserAgent = "@hraness/kb archive-today fallback";
+const defaultUserAgent = "@hraness/wordcell archive-today fallback";
 const defaultTimeoutMs = 10_000;
 const defaultMaximumBytes = 8 * 1024 * 1024;
 const discoveryMaximumBytes = 256 * 1024;

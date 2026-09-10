@@ -8,7 +8,7 @@ import {
   readCookieFile,
   renderCookieHeader,
   renderNetscapeCookieJar
-} from "../index-bnmax0dq.js";
+} from "../index-2gv8y733.js";
 export {
   renderNetscapeCookieJar,
   renderCookieHeader,

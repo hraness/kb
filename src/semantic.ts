@@ -424,7 +424,7 @@ async function verifiedIndexEmbeddingModelSource(
     return Object.freeze({ source: recommendedEmbeddingModel, release: () => Promise.resolve() });
   }
   const sourcePath = resolve(path);
-  const directory = await mkdtemp(join(tmpdir(), "hraness-kb-embedding-model-"));
+  const directory = await mkdtemp(join(tmpdir(), "hraness-wordcell-embedding-model-"));
   const destinationPath = join(directory, "pinned-model.gguf");
   let source: Awaited<ReturnType<typeof open>> | undefined;
   let destination: Awaited<ReturnType<typeof open>> | undefined;
@@ -785,7 +785,7 @@ function internalVectorBoundary(
 ): QmdInternalVectorBoundary | null {
   // QMD 2.5.3's public searchVector omits its per-store LLM session and falls
   // back to a process-global model. Its documented advanced internal boundary
-  // lets KB keep query inference on the same store-local, verified bytes while
+  // lets Wordcell keep query inference on the same store-local, verified bytes while
   // retaining a path-independent identity for derived vector rows.
   if (store.internal === undefined) return null;
   const internal = boundaryRecord(store.internal, "QMD store.internal");
@@ -1101,7 +1101,7 @@ async function createIsolatedQmdDatabaseSnapshot(
   database: string,
   seal: SemanticDatabaseSnapshotSeal,
 ): Promise<IsolatedQmdDatabaseSnapshot> {
-  const directory = await mkdtemp(join(tmpdir(), "hraness-kb-qmd-reader."));
+  const directory = await mkdtemp(join(tmpdir(), "hraness-wordcell-qmd-reader."));
   await chmod(directory, 0o700);
   let cleaned = false;
   const cleanup = async (): Promise<void> => {

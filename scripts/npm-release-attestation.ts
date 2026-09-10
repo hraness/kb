@@ -1,15 +1,14 @@
 import { readFile } from "node:fs/promises";
 import { isAbsolute, resolve } from "node:path";
 
-const expectedName = "@hraness/kb";
+const expectedName = "@hraness/wordcell";
 const expectedRegistry = "https://registry.npmjs.org";
 const expectedAuditRegistry = `${expectedRegistry}/`;
-const expectedRepository = "https://github.com/hraness/kb";
+const expectedRepository = "https://github.com/hraness/wordcell";
 const expectedRepositoryId = "1308971873";
 const expectedRepositoryOwnerId = "307125679";
-const expectedWorkflowPath = ".github/workflows/npm-stage.yml";
-const expectedWorkflowRef = "refs/heads/main";
-const expectedWorkflowEvent = "workflow_dispatch";
+const expectedWorkflowPath = ".github/workflows/release.yml";
+const expectedWorkflowEvent = "push";
 const expectedBuilder = "https://github.com/actions/runner/github-hosted";
 const expectedBuildType = "https://slsa-framework.github.io/github-actions-buildtypes/workflow/v1";
 const provenancePredicateType = "https://slsa.dev/provenance/v1";
@@ -25,6 +24,8 @@ const maximumRegistryViewBytes = 1_000_000;
 type ReleaseAttestationInput = Readonly<{
   audit: unknown;
   expectedSourceSha: string;
+  expectedRunId: string;
+  maximumRunAttempt: string;
   expectedTarballSha512: string;
   expectedVersion: string;
   registryLatest: unknown;
@@ -81,7 +82,7 @@ function stableVersion(version: string): void {
 function canonicalAttestations(version: string): Readonly<Record<string, unknown>> {
   return Object.freeze({
     provenance: Object.freeze({ predicateType: provenancePredicateType }),
-    url: `${expectedRegistry}/-/npm/v1/attestations/@hraness%2fkb@${version}`,
+    url: `${expectedRegistry}/-/npm/v1/attestations/@hraness%2fwordcell@${version}`,
   });
 }
 
@@ -144,7 +145,7 @@ function verifySubject(
   exactKeys(subject, ["digest", "name"], `${label}.subject[0]`);
   exactKeys(digest, ["sha512"], `${label}.subject[0].digest`);
   if (
-    subject.name !== `pkg:npm/%40hraness/kb@${version}`
+    subject.name !== `pkg:npm/%40hraness/wordcell@${version}`
     || digest.sha512 !== tarballSha512
   ) {
     throw new TypeError(`${label} subject does not bind the exact npm tarball`);
@@ -304,12 +305,13 @@ function verifyProvenanceStatement(
   exactKeys(external, ["workflow"], "SLSA external parameters");
   const workflow = record(external.workflow, "SLSA workflow parameters");
   exactKeys(workflow, ["path", "ref", "repository"], "SLSA workflow parameters");
+  const expectedWorkflowRef = `refs/tags/v${version}`;
   if (
     workflow.path !== expectedWorkflowPath
     || workflow.ref !== expectedWorkflowRef
     || workflow.repository !== expectedRepository
   ) {
-    throw new TypeError("SLSA provenance does not identify the exact main staging workflow");
+    throw new TypeError("SLSA provenance does not identify the exact tag Release workflow");
   }
   const internal = record(buildDefinition.internalParameters, "SLSA internal parameters");
   exactKeys(internal, ["github"], "SLSA internal parameters");
@@ -338,7 +340,7 @@ function verifyProvenanceStatement(
     dependency.uri !== `git+${expectedRepository}@${expectedWorkflowRef}`
     || dependencyDigest.gitCommit !== sourceSha
   ) {
-    throw new TypeError("SLSA provenance does not bind the exact main source commit");
+    throw new TypeError("SLSA provenance does not bind the exact tagged source commit");
   }
   const runDetails = record(predicate.runDetails, "SLSA run details");
   exactKeys(runDetails, ["builder", "metadata"], "SLSA run details");
@@ -350,7 +352,7 @@ function verifyProvenanceStatement(
   const metadata = record(runDetails.metadata, "SLSA run metadata");
   exactKeys(metadata, ["invocationId"], "SLSA run metadata");
   const invocationId = stringField(metadata, "invocationId", "SLSA run metadata");
-  if (!/^https:\/\/github\.com\/hraness\/kb\/actions\/runs\/[1-9][0-9]*\/attempts\/[1-9][0-9]*$/u.test(invocationId)) {
+  if (!/^https:\/\/github\.com\/hraness\/wordcell\/actions\/runs\/[1-9][0-9]*\/attempts\/[1-9][0-9]*$/u.test(invocationId)) {
     throw new TypeError("SLSA provenance has a noncanonical GitHub Actions invocation");
   }
   return invocationId;
@@ -360,6 +362,11 @@ export function verifyNpmReleaseAttestation(
   input: ReleaseAttestationInput,
 ): VerifiedReleaseAttestation {
   stableVersion(input.expectedVersion);
+  for (const id of [input.expectedRunId, input.maximumRunAttempt]) {
+    if (!/^[1-9][0-9]*$/u.test(id) || BigInt(id) > BigInt(Number.MAX_SAFE_INTEGER)) {
+      throw new TypeError("Expected provenance run and attempt must be positive safe integers");
+    }
+  }
   if (!/^[a-f0-9]{40}$/u.test(input.expectedSourceSha)) {
     throw new TypeError("Expected source SHA must be one lowercase Git commit");
   }
@@ -402,7 +409,7 @@ export function verifyNpmReleaseAttestation(
   }
   const verified = matching[0] as Record<string, unknown>;
   if (
-    verified.location !== "node_modules/@hraness/kb"
+    verified.location !== "node_modules/@hraness/wordcell"
     || verified.registry !== expectedAuditRegistry
   ) {
     throw new TypeError("npm signature audit did not verify the isolated canonical package install");
@@ -449,6 +456,10 @@ export function verifyNpmReleaseAttestation(
     input.expectedTarballSha512,
     input.expectedSourceSha,
   );
+  const invocation = /\/runs\/([1-9][0-9]*)\/attempts\/([1-9][0-9]*)$/u.exec(invocationId)!;
+  if (invocation[1] !== input.expectedRunId || BigInt(invocation[2]!) > BigInt(input.maximumRunAttempt)) {
+    throw new TypeError("SLSA provenance must come from this release run and an admitted attempt");
+  }
   return Object.freeze({
     invocationId,
     sourceSha: input.expectedSourceSha,
@@ -476,6 +487,8 @@ async function main(): Promise<void> {
   const requiredFlags = [
     "--audit-json",
     "--expected-source-sha",
+    "--expected-run-id",
+    "--maximum-run-attempt",
     "--expected-tarball-sha512",
     "--expected-version",
     "--registry-latest-json",
@@ -513,6 +526,8 @@ async function main(): Promise<void> {
   const result = verifyNpmReleaseAttestation({
     audit: parseJson(auditSource, "npm signature audit", maximumAuditBytes),
     expectedSourceSha: values.get("--expected-source-sha") as string,
+    expectedRunId: values.get("--expected-run-id") as string,
+    maximumRunAttempt: values.get("--maximum-run-attempt") as string,
     expectedTarballSha512: values.get("--expected-tarball-sha512") as string,
     expectedVersion: values.get("--expected-version") as string,
     registryLatest: parseJson(latestSource, "npm latest readback", 1_024),

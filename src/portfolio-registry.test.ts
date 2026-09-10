@@ -112,7 +112,7 @@ describe("portfolio registry", () => {
   });
 
   test("resolves only authorized roots and never touches a denied personal checkout", async () => {
-    const temporary = await mkdtemp(join(tmpdir(), "hraness-kb-registry-"));
+    const temporary = await mkdtemp(join(tmpdir(), "hraness-wordcell-registry-"));
     try {
       await mkdir(join(temporary, "alpha", "kb"), { recursive: true });
       const parsed = parsePortfolioRegistry(registry([
@@ -132,7 +132,7 @@ describe("portfolio registry", () => {
   });
 
   test("rejects symlinked and overlapping selected roots", async () => {
-    const temporary = await mkdtemp(join(tmpdir(), "hraness-kb-registry-"));
+    const temporary = await mkdtemp(join(tmpdir(), "hraness-wordcell-registry-"));
     try {
       await mkdir(join(temporary, "repository", "kb", "nested"), { recursive: true });
       await symlink(join(temporary, "repository"), join(temporary, "linked"));
@@ -169,7 +169,7 @@ describe("portfolio registry", () => {
   });
 
   test("rejects symlinked registry files at the default read boundary", async () => {
-    const temporary = await mkdtemp(join(tmpdir(), "hraness-kb-registry-file-"));
+    const temporary = await mkdtemp(join(tmpdir(), "hraness-wordcell-registry-file-"));
     try {
       const target = join(temporary, "registry.json");
       const linked = join(temporary, "linked.json");

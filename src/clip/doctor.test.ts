@@ -286,7 +286,7 @@ describe("clip doctor", () => {
     });
     expect(report.search.semanticPrerequisites.status).toBe("unavailable");
     expect(report.warnings).toContain(
-      "Reinstall @hraness/kb with Bun so node-llama-cpp 3.18.1 and @node-llama-cpp/mac-arm64-metal 3.18.1 with its native binary are installed; semantic and hybrid vector retrieval are not ready. Keyword-only QMD search remains available.",
+      "Reinstall @hraness/wordcell with Bun so node-llama-cpp 3.18.1 and @node-llama-cpp/mac-arm64-metal 3.18.1 with its native binary are installed; semantic and hybrid vector retrieval are not ready. Keyword-only QMD search remains available.",
     );
   });
 
@@ -511,8 +511,8 @@ describe("clip doctor", () => {
     expect(rendered).toContain("Cookie/keychain probe: not performed");
     expect(rendered).toContain("Install Google Chrome or Chromium for rendered capture");
     expect(rendered).toContain("Install yt-dlp");
-    expect(rendered).toContain("kb pdf requires both pdfinfo and pdftohtml");
-    expect(rendered).toContain("kb pdf still preserves native text and images without OCR");
+    expect(rendered).toContain("wordcell pdf requires both pdfinfo and pdftohtml");
+    expect(rendered).toContain("wordcell pdf still preserves native text and images without OCR");
   });
 
   test("discovers Chromium on Linux through an injected executable lookup", async () => {

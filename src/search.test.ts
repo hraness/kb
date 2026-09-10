@@ -33,7 +33,7 @@ function fixture() {
       "---",
       "tags: [agents, context]",
       "status: current",
-      "repository_scopes: [packages/KB]",
+      "repository_scopes: [packages/Wordcell]",
       "---",
       "# Repository context",
       "",
@@ -112,7 +112,7 @@ describe("live exact search", () => {
     }).map(({ id }) => id)).toEqual(["notes/write-path"]);
     expect(searchExactVault(notes, analysis, {
       query: "agent",
-      repositoryScopes: ["packages/KB"],
+      repositoryScopes: ["packages/Wordcell"],
     }).map(({ id }) => id)).toEqual(["notes/repository-context"]);
     expect(() => searchExactVault(notes, analysis, {
       query: "agent",

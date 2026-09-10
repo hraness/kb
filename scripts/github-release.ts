@@ -5,17 +5,17 @@ import { readFileSync } from "node:fs";
 import { basename, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
-const repository = "hraness/kb";
+const repository = "hraness/wordcell";
 const repositoryId = 1308971873;
-const packageName = "@hraness/kb";
+const packageName = "@hraness/wordcell";
 const maximumFileBytes = 128 * 1024 * 1024;
 const metadataNames = ["npm-pack.json", "release-manifest.json", "SHA256SUMS"];
 
 export type ReleaseManifest = Readonly<{
   schema: "hraness-github-release-v1";
-  repository: "hraness/kb";
+  repository: "hraness/wordcell";
   repositoryId: 1308971873;
-  package: "@hraness/kb";
+  package: "@hraness/wordcell";
   version: string;
   tag: string;
   sourceSha: string;
@@ -69,10 +69,10 @@ export function parseReleaseManifest(value: unknown): ReleaseManifest {
     || manifest.tag !== `v${version}` || manifest.workflow !== ".github/workflows/release.yml"
     || !exactHex(manifest.sourceSha, 40)
     || !exactHex(manifest.workflowSha, 40)
-    || archive.name !== `hraness-kb-${version}.tgz`
+    || archive.name !== `hraness-wordcell-${version}.tgz`
     || !exactHex(archive.sha256, 64)
     || !exactHex(archive.sha512, 128)
-  ) throw new Error("Release manifest does not identify the canonical KB artifact");
+  ) throw new Error("Release manifest does not identify the canonical Wordcell artifact");
   positive(manifest.runId, "Release run ID");
   positive(manifest.runAttempt, "Release run attempt");
   if (positive(archive.bytes, "Archive bytes") > maximumFileBytes) throw new Error("Release archive exceeds byte budget");
@@ -137,7 +137,7 @@ function exactAssetBrowserUrl(value: unknown, name: string, tag: string, draft: 
 export function verifyProviderRelease(value: unknown, manifest: ReleaseManifest, assets: readonly AssetIdentity[], allowDraft: boolean): readonly string[] {
   const release = record(value, "GitHub Release");
   const author = record(release.author, "Release author");
-  if (release.tag_name !== manifest.tag || release.target_commitish !== manifest.sourceSha || release.name !== `KB ${manifest.tag}` || release.body !== releaseBody(manifest)
+  if (release.tag_name !== manifest.tag || release.target_commitish !== manifest.sourceSha || release.name !== `Wordcell ${manifest.tag}` || release.body !== releaseBody(manifest)
     || release.prerelease !== false || (!allowDraft && (release.draft !== false || release.immutable !== true))
     || (allowDraft && release.draft !== true && (release.draft !== false || release.immutable !== true))
     || (release.draft === true && release.immutable !== false)
@@ -258,7 +258,7 @@ async function assetIdentities(directory: string): Promise<readonly AssetIdentit
 
 async function prepare(directory: string): Promise<void> {
   const version = stableVersion(process.env.RELEASE_VERSION);
-  const archiveName = `hraness-kb-${version}.tgz`;
+  const archiveName = `hraness-wordcell-${version}.tgz`;
   const archive = await boundedFile(join(directory, archiveName));
   const manifest = parseReleaseManifest({
     schema: "hraness-github-release-v1", repository, repositoryId, package: packageName,
@@ -337,7 +337,7 @@ export function publishVerifiedRelease(
     authorize();
     const response = run("gh", ["api", "--method", "POST", `/repos/${repository}/releases`, "--include",
       "-f", `tag_name=${manifest.tag}`, "-f", `target_commitish=${manifest.sourceSha}`,
-      "-f", `name=KB ${manifest.tag}`, "-f", `body=${releaseBody(manifest)}`,
+      "-f", `name=Wordcell ${manifest.tag}`, "-f", `body=${releaseBody(manifest)}`,
       "-F", "draft=true", "-F", "prerelease=false", "-f", "make_latest=false"]);
     const separator = response.search(/\r?\n\r?\n/u);
     if (!/^HTTP\/(?:1\.1|2(?:\.0)?) 201(?: [^\r\n]*)?\r?\n/u.test(response) || separator < 0) {
@@ -408,7 +408,7 @@ async function publish(directory: string): Promise<void> {
 async function download(directory: string, version: string): Promise<void> {
   const tag = `v${stableVersion(version)}`;
   await mkdir(directory, { recursive: false });
-  const expected = [`hraness-kb-${version}.tgz`, ...metadataNames, "provenance.jsonl"];
+  const expected = [`hraness-wordcell-${version}.tgz`, ...metadataNames, "provenance.jsonl"];
   for (const name of expected) command("gh", ["release", "download", tag, "--repo", repository, "--dir", directory, "--pattern", name]);
   const manifest = await verifyReleaseFiles(directory);
   if (manifest.version !== version || manifest.sourceSha !== process.env.VERIFIED_SOURCE_SHA) throw new Error("Canonical GitHub source differs from the reviewed mirror source");
