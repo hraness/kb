@@ -5,9 +5,9 @@ import { parseArguments } from "../src/cli.js";
 
 const manifestUrl = new URL("../package.json", import.meta.url);
 const readmeUrl = new URL("../README.md", import.meta.url);
-const skillUrl = new URL("../skills/kb/SKILL.md", import.meta.url);
+const skillUrl = new URL("../skills/wordcell/SKILL.md", import.meta.url);
 const queryReferenceUrl = new URL(
-  "../skills/kb/references/query.md",
+  "../skills/wordcell/references/query.md",
   import.meta.url,
 );
 
@@ -56,30 +56,30 @@ describe("durable-session documentation", () => {
     expect(offsets.every((offset) => offset >= 0)).toBe(true);
     expect(offsets).toEqual([...offsets].sort((left, right) => left - right));
 
-    const landingStart = readme.indexOf("<!-- hraness:kb-landing:start -->");
-    const landingEnd = readme.indexOf("<!-- hraness:kb-landing:end -->");
+    const landingStart = readme.indexOf("<!-- hraness:wordcell-landing:start -->");
+    const landingEnd = readme.indexOf("<!-- hraness:wordcell-landing:end -->");
     expect(landingStart).toBeGreaterThanOrEqual(0);
     expect(landingEnd).toBeGreaterThan(landingStart);
     const landing = compact(readme.slice(landingStart, landingEnd));
     for (const evidence of [
       "kb/notes/parser-contract.md",
-      "kb backlinks notes/parser-contract --root kb",
-      "kb search \"why parser retries stop\" --root kb --mode exact",
-      "kb context packages/parser/src/index.ts --root kb --repo .",
-      "kb history notes/parser-contract --root kb --repo .",
+      "wordcell backlinks notes/parser-contract --root kb",
+      "wordcell search \"why parser retries stop\" --root kb --mode exact",
+      "wordcell context packages/parser/src/index.ts --root kb --repo .",
+      "wordcell history notes/parser-contract --root kb --repo .",
       "They do not reconstruct private chat or prove that the note is still correct.",
     ] as const) expect(landing).toContain(evidence);
   });
 
   test("keeps the package, README, and public skill on one immutable release", async () => {
     const { manifest, readme, skill } = await publicSurface();
-    const packagePin = `https://github.com/hraness/kb/releases/download/v${manifest.version}/hraness-kb-${manifest.version}.tgz`;
-    const skillPin = `hraness/kb#v${manifest.version}`;
+    const packagePin = `https://github.com/hraness/wordcell/releases/download/v${manifest.version}/hraness-wordcell-${manifest.version}.tgz`;
+    const skillPin = `hraness/wordcell#v${manifest.version}`;
     expect(readme).toContain(`bun add --global --ignore-scripts ${packagePin}`);
     expect(readme).toContain(`bun add --exact --ignore-scripts ${packagePin}`);
     expect(readme).toContain(skillPin);
     expect(skill).toContain(`bun add --global --ignore-scripts ${packagePin}`);
-    expect(`${readme}\n${skill}`).not.toContain("@hraness/kb@latest");
+    expect(`${readme}\n${skill}`).not.toContain("@hraness/wordcell@latest");
   });
 
   test("keeps every opening workflow command accepted by the CLI parser", () => {
@@ -131,10 +131,10 @@ describe("durable-session documentation", () => {
     expect(skill).toContain("[Query the knowledge base](references/query.md)");
     expect(queryReference).toContain("## Recover a stopped session");
     for (const command of [
-      "kb context packages/parser/src/index.ts",
-      "kb search \"why parser retries stop\"",
-      "kb backlinks notes/parser-contract",
-      "kb history notes/parser-contract",
+      "wordcell context packages/parser/src/index.ts",
+      "wordcell search \"why parser retries stop\"",
+      "wordcell backlinks notes/parser-contract",
+      "wordcell history notes/parser-contract",
     ] as const) expect(queryReference).toContain(command);
     expect(compact(queryReference)).toContain(
       "This workflow recovers only context that was persisted in files or Git",

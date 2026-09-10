@@ -46,7 +46,7 @@ function fixture() {
       "owner:",
       "  name: Bob",
       "  teams: [Operations]",
-      "repository_scopes: [packages/KB]",
+      "repository_scopes: [packages/Wordcell]",
       "---",
       "# Beta",
       "",
@@ -170,7 +170,7 @@ describe("vault metadata queries", () => {
     const { notes, analysis } = fixture();
     expect(queryVault(notes, analysis, { repositoryScopes: ["packages/kb"] })
       .map(({ path }) => path)).toEqual(["notes/alpha.md"]);
-    expect(queryVault(notes, analysis, { repositoryScopes: ["packages/KB"] })
+    expect(queryVault(notes, analysis, { repositoryScopes: ["packages/Wordcell"] })
       .map(({ path }) => path)).toEqual(["notes/beta.md"]);
     expect(queryVault(notes, analysis, { repositoryScopes: ["packages/kb/src"] }))
       .toEqual([]);

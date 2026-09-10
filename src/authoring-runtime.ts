@@ -2,7 +2,11 @@ import { Cause, Effect, Exit, Option } from "effect";
 
 /** A raw native or policy failure, including falsey values; never mutate its object. */
 export class AuthoringFailure {
-  constructor(readonly reason: unknown) {}
+  readonly reason: unknown;
+
+  constructor(reason: unknown) {
+    this.reason = reason;
+  }
 }
 
 export function authoringNative<A>(operation: () => PromiseLike<A>): Effect.Effect<A, AuthoringFailure> {

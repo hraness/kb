@@ -387,13 +387,13 @@ export function parseArguments(
 }
 
 export const usage = `Usage:
-  kb clip <url> [slug] [options]
-  kb clip current [slug] --browser-live [options]
-  kb clip current [slug] --cdp <loopback-port> [options]
-  kb clip capture <url> [slug] [options]
-  kb clip inspect <url> [options]
-  kb doctor [--json]
-  kb adapters [--json]
+  wordcell clip <url> [slug] [options]
+  wordcell clip current [slug] --browser-live [options]
+  wordcell clip current [slug] --cdp <loopback-port> [options]
+  wordcell clip capture <url> [slug] [options]
+  wordcell clip inspect <url> [options]
+  wordcell doctor [--json]
+  wordcell adapters [--json]
 
 Capture options:
   --mode auto|http|browser|file     Acquisition strategy (default: auto)

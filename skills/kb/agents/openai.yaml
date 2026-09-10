@@ -1,4 +1,0 @@
-interface:
-  display_name: "KB"
-  short_description: "Set up, query, capture, and maintain Markdown memory"
-  default_prompt: "Use $kb to set up or work with this hraness/kb knowledge base, routing the request before any runtime preparation and loading only the references needed."

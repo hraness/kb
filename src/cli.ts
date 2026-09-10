@@ -208,46 +208,46 @@ async function loadSearchRulesFile(path: string): Promise<SearchRulesV1> {
   return parseSearchRules(input);
 }
 
-export const usage = `kb — auditable capture and derived links for Markdown vaults
+export const usage = `wordcell — auditable capture and derived links for Markdown vaults
 
 Usage:
-  kb init [directory] [--json]
-  kb clip <url|current> [capture options]
-  kb capture show <bundle> [--verify-assets] [--include-source-html] [--json]
-  kb capture verify <bundle> [--verify-assets] [--json]
-  kb capture diff <bundle> [--repo <repository>] [--ref <ref>] [--json]
-  kb url-metadata tool <build|check>
-  kb url-metadata backfill [metadata options]
-  kb inspect <url> [capture options]
-  kb pdf <file-or-url> [PDF options]
-  kb refresh [--root <directory>] [--index <path>] [--json]
-  kb check [--root <directory>] [--index <path>] [--no-catalog] [--json]
-  kb catalog [--root <directory>] [--index <path>] [--json]
-  kb graph [--root <directory>] [--index <path>] [--json]
-  kb backlinks <note> [--root <directory>] [--index <path>] [--json]
-  kb links <note> [--root <directory>] [--direction <in|out|both>] [--depth <count>] [--limit <count>] [--json]
-  kb note create <id> --title <title> [--type <type>] [--tag <tag>] [--body <markdown> | --body-file <path>] [--root <directory>] [--json]
-  kb relation add <source> <predicate> <target> [--root <directory>] [--expected-revision <sha256:...>] [--json]
-  kb relation remove <source> <predicate> <target> [--root <directory>] [--expected-revision <sha256:...>] [--json]
-  kb relation list <note> [--root <directory>] [--json]
-  kb percolate [note] [--root <directory>] [--min-support <count>] [--limit <count>] [--json]
-  kb list [--root <directory>] [--where <path=value>] [--has <path>] [--tag <tag>] [--scope <repository-path>] [--sort <field>] [--order <asc|desc>] [--limit <count>] [--json]
-  kb index [--root <directory>] [--database <path>] [--force] [--json]
-  kb search <query> [--root <directory>] [--repo <repository>] [--database <path>] [--mode <hybrid|exact|keyword|semantic>] [--rules <file>] [--priority] [--where <path=value>] [--has <path>] [--tag <tag>] [--scope <repository-path>] [--related <note>] [--graph-depth <1|2>] [--no-graph] [--history | --no-history | --require-history] [--limit <count>] [--candidate-limit <count>] [--min-score <score>] [--json]
-  kb history <note> [--root <directory>] [--repo <repository>] [--limit <count>] [--cochanged-limit <count>] [--json]
-  kb history search <query-or-path> [--root <directory>] [--repo <repository>] [--limit <count>] [--commit-limit <count>] [--cochanged-limit <count>] [--json]
-  kb evaluate <manifest.json> [--root <directory>] [--repo <repository>] [--database <path>] [--retriever <id>] [--split <development|test|all>] [--limit <count>] [--cutoff <count>] [--timeout <milliseconds>] [--baseline <id>] [--model-file <path>] [--cache-state <cold|mixed|warm>] [--json]
-  kb portfolio search <query> --registry <file> --workspace <directory> (--shared | --vault <owner/id>...) [--mode <hybrid|exact|keyword|semantic>] [--rules <file>] [--priority] [--limit <count>] [--require-all] [--json]
-  kb portfolio audit --registry <file> --workspace <directory> (--all | --shared | --vault <owner/id>...) [--strict] [--json]
-  kb inbox [--root <directory>] [--source-prefix <directory>] [--limit <count>] [--json]
-  kb context <repository-path> [--root <vault>] [--repo <repository>] [--kind <auto|file|directory>] [--json]
-  kb agents identity <repository-scope> [--json]
-  kb agents check [--root <vault>] [--repo <repository>] [--json]
-  kb agents audit [--root <vault>] [--repo <repository>] [--json]
-  kb doctor [--json]
-  kb adapters [--json]
+  wordcell init [directory] [--json]
+  wordcell clip <url|current> [capture options]
+  wordcell capture show <bundle> [--verify-assets] [--include-source-html] [--json]
+  wordcell capture verify <bundle> [--verify-assets] [--json]
+  wordcell capture diff <bundle> [--repo <repository>] [--ref <ref>] [--json]
+  wordcell url-metadata tool <build|check>
+  wordcell url-metadata backfill [metadata options]
+  wordcell inspect <url> [capture options]
+  wordcell pdf <file-or-url> [PDF options]
+  wordcell refresh [--root <directory>] [--index <path>] [--json]
+  wordcell check [--root <directory>] [--index <path>] [--no-catalog] [--json]
+  wordcell catalog [--root <directory>] [--index <path>] [--json]
+  wordcell graph [--root <directory>] [--index <path>] [--json]
+  wordcell backlinks <note> [--root <directory>] [--index <path>] [--json]
+  wordcell links <note> [--root <directory>] [--direction <in|out|both>] [--depth <count>] [--limit <count>] [--json]
+  wordcell note create <id> --title <title> [--type <type>] [--tag <tag>] [--body <markdown> | --body-file <path>] [--root <directory>] [--json]
+  wordcell relation add <source> <predicate> <target> [--root <directory>] [--expected-revision <sha256:...>] [--json]
+  wordcell relation remove <source> <predicate> <target> [--root <directory>] [--expected-revision <sha256:...>] [--json]
+  wordcell relation list <note> [--root <directory>] [--json]
+  wordcell percolate [note] [--root <directory>] [--min-support <count>] [--limit <count>] [--json]
+  wordcell list [--root <directory>] [--where <path=value>] [--has <path>] [--tag <tag>] [--scope <repository-path>] [--sort <field>] [--order <asc|desc>] [--limit <count>] [--json]
+  wordcell index [--root <directory>] [--database <path>] [--force] [--json]
+  wordcell search <query> [--root <directory>] [--repo <repository>] [--database <path>] [--mode <hybrid|exact|keyword|semantic>] [--rules <file>] [--priority] [--where <path=value>] [--has <path>] [--tag <tag>] [--scope <repository-path>] [--related <note>] [--graph-depth <1|2>] [--no-graph] [--history | --no-history | --require-history] [--limit <count>] [--candidate-limit <count>] [--min-score <score>] [--json]
+  wordcell history <note> [--root <directory>] [--repo <repository>] [--limit <count>] [--cochanged-limit <count>] [--json]
+  wordcell history search <query-or-path> [--root <directory>] [--repo <repository>] [--limit <count>] [--commit-limit <count>] [--cochanged-limit <count>] [--json]
+  wordcell evaluate <manifest.json> [--root <directory>] [--repo <repository>] [--database <path>] [--retriever <id>] [--split <development|test|all>] [--limit <count>] [--cutoff <count>] [--timeout <milliseconds>] [--baseline <id>] [--model-file <path>] [--cache-state <cold|mixed|warm>] [--json]
+  wordcell portfolio search <query> --registry <file> --workspace <directory> (--shared | --vault <owner/id>...) [--mode <hybrid|exact|keyword|semantic>] [--rules <file>] [--priority] [--limit <count>] [--require-all] [--json]
+  wordcell portfolio audit --registry <file> --workspace <directory> (--all | --shared | --vault <owner/id>...) [--strict] [--json]
+  wordcell inbox [--root <directory>] [--source-prefix <directory>] [--limit <count>] [--json]
+  wordcell context <repository-path> [--root <vault>] [--repo <repository>] [--kind <auto|file|directory>] [--json]
+  wordcell agents identity <repository-scope> [--json]
+  wordcell agents check [--root <vault>] [--repo <repository>] [--json]
+  wordcell agents audit [--root <vault>] [--repo <repository>] [--json]
+  wordcell doctor [--json]
+  wordcell adapters [--json]
 
-Run \`kb clip --help\` for web capture options or \`kb pdf --help\` for PDF conversion options.
+Run \`wordcell clip --help\` for web capture options or \`wordcell pdf --help\` for PDF conversion options.
 `;
 
 type VaultCommand = "refresh" | "check" | "graph" | "backlinks" | "links";
@@ -3116,7 +3116,7 @@ function renderContext(
     const context = guide.marker.markers[0]?.noteId;
     lines.push(`  ${safe(guide.path)}${context === undefined ? "" : `  →  ${safe(context)}`}`);
   }
-  lines.push("KB hubs (nearest → root):");
+  lines.push("Wordcell hubs (nearest → root):");
   if (inspection.matchingContexts.length === 0) lines.push("  None.");
   for (const context of inspection.matchingContexts) {
     const connection = snapshot.analysis.noteConnections.find(({ id }) => id === context.note.id);
@@ -3163,7 +3163,7 @@ function renderContext(
   }
   for (const issue of inspection.issues) lines.push(`error: ${safe(issue.message)}`);
   if (inspection.matchingContexts.length > 0) {
-    lines.push("Open a hub, then use `kb links <hub> --root <vault> --depth 1` for bounded neighboring context.");
+    lines.push("Open a hub, then use `wordcell links <hub> --root <vault> --depth 1` for bounded neighboring context.");
   }
   return `${lines.join("\n")}\n`;
 }
@@ -3331,7 +3331,7 @@ function renderAgentReport(
   discoveryIssues: readonly AgentGuideDiscoveryIssue[],
 ): string {
   const lines = [
-    `${action === "check" ? "Checked" : "Audited"} ${audit.guideCount} agent guides; ${audit.mappedGuideCount} markers, ${validContexts} valid KB hubs.`,
+    `${action === "check" ? "Checked" : "Audited"} ${audit.guideCount} agent guides; ${audit.mappedGuideCount} markers, ${validContexts} valid Wordcell hubs.`,
     `Context: ${audit.words} words (${audit.contentsWords} Contents, ${audit.guidelineWords} Guidelines), ${audit.nonblankLines} nonblank lines.`,
   ];
   if (errors.length === 0) lines.push("Mappings and guide shape: clean.");

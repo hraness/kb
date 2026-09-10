@@ -1,0 +1,40 @@
+{
+  "name": "wordcell-site",
+  "version": "0.20.0",
+  "private": true,
+  "packageManager": "bun@1.3.14",
+  "engines": {
+    "node": "24.x"
+  },
+  "scripts": {
+    "sync:readme": "bun scripts/sync-readme.ts",
+    "dev": "bun run sync:readme && next dev --webpack",
+    "prebuild": "bun run sync:readme",
+    "build": "next build --webpack",
+    "postbuild": "bun test ./tests/runtime.test.ts",
+    "start": "next start",
+    "lint": "eslint . --ignore-pattern .next",
+    "test": "bun test ./tests/source.test.ts ./tests/home.test.tsx ./scripts/readme-html.test.ts",
+    "typecheck": "tsc --noEmit",
+    "check": "bun run sync:readme && bun run test && bun run lint && bun run typecheck && bun run build"
+  },
+  "dependencies": {
+    "@hraness/design-kit": "github:hraness/design-kit#v0.4.0",
+    "@hraness/ui": "github:hraness/ui#v0.4.10",
+    "next": "16.3.3",
+    "react": "19.2.6",
+    "react-dom": "19.2.6"
+  },
+  "devDependencies": {
+    "@tailwindcss/postcss": "4.2.1",
+    "@types/bun": "1.3.14",
+    "@types/node": "22.19.19",
+    "@types/react": "19.2.14",
+    "@types/react-dom": "19.2.3",
+    "eslint": "9.39.4",
+    "eslint-config-next": "16.3.3",
+    "tailwindcss": "4.2.1",
+    "typescript": "5.9.3"
+  },
+  "type": "module"
+}

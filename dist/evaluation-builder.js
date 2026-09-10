@@ -4,15 +4,15 @@ import {
   knowledgeBaseEvaluationRetrieverIds,
   openKnowledgeBaseEvaluation,
   verifyFrozenEvaluationSnapshot
-} from "./index-xw9ac71d.js";
-import"./index-vxmf14m1.js";
+} from "./index-bs0yf4pp.js";
+import"./index-m7et4rz4.js";
 import"./index-adx6khj5.js";
 import {
   indexSemanticVault,
   recommendedEmbeddingModel,
   recommendedEmbeddingModelSha256,
   scanVault
-} from "./index-5m2ydj5q.js";
+} from "./index-n05s3wsb.js";
 import"./index-4j3tt0c3.js";
 import {
   runGitCommand
@@ -22,10 +22,10 @@ import {
   MAX_EVALUATION_EVIDENCE_BYTES,
   MAX_EVALUATION_RESULTS_PER_QUERY
 } from "./index-b88v3vtm.js";
-import"./index-gm9t95d9.js";
-import"./index-d13v9ckt.js";
+import"./index-why54q5p.js";
 import"./index-48pz4jpc.js";
 import"./index-06c9ctr6.js";
+import"./index-d13v9ckt.js";
 import"./index-5vwpzb5a.js";
 import"./index-ekpwvbra.js";
 import"./index-1xxnjn0d.js";
@@ -9369,7 +9369,7 @@ import { fileURLToPath } from "url";
 var CHILD_ARGUMENT = "--kb-evaluation-measurement-child-v2";
 var PROTOCOL = "kb-evaluation-measurement-child-v2";
 var PROTOCOL_VERSION = 1;
-var WORK_DIRECTORY_PREFIX = "hraness-kb-evaluation-measurement-";
+var WORK_DIRECTORY_PREFIX = "hraness-wordcell-evaluation-measurement-";
 var PREPARATION_MARKER = ".incremental-prepared-v2.json";
 var DEFAULT_TIMEOUT_MS = 10 * 60000;
 var MAX_TIMEOUT_MS = 30 * 60000;
@@ -12045,7 +12045,7 @@ async function buildKbEvidenceRoutingEvaluation(configPath, dependencies = {}) {
     }
   };
 }
-var kbEvidenceRoutingBuildUsage = "Usage: kb-evaluation-builder <--anchor-seal|--build> --config <checked-config.json> --artifact-root <artifact-B>";
+var kbEvidenceRoutingBuildUsage = "Usage: wordcell-evaluation-builder <--anchor-seal|--build> --config <checked-config.json> --artifact-root <artifact-B>";
 function parseKbEvidenceRoutingBuildCliArguments(arguments_) {
   const mode = arguments_[0];
   const configPath = arguments_[2];

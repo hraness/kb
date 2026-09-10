@@ -348,7 +348,7 @@ function materializePinnedBinary(expected: BinaryIdentity, runDirectory: string)
 }
 
 function createPrivateRunDirectory(): string {
-  const directory = mkdtempSync(join(tmpdir(), "hraness-kb-metadata-search-"));
+  const directory = mkdtempSync(join(tmpdir(), "hraness-wordcell-metadata-search-"));
   chmodSync(directory, 0o700);
   for (const name of ["home", "config", "cache", "data", "tmp"]) {
     mkdirSync(join(directory, name), { mode: 0o700 });

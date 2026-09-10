@@ -247,7 +247,7 @@ describe("QMD indexing", () => {
   });
 
   test("pins QMD's recommended embedding model, incrementally updates, embeds, and closes", async () => {
-    const temporary = await mkdtemp(join(tmpdir(), "hraness-kb-semantic-"));
+    const temporary = await mkdtemp(join(tmpdir(), "hraness-wordcell-semantic-"));
     const root = join(temporary, "vault");
     const optionsSeen: SemanticStoreOptions[] = [];
     const calls: string[] = [];
@@ -298,7 +298,7 @@ describe("QMD indexing", () => {
   });
 
   test("indexes from a private verified model snapshot while retaining the stable public identity", async () => {
-    const temporary = await mkdtemp(join(tmpdir(), "hraness-kb-semantic-local-index-"));
+    const temporary = await mkdtemp(join(tmpdir(), "hraness-wordcell-semantic-local-index-"));
     const root = join(temporary, "vault");
     const modelFile = join(temporary, "pinned-model.gguf");
     const optionsSeen: SemanticStoreOptions[] = [];
@@ -351,7 +351,7 @@ describe("QMD indexing", () => {
   });
 
   test("rejects unpinned local index model bytes before opening QMD", async () => {
-    const temporary = await mkdtemp(join(tmpdir(), "hraness-kb-semantic-local-index-"));
+    const temporary = await mkdtemp(join(tmpdir(), "hraness-wordcell-semantic-local-index-"));
     const root = join(temporary, "vault");
     const modelFile = join(temporary, "wrong-model.gguf");
     let creates = 0;
@@ -379,7 +379,7 @@ describe("QMD indexing", () => {
   });
 
   test("indexes an immutable validated projection with an auditable path manifest", async () => {
-    const temporary = await mkdtemp(join(tmpdir(), "hraness-kb-semantic-"));
+    const temporary = await mkdtemp(join(tmpdir(), "hraness-wordcell-semantic-"));
     const root = join(temporary, "vault");
     const cache = join(temporary, "cache");
     const database = join(cache, "projection.sqlite");
@@ -450,7 +450,7 @@ describe("QMD indexing", () => {
   });
 
   test("rejects an oversized live note before creating QMD database content", async () => {
-    const temporary = await mkdtemp(join(tmpdir(), "hraness-kb-semantic-"));
+    const temporary = await mkdtemp(join(tmpdir(), "hraness-wordcell-semantic-"));
     const root = join(temporary, "vault");
     const database = join(temporary, "cache", "oversized.sqlite");
     let creates = 0;
@@ -480,7 +480,7 @@ describe("QMD indexing", () => {
   });
 
   test("rejects an in-vault database before scanning or writing cache state", async () => {
-    const temporary = await mkdtemp(join(tmpdir(), "hraness-kb-semantic-overlap-"));
+    const temporary = await mkdtemp(join(tmpdir(), "hraness-wordcell-semantic-overlap-"));
     const root = join(temporary, "vault");
     const database = join(root, "cache", "index.sqlite");
     let scans = 0;
@@ -510,7 +510,7 @@ describe("QMD indexing", () => {
   });
 
   test("closes the store when indexing fails", async () => {
-    const temporary = await mkdtemp(join(tmpdir(), "hraness-kb-semantic-"));
+    const temporary = await mkdtemp(join(tmpdir(), "hraness-wordcell-semantic-"));
     const cache = `${temporary}-cache`;
     let closed = false;
     const store = {
@@ -538,7 +538,7 @@ describe("QMD indexing", () => {
   });
 
   test("rejects malformed stores and closes the foreign resource when possible", async () => {
-    const temporary = await mkdtemp(join(tmpdir(), "hraness-kb-semantic-"));
+    const temporary = await mkdtemp(join(tmpdir(), "hraness-wordcell-semantic-"));
     const cache = `${temporary}-cache`;
     let closed = false;
     const dependencies: SemanticDependencies = {
@@ -563,7 +563,7 @@ describe("QMD indexing", () => {
   });
 
   test("rejects malformed QMD results before they enter the owned API", async () => {
-    const temporary = await mkdtemp(join(tmpdir(), "hraness-kb-semantic-"));
+    const temporary = await mkdtemp(join(tmpdir(), "hraness-wordcell-semantic-"));
     const cache = `${temporary}-cache`;
     let closed = false;
     const store = {
@@ -593,7 +593,7 @@ describe("QMD indexing", () => {
 
 describe("QMD warm-cache checkpoint", () => {
   test("closes exactly once when checkpointing fails", async () => {
-    const temporary = await mkdtemp(join(tmpdir(), "hraness-kb-semantic-checkpoint-failure-"));
+    const temporary = await mkdtemp(join(tmpdir(), "hraness-wordcell-semantic-checkpoint-failure-"));
     const root = join(temporary, "vault");
     const database = join(temporary, "warm.sqlite");
     let closes = 0;
@@ -616,7 +616,7 @@ describe("QMD warm-cache checkpoint", () => {
   });
 
   test("rejects a rollback journal left beside the checkpointed database", async () => {
-    const temporary = await mkdtemp(join(tmpdir(), "hraness-kb-semantic-checkpoint-journal-"));
+    const temporary = await mkdtemp(join(tmpdir(), "hraness-wordcell-semantic-checkpoint-journal-"));
     const root = join(temporary, "vault");
     const database = join(temporary, "warm.sqlite");
     await mkdir(root);
@@ -643,7 +643,7 @@ describe("QMD warm-cache checkpoint", () => {
 
 describe("QMD warm-cache attestation", () => {
   test("proves readiness without invoking any repairing or retrieval operation", async () => {
-    const temporary = await mkdtemp(join(tmpdir(), "hraness-kb-semantic-attest-"));
+    const temporary = await mkdtemp(join(tmpdir(), "hraness-wordcell-semantic-attest-"));
     const root = join(temporary, "vault");
     const database = join(temporary, "warm.sqlite");
     const modelFile = join(temporary, "model.gguf");
@@ -761,7 +761,7 @@ describe("QMD warm-cache attestation", () => {
   });
 
   test("fails closed on pending embeddings and releases both store and model references", async () => {
-    const temporary = await mkdtemp(join(tmpdir(), "hraness-kb-semantic-attest-pending-"));
+    const temporary = await mkdtemp(join(tmpdir(), "hraness-wordcell-semantic-attest-pending-"));
     const root = join(temporary, "vault");
     const database = join(temporary, "warm.sqlite");
     const modelFile = join(temporary, "model.gguf");
@@ -816,7 +816,7 @@ describe("QMD warm-cache attestation", () => {
   });
 
   test("keeps the isolated database until QMD close settles", async () => {
-    const temporary = await mkdtemp(join(tmpdir(), "hraness-kb-semantic-attest-close-"));
+    const temporary = await mkdtemp(join(tmpdir(), "hraness-wordcell-semantic-attest-close-"));
     const root = join(temporary, "vault");
     const database = join(temporary, "warm.sqlite");
     const modelFile = join(temporary, "model.gguf");
@@ -877,7 +877,7 @@ describe("QMD warm-cache attestation", () => {
   });
 
   test("rejects missing and malformed strict boundaries while closing foreign stores", async () => {
-    const temporary = await mkdtemp(join(tmpdir(), "hraness-kb-semantic-attest-boundary-"));
+    const temporary = await mkdtemp(join(tmpdir(), "hraness-wordcell-semantic-attest-boundary-"));
     const root = join(temporary, "vault");
     const database = join(temporary, "warm.sqlite");
     const modelFile = join(temporary, "model.gguf");
@@ -941,7 +941,7 @@ describe("QMD warm-cache attestation", () => {
   });
 
   test("rejects forged and closed model leases before opening a store", async () => {
-    const temporary = await mkdtemp(join(tmpdir(), "hraness-kb-semantic-attest-brand-"));
+    const temporary = await mkdtemp(join(tmpdir(), "hraness-wordcell-semantic-attest-brand-"));
     const root = join(temporary, "vault");
     const modelFile = join(temporary, "model.gguf");
     let creates = 0;
@@ -982,7 +982,7 @@ describe("QMD warm-cache attestation", () => {
 
 describe("QMD warm query-only sessions", () => {
   test("isolates pinned QMD initialization from attestation and warm query cache state", async () => {
-    const temporary = await mkdtemp(join(tmpdir(), "hraness-kb-semantic-real-warm-reader-"));
+    const temporary = await mkdtemp(join(tmpdir(), "hraness-wordcell-semantic-real-warm-reader-"));
     const root = join(temporary, "vault");
     const database = join(temporary, "cache", "warm.sqlite");
     const modelFile = join(temporary, "model.gguf");
@@ -1034,7 +1034,7 @@ describe("QMD warm query-only sessions", () => {
   });
 
   test("eagerly opens one existing projection without writer, update, or cache mutation", async () => {
-    const temporary = await mkdtemp(join(tmpdir(), "hraness-kb-semantic-warm-reader-"));
+    const temporary = await mkdtemp(join(tmpdir(), "hraness-wordcell-semantic-warm-reader-"));
     const root = join(temporary, "vault");
     const database = join(temporary, "cache", "warm.sqlite");
     const modelFile = join(temporary, "model.gguf");
@@ -1222,7 +1222,7 @@ describe("QMD warm query-only sessions", () => {
   });
 
   test("fails closed before QMD when the immutable projection is absent", async () => {
-    const temporary = await mkdtemp(join(tmpdir(), "hraness-kb-semantic-warm-missing-"));
+    const temporary = await mkdtemp(join(tmpdir(), "hraness-wordcell-semantic-warm-missing-"));
     const root = join(temporary, "vault");
     const database = join(temporary, "warm.sqlite");
     const modelFile = join(temporary, "model.gguf");
@@ -1256,7 +1256,7 @@ describe("QMD warm query-only sessions", () => {
 
 describe("QMD search", () => {
   test("uses one measured store-local query embedding over a private immutable model copy", async () => {
-    const temporary = await mkdtemp(join(tmpdir(), "hraness-kb-semantic-model-"));
+    const temporary = await mkdtemp(join(tmpdir(), "hraness-wordcell-semantic-model-"));
     const root = join(temporary, "vault");
     const modelFile = join(temporary, "private-model.gguf");
     const optionsSeen: SemanticStoreOptions[] = [];
@@ -1380,7 +1380,7 @@ describe("QMD search", () => {
   });
 
   test("rejects unpinned local model bytes before opening QMD", async () => {
-    const temporary = await mkdtemp(join(tmpdir(), "hraness-kb-semantic-model-"));
+    const temporary = await mkdtemp(join(tmpdir(), "hraness-wordcell-semantic-model-"));
     const root = join(temporary, "vault");
     const modelFile = join(temporary, "wrong-model.gguf");
     let creates = 0;
@@ -1405,7 +1405,7 @@ describe("QMD search", () => {
   });
 
   test("shares one branded model copy until every retained session closes", async () => {
-    const temporary = await mkdtemp(join(tmpdir(), "hraness-kb-semantic-lease-"));
+    const temporary = await mkdtemp(join(tmpdir(), "hraness-wordcell-semantic-lease-"));
     const root = join(temporary, "vault");
     const modelFile = join(temporary, "model.gguf");
     const configuredModels: string[] = [];
@@ -1468,7 +1468,7 @@ describe("QMD search", () => {
   });
 
   test("strict vector mode rejects and closes a store without the internal LLM boundary", async () => {
-    const temporary = await mkdtemp(join(tmpdir(), "hraness-kb-semantic-strict-"));
+    const temporary = await mkdtemp(join(tmpdir(), "hraness-wordcell-semantic-strict-"));
     const root = join(temporary, "vault");
     let closed = false;
     await mkdir(root);
@@ -1501,7 +1501,7 @@ describe("QMD search", () => {
   });
 
   test("rejects structurally forged model leases before opening QMD", async () => {
-    const temporary = await mkdtemp(join(tmpdir(), "hraness-kb-semantic-brand-"));
+    const temporary = await mkdtemp(join(tmpdir(), "hraness-wordcell-semantic-brand-"));
     const root = join(temporary, "vault");
     let creates = 0;
     await mkdir(root);
@@ -1530,7 +1530,7 @@ describe("QMD search", () => {
   });
 
   test("rejects a vector backend that performs more than one query embedding", async () => {
-    const temporary = await mkdtemp(join(tmpdir(), "hraness-kb-semantic-vector-count-"));
+    const temporary = await mkdtemp(join(tmpdir(), "hraness-wordcell-semantic-vector-count-"));
     const root = join(temporary, "vault");
     await mkdir(root);
     await writeFile(join(root, "index.md"), "# Knowledge base\n", "utf8");
@@ -1581,7 +1581,7 @@ describe("QMD search", () => {
   });
 
   test("shares one scan, update, embedding, and serialized store across a session", async () => {
-    const temporary = await mkdtemp(join(tmpdir(), "hraness-kb-semantic-"));
+    const temporary = await mkdtemp(join(tmpdir(), "hraness-wordcell-semantic-"));
     const root = join(temporary, "vault");
     await mkdir(root);
     await writeFile(join(root, "index.md"), "# Knowledge base\n", "utf8");
@@ -1653,7 +1653,7 @@ describe("QMD search", () => {
   });
 
   test("allows same-generation sessions and their keyword reads to overlap", async () => {
-    const temporary = await mkdtemp(join(tmpdir(), "hraness-kb-semantic-"));
+    const temporary = await mkdtemp(join(tmpdir(), "hraness-wordcell-semantic-"));
     const root = join(temporary, "vault");
     const database = join(temporary, "cache", "shared.sqlite");
     const body = "# Shared generation\n\nParallel readers stay coherent.\n";
@@ -1706,7 +1706,7 @@ describe("QMD search", () => {
   });
 
   test("serializes semantic sessions that name one database through directory aliases", async () => {
-    const temporary = await mkdtemp(join(tmpdir(), "hraness-kb-semantic-alias-"));
+    const temporary = await mkdtemp(join(tmpdir(), "hraness-wordcell-semantic-alias-"));
     const root = join(temporary, "vault");
     const realCache = join(temporary, "cache-real");
     const aliasCache = join(temporary, "cache-alias");
@@ -1754,7 +1754,7 @@ describe("QMD search", () => {
   });
 
   test("waits for same-generation readers before a forced re-embed", async () => {
-    const temporary = await mkdtemp(join(tmpdir(), "hraness-kb-semantic-force-"));
+    const temporary = await mkdtemp(join(tmpdir(), "hraness-wordcell-semantic-force-"));
     const root = join(temporary, "vault");
     const database = join(temporary, "cache", "shared.sqlite");
     let creates = 0;
@@ -1796,7 +1796,7 @@ describe("QMD search", () => {
   });
 
   test("keeps different-generation sessions coherent by leasing through close", async () => {
-    const temporary = await mkdtemp(join(tmpdir(), "hraness-kb-semantic-"));
+    const temporary = await mkdtemp(join(tmpdir(), "hraness-wordcell-semantic-"));
     const firstRoot = join(temporary, "first");
     const secondRoot = join(temporary, "second");
     const database = join(temporary, "cache", "shared.sqlite");
@@ -1861,7 +1861,7 @@ describe("QMD search", () => {
   });
 
   test("runs concurrent fresh and warm real QMD keyword sessions without lock errors", async () => {
-    const temporary = await mkdtemp(join(tmpdir(), "hraness-kb-semantic-real-"));
+    const temporary = await mkdtemp(join(tmpdir(), "hraness-wordcell-semantic-real-"));
     const root = join(temporary, "vault");
     const database = join(temporary, "cache", "real.sqlite");
     await mkdir(root);
@@ -1902,7 +1902,7 @@ describe("QMD search", () => {
   }, 15_000);
 
   test("runs typed lexical and vector queries through QMD hybrid fusion", async () => {
-    const temporary = await mkdtemp(join(tmpdir(), "hraness-kb-semantic-"));
+    const temporary = await mkdtemp(join(tmpdir(), "hraness-wordcell-semantic-"));
     const root = join(temporary, "vault");
     const note = join(root, "notes", "hybrid.md");
     const virtualPath = "qmd://kb/notes/hybrid.md";
@@ -1994,7 +1994,7 @@ describe("QMD search", () => {
   });
 
   test("retrieves hybrid candidates below QMD's former twenty-row structured cap", async () => {
-    const temporary = await mkdtemp(join(tmpdir(), "hraness-kb-semantic-window-"));
+    const temporary = await mkdtemp(join(tmpdir(), "hraness-wordcell-semantic-window-"));
     const root = join(temporary, "vault");
     const bodies = new Map<string, string>();
     const limits: number[] = [];
@@ -2051,7 +2051,7 @@ describe("QMD search", () => {
   });
 
   test("incrementally embeds and returns bounded vault-relative semantic evidence", async () => {
-    const temporary = await mkdtemp(join(tmpdir(), "hraness-kb-semantic-"));
+    const temporary = await mkdtemp(join(tmpdir(), "hraness-wordcell-semantic-"));
     const root = join(temporary, "vault");
     const note = join(root, "plans", "mine-auth-context-v0.5.md");
     const virtualPath = "qmd://kb/plans/mine-auth-context-v0-5.md";
@@ -2117,7 +2117,7 @@ describe("QMD search", () => {
   });
 
   test("disambiguates handelized collisions by live content and rejects stale virtual hits", async () => {
-    const temporary = await mkdtemp(join(tmpdir(), "hraness-kb-semantic-"));
+    const temporary = await mkdtemp(join(tmpdir(), "hraness-wordcell-semantic-"));
     const cache = `${temporary}-cache`;
     const plans = join(temporary, "plans");
     const dottedBody = "# Dotted plan\n\nCurrent collision evidence.\n";
@@ -2161,7 +2161,7 @@ describe("QMD search", () => {
   });
 
   test("keyword mode stays model-free and validates bounds", async () => {
-    const temporary = await mkdtemp(join(tmpdir(), "hraness-kb-semantic-"));
+    const temporary = await mkdtemp(join(tmpdir(), "hraness-wordcell-semantic-"));
     const cache = `${temporary}-cache`;
     const note = join(temporary, "note.md");
     let embeds = 0;
@@ -2246,7 +2246,7 @@ describe("QMD search", () => {
   });
 
   test("rejects an oversized shared query before opening QMD", async () => {
-    const temporary = await mkdtemp(join(tmpdir(), "hraness-kb-semantic-"));
+    const temporary = await mkdtemp(join(tmpdir(), "hraness-wordcell-semantic-"));
     const database = join(temporary, "cache", "query.sqlite");
     let creates = 0;
     try {

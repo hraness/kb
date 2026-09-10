@@ -79,7 +79,7 @@ function issueKinds(issues: readonly AgentContextIssue[]): string[] {
 }
 
 function temporaryRepository(): string {
-  const root = mkdtempSync(join(tmpdir(), "hraness-kb-agent-context-"));
+  const root = mkdtempSync(join(tmpdir(), "hraness-wordcell-agent-context-"));
   temporaryRoots.push(root);
   return root;
 }

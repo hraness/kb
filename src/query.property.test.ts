@@ -80,7 +80,7 @@ describe("vault query properties", () => {
           "---",
           `status: ${statuses[index % statuses.length]}`,
           "repository_scopes:",
-          `  - packages/${index % 2 === 0 ? "kb" : "KB"}`,
+          `  - packages/${index % 2 === 0 ? "kb" : "Wordcell"}`,
           "---",
           `# ${name}`,
         ].join("\n")));

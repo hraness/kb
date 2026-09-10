@@ -30,7 +30,7 @@ export function findKbPackageRoot(
         if (
           isPackageManifest(parsed)
           && typeof parsed.name === "string"
-          && parsed.name.endsWith("/kb")
+          && parsed.name === "@hraness/wordcell"
           && typeof parsed.version === "string"
         ) return directory;
       } catch {
@@ -41,7 +41,7 @@ export function findKbPackageRoot(
     if (parent === directory) break;
     directory = parent;
   }
-  throw new Error("Could not locate the kb package root.");
+  throw new Error("Could not locate the wordcell package root.");
 }
 
 /** Resolve a declared runtime dependency without assuming node_modules layout. */

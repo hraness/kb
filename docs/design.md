@@ -1,6 +1,6 @@
 # Design
 
-hraness/kb treats a knowledge base as durable Markdown plus replaceable views.
+hraness/wordcell treats a knowledge base as durable Markdown plus replaceable views.
 A vault must remain useful when the CLI is absent, and a capture must remain
 inspectable when the original page changes or disappears. Exact graph and
 metadata views are deterministic; semantic search is optional derived state
@@ -10,7 +10,7 @@ that can be deleted and rebuilt.
 
 The vault is an ordinary directory of Obsidian-compatible Markdown, suitable for a text editor, Git, and standard filesystem tools. Frontmatter, headings, prose, and wikilinks are owned content. Refresh, check, graph navigation, metadata queries, and capture require no hosted account or model. A local QMD index is an optional cache for semantic recall, never the authoritative copy of a note.
 
-`kb init` creates a small set of authority boundaries:
+`wordcell init` creates a small set of authority boundaries:
 
 - `articles/` contains captured sources and their local artifacts.
 - `notes/` contains maintained concepts, entities, comparisons, and syntheses.
@@ -25,7 +25,7 @@ The boundaries separate what a source said from what the vault currently conclud
 
 The packaged Agent Skill routes setup and evolution requests before it prepares
 a runtime. It can inspect an explicitly proposed location, interview the user,
-and present exact read and write surfaces without installing KB, creating a
+and present exact read and write surfaces without installing Wordcell, creating a
 vault, building a QMD index, or accessing an ambient account. Only the approved
 proposal may scaffold files. A changed path, skill, repository, account, or
 integration requires renewed approval.
@@ -49,7 +49,7 @@ public notes about [designing a personal knowledge base with an
 agent](https://gist.github.com/fxchen/773397095d7a6bffda621e4237da0da9)
 and [extending it with skills](https://gist.github.com/fxchen/09cb410b22c9c5256d80243ee925b57e).
 
-KB ships no `kb_role` field, lifecycle resolver or API, lifecycle CLI,
+Wordcell ships no `kb_role` field, lifecycle resolver or API, lifecycle CLI,
 compatibility diagnostic, or metadata migration. A frozen value gate must show
 that those surfaces improve deterministic agent decisions before they are
 introduced. Current and historical plan routing remains derived from existing
@@ -92,7 +92,7 @@ directory changes its scope and therefore its hub identity.
 Derive the exact tuple without writing files:
 
 ```sh
-kb agents identity src --json
+wordcell agents identity src --json
 ```
 
 The command returns the normalized scope, extensionless note ID, Markdown path,
@@ -117,14 +117,14 @@ Mappings are reciprocal: a hub requires the marker in the `AGENTS.md` at its
 exact scope, and a marker requires that canonical hub. A guide without a marker
 is valid and remains fully normative.
 
-`kb context <repository-path> --root <vault> --repo <repository>` returns the
+`wordcell context <repository-path> --root <vault> --repo <repository>` returns the
 applicable guides from root to nearest, verified hubs from nearest to root, and
 the authored memory records whose `repository_scopes` contain the target. The
 text view includes summaries, not bodies. It keeps maintained knowledge, active
 plans, dated research, reports, and terminal plans in separate bounded groups,
 reports the exact declaration that matched, and prefers the deepest matching
-scope. Open only the useful record, then use `kb links`, `kb backlinks`, `kb
-list`, or `kb search` for a bounded expansion. `--kind auto` uses filesystem
+scope. Open only the useful record, then use `wordcell links`, `wordcell backlinks`, `kb
+list`, or `wordcell search` for a bounded expansion. `--kind auto` uses filesystem
 state and a conservative path hint; `--kind file` or `--kind directory` makes
 the target interpretation explicit.
 
@@ -144,10 +144,10 @@ repository scope. Reports analogously declare `type: report`, a valid
 available to ordinary metadata, text, and graph queries without being labeled
 current path memory.
 
-`kb agents check` verifies canonical IDs, `type` and `scope` metadata,
+`wordcell agents check` verifies canonical IDs, `type` and `scope` metadata,
 duplicate, case-fold, and Unicode-normalization collisions, repository
 confinement, real scope directories and regular guide files, exact reciprocal
-markers, and the required guide shape. `kb agents audit` runs the same gate
+markers, and the required guide shape. `wordcell agents audit` runs the same gate
 and adds deterministic measurements for every guide and section, inherited
 chains, long guideline bullets, and exact duplicate rules. Those measurements
 identify review candidates. Length is not a correctness test, and moving a
@@ -195,7 +195,7 @@ without `.md`. The source note is the implicit subject. Different agents can
 therefore edit relationships on different notes without contending on a central
 ontology or edge file.
 
-The recommended vocabulary covers common KB claims: `synthesizes`,
+The recommended vocabulary covers common Wordcell claims: `synthesizes`,
 `evidenced-by`, `informed-by`, `supersedes`, and `contradicts`. It is advisory,
 not a closed ontology. A vault may author another canonical predicate when its
 prose and evidence define the claim. Note type, directory, chronology, shared
@@ -228,16 +228,16 @@ continue to point at the authored source.
 Every structural command scans the current notes and resolves canonical note
 identities, contextual wikilinks, and source-owned typed relationships. The
 package does not maintain a second graph database or generated fact file.
-`kb graph` returns the whole resolved graph and its diagnostics;
-`kb backlinks` and `kb relation list` answer focused inbound or typed-edge
-questions; and `kb links` performs cycle-safe traversal with explicit depth and
+`wordcell graph` returns the whole resolved graph and its diagnostics;
+`wordcell backlinks` and `wordcell relation list` answer focused inbound or typed-edge
+questions; and `wordcell links` performs cycle-safe traversal with explicit depth and
 result limits.
 
-`kb percolate` runs named, read-only analyses that surface repeated tags
+`wordcell percolate` runs named, read-only analyses that surface repeated tags
 without concept notes, unconnected shared-concept neighborhoods, exact
 unlinked mentions, and relationship-hygiene findings. The output cites the
 authored evidence that caused each candidate. A person or agent decides whether
-to run `kb note create` or `kb relation add`.
+to run `wordcell note create` or `wordcell relation add`.
 
 Percolation Result V2 emits missing relationships as unordered endpoint pairs
 with a required predicate. It does not present either endpoint as the source,
@@ -251,12 +251,12 @@ available throughout 0.19.x and is not removed before 0.20.0.
 This named-command surface is deliberate. Common graph questions receive a
 small typed contract, deterministic ordering, and an operation-specific bound
 instead of requiring every agent to construct an ad hoc query program. A
-one-off whole-vault question can inspect `kb graph --json`; a recurring question
+one-off whole-vault question can inspect `wordcell graph --json`; a recurring question
 earns a focused command and regression tests when real use demonstrates the
 need.
 
 Commands that only need links and typed relationships skip quadratic
-prose-mention discovery. A scoped `kb percolate <note>` considers only mention
+prose-mention discovery. A scoped `wordcell percolate <note>` considers only mention
 pairs touching the resolved note; vault-wide percolation and ordinary graph
 maintenance use explicit pair and result budgets. Scans reject more than 10,000
 notes before parsing, then bound each note at 16 MiB of valid UTF-8 and the
@@ -278,8 +278,8 @@ closure and explicit transformation or redaction disclosures. A model cannot
 replace the source authority, destination, rights, review, or conflict policy
 inside a preparation call.
 
-KB delegates contract, binding, head, record, and exact dependency-closure
-verification to the immutable `@hraness/oh` v0.2.0 store API. KB keeps lower
+Wordcell delegates contract, binding, head, record, and exact dependency-closure
+verification to the immutable `@hraness/oh` v0.2.0 store API. Wordcell keeps lower
 local byte, record, root, depth, and node ceilings and rejects accessors,
 symbols, cycles, canonical-authority bindings, tampered or incomplete records,
 over-complete closures, wrong bindings or heads, and derived-only roots. The
@@ -289,30 +289,30 @@ closure roots, and record digests without copying source realm or space IDs.
 The returned status is always `prepared`. The function does not open a vault,
 write a note, invoke Git, import an operation chain or database, retain a
 projection, or write to canonical Oh. A reviewer must inspect the candidate and
-author destination Markdown through KB's existing revision-checked write path;
+author destination Markdown through Wordcell's existing revision-checked write path;
 the source's proposed assertion is never relabeled as reviewed knowledge.
 
 ## Catalog ownership is explicit
 
-A managed vault gives one marked region in `index.md` to the tool. `kb refresh`
+A managed vault gives one marked region in `index.md` to the tool. `wordcell refresh`
 renders a sorted catalog and atomically replaces only that region. Text outside
 the markers belongs to the author. Malformed or duplicate markers fail closed.
 
 An authored vault declares `kb_catalog: authored` in `index.md`. Refresh and
-check leave the complete file untouched, while `kb catalog` renders the same
+check leave the complete file untouched, while `wordcell catalog` renders the same
 exhaustive inventory on demand. This removes a repository-wide generated-file
 hotspot without weakening the scan, graph, metadata, attachment, plan, research,
 or context checks.
 
-`kb check` computes the expected managed catalog when one exists and applies
-the remaining vault policy in either mode. `kb check --no-catalog` skips only
+`wordcell check` computes the expected managed catalog when one exists and applies
+the remaining vault policy in either mode. `wordcell check --no-catalog` skips only
 catalog freshness, which lets independent lanes validate their notes before
 integration. A managed vault still performs one final refresh after lanes join;
 an authored vault has no shared generated Markdown write.
 
-`kb graph` exposes the scan as a human-readable or structured report.
-`kb backlinks` and `kb relation list` use the same identities to retrieve
-incoming links and typed assertions. `kb links` traverses both kinds of authored
+`wordcell graph` exposes the scan as a human-readable or structured report.
+`wordcell backlinks` and `wordcell relation list` use the same identities to retrieve
+incoming links and typed assertions. `wordcell links` traverses both kinds of authored
 edge to a bounded depth and node count, reporting when a high-degree
 neighborhood reaches the cap. There is no second graph state to synchronize.
 
@@ -335,9 +335,9 @@ their established error precedence.
 
 Frontmatter is parsed as typed, nested data rather than flattened strings. Scalars retain their string, number, boolean, or null type; arrays and objects retain their structure. Tags from frontmatter are normalized for matching while the original metadata remains available in structured output.
 
-`kb list` filters that authored state by nested dotted paths, field existence,
+`wordcell list` filters that authored state by nested dotted paths, field existence,
 tags, or repeated exact repository scopes, then sorts by title, path, graph
-counts, or nested metadata. `kb search` and the SDK expose the same
+counts, or nested metadata. `wordcell search` and the SDK expose the same
 case-sensitive scope constraint. Repeated filters are conjunctive; repeated
 scope values form one exact allowlist. Missing sort values are placed last and
 ties are stable, so the same vault and query produce the same order.
@@ -346,13 +346,13 @@ Metadata is useful for exact questions such as “which implementation plans are
 
 ## Hybrid retrieval keeps its evidence visible
 
-`kb search` starts with the current Markdown. Its exact lane scans note identity,
+`wordcell search` starts with the current Markdown. Its exact lane scans note identity,
 title, aliases, path, tags, typed metadata, and prose. Exact title and alias
 identities remain visible in the result evidence and stay ahead of broader
 matches.
 
 Hybrid mode is the default. It runs the exact lane alongside [QMD](https://github.com/tobi/qmd).
-KB requests QMD's direct local full-text and vector rankings at the declared
+Wordcell requests QMD's direct local full-text and vector rankings at the declared
 candidate bound, then fuses them without query expansion or reranking models.
 This avoids QMD 2.5.3's smaller fixed structured-hybrid pool. Both the inner
 QMD lists and the outer exact/QMD lists receive neutral equal weights in
@@ -363,7 +363,7 @@ position. `--mode exact` stays model-free,
 `--mode keyword` uses QMD's full-text index, and `--mode semantic` selects its
 vector lane.
 
-KB pins QMD 2.5.3 and one full upstream revision of its compact
+Wordcell pins QMD 2.5.3 and one full upstream revision of its compact
 EmbeddingGemma model for local vector retrieval. The revision prevents branch
 drift and gives the model a revision-specific cache identity. Without an
 explicit local source, the first hybrid or semantic query downloads that
@@ -371,12 +371,12 @@ revision; later runs reuse the local cache and incrementally update changed
 Markdown.
 
 An explicit model file is accepted only when its SHA-256 matches the pinned
-artifact. KB gives QMD that file as the per-store load source while retaining
+artifact. Wordcell gives QMD that file as the per-store load source while retaining
 the stable model URI and digest as derived-index identity. QMD 2.5.3's public
-vector method falls back to a process-global model for query embeddings, so KB
+vector method falls back to a process-global model for query embeddings, so Wordcell
 uses QMD's exposed per-store vector boundary for both query and document
 inference. That QMD release also asks its process-global model to tokenize fresh
-document chunks and legacy fingerprint samples. KB pins an [immutable public
+document chunks and legacy fingerprint samples. Wordcell pins an [immutable public
 Hraness QMD compatibility commit](https://github.com/hraness/qmd/commit/aa993dceb3ef8cfb71d470554ca437570f5a2b3c)
 that routes those two internal calls through QMD's existing store-local model
 without changing its public chunking API. The
@@ -385,9 +385,9 @@ depend on consumer-relative patches or installation-time compilation. The local 
 enter reports, SDK results, or generation identity, and moving identical model
 bytes does not require a new logical index.
 
-Each vault gets a path-derived SQLite cache under the user's cache directory unless `--database` selects another file outside the vault. KB refuses a database symlink or multiply linked database file and claims its adjacent snapshot directory with a versioned ownership record before cleanup. It scans and bounds the live Markdown first, then atomically refreshes a disposable validated source projection beside the database. QMD indexes that projection, so it cannot read a note that bypassed KB's per-note or aggregate vault limits or recursively ingest its own cache. Cached files are checked against the manifest before reuse. An older snapshot directory without the ownership record is never removed automatically; delete the explicitly named disposable `.snapshot` directory and retry.
+Each vault gets a path-derived SQLite cache under the user's cache directory unless `--database` selects another file outside the vault. Wordcell refuses a database symlink or multiply linked database file and claims its adjacent snapshot directory with a versioned ownership record before cleanup. It scans and bounds the live Markdown first, then atomically refreshes a disposable validated source projection beside the database. QMD indexes that projection, so it cannot read a note that bypassed Wordcell's per-note or aggregate vault limits or recursively ingest its own cache. Cached files are checked against the manifest before reuse. An older snapshot directory without the ownership record is never removed automatically; delete the explicitly named disposable `.snapshot` directory and retry.
 
-A database-scoped process lease serializes projection installation, store updates, and embedding writes across agents. The generation identity includes the immutable note bytes and the QMD version, embedding model, collection configuration, and projection contract that interpret the shared SQLite state. Sessions with the same identity may read concurrently; an identity change waits for older readers to close before mutating the database. QMD operations within one open session remain serialized. `index.md` and every `AGENTS.md` are excluded because they are navigation and always-loaded instructions rather than knowledge records. Scope hubs remain ordinary Markdown, so QMD indexes their rationale and evidence like any other note. The database and source projection may be removed at any time and recreated with `kb index`.
+A database-scoped process lease serializes projection installation, store updates, and embedding writes across agents. The generation identity includes the immutable note bytes and the QMD version, embedding model, collection configuration, and projection contract that interpret the shared SQLite state. Sessions with the same identity may read concurrently; an identity change waits for older readers to close before mutating the database. QMD operations within one open session remain serialized. `index.md` and every `AGENTS.md` are excluded because they are navigation and always-loaded instructions rather than knowledge records. Scope hubs remain ordinary Markdown, so QMD indexes their rationale and evidence like any other note. The database and source projection may be removed at any time and recreated with `wordcell index`.
 
 Search results are joined back to the live session snapshot, so each hit carries
 current typed metadata and tags. Files outside the requested vault and stale
@@ -407,7 +407,7 @@ along with a bounded neighborhood around the strongest results. These graph
 neighbors remain a separate context collection. They do not enter primary text
 rank or become authored edges. When explicitly requested, bounded Git history
 can likewise explain when a note changed and which paths changed with it. `kb
-history <note>` retrieves one note's provenance directly, and `kb history
+history <note>` retrieves one note's provenance directly, and `wordcell history
 search <query-or-path>` searches commit subjects, note paths, and co-change
 paths without running text retrieval. `--history`, `--require-history`, or SDK
 history options enable that separate lane on search. Omitted history performs
@@ -431,7 +431,7 @@ Agents that need several retrieval operations can use the SDK without spawning
 one CLI process per question:
 
 ```ts
-import { openKnowledgeBase, packUntrustedSearchContext } from "@hraness/kb/sdk";
+import { openKnowledgeBase, packUntrustedSearchContext } from "@hraness/wordcell/sdk";
 
 const kb = await openKnowledgeBase({ root: "kb", repository: "." });
 try {
@@ -454,7 +454,7 @@ and does not watch the filesystem. Close it and open a new session after any
 Markdown write so later work cannot mistake an old snapshot for current state.
 
 `packUntrustedSearchContext` accepts ordinary plain objects and arrays, such as
-values produced by JSON parsing or KB itself. Do not pass same-realm `Proxy`
+values produced by JSON parsing or Wordcell itself. Do not pass same-realm `Proxy`
 objects: proxy inspection can execute user code and is outside a data-only
 projection boundary. Isolate or serialize foreign executable objects before
 packing them.
@@ -479,9 +479,9 @@ runner continues to return a Promise, so callers need no Effect runtime or
 service configuration.
 
 ```ts
-import { openKnowledgeBase } from "@hraness/kb/sdk";
-import { runWorkflow } from "@hraness/kb/workflow";
-import { explainChangeWorkflow } from "@hraness/kb/workflows";
+import { openKnowledgeBase } from "@hraness/wordcell/sdk";
+import { runWorkflow } from "@hraness/wordcell/workflow";
+import { explainChangeWorkflow } from "@hraness/wordcell/workflows";
 
 const kb = await openKnowledgeBase({ root: "kb", repository: "." });
 try {
@@ -502,7 +502,7 @@ history.
 
 Only `decisionContextWorkflow` returns a bounded untrusted context envelope.
 `explainChangeWorkflow` and `planRadarWorkflow` intentionally return raw
-source-derived KB and Git structures for trusted application code to inspect.
+source-derived Wordcell and Git structures for trusted application code to inspect.
 Treat every string field in those results as untrusted data: do not execute it
 or place it in a model instruction channel, and project or pack the selected
 fields through the untrusted-content boundary before an agent handoff.
@@ -514,7 +514,7 @@ examples. It checks metric and fusion arithmetic only.
 
 The real-corpus evaluator accepts a versioned manifest with query text,
 independently authored relevance judgments, query classes, and structured lane
-inputs. `kb evaluate` fails before retrieval unless the checkout's exact `HEAD`,
+inputs. `wordcell evaluate` fails before retrieval unless the checkout's exact `HEAD`,
 the `HEAD:<vault-root>` tree, and the clean vault match the frozen manifest. It
 then runs built-in exact, keyword, semantic, hybrid, graph, metadata,
 path-context, and Git adapters through one immutable session. Human query prose
@@ -544,7 +544,7 @@ matching case. Symlinks, hard links, ambiguous case-fold matches, missing files,
 and paths outside the vault fail. External URLs and fragment-only links remain
 outside this local integrity lane.
 
-`kb inbox` is a bounded advisory view over recent captured sources that have no
+`wordcell inbox` is a bounded advisory view over recent captured sources that have no
 maintained-note disposition. Source-to-source and catalog links do not count as
 synthesis. A capture may intentionally remain a leaf, so the inbox never writes
 links, creates notes, or fails the vault merely because an item is present.
@@ -590,7 +590,7 @@ URLs, redirects, DNS answers, response bodies, browser pages, cookies, subproces
 - Active source evidence is converted to inert HTML with credential-shaped values redacted.
 - Bundle paths are owned, staged beside the target, and installed by atomic rename; forced replacement requires a compatible manifest and rollback.
 
-Live or CDP browser attachment keeps the browser's existing network stack and signed-in state. `kb clip current` reads the active tab without navigating or interacting with it and leaves the browser open. URL-based attached capture may navigate that tab and scroll within the configured bounds, taking bounded observations as content is rendered. Screenshots are also different from sanitized source evidence because private content can remain visible in pixels.
+Live or CDP browser attachment keeps the browser's existing network stack and signed-in state. `wordcell clip current` reads the active tab without navigating or interacting with it and leaves the browser open. URL-based attached capture may navigate that tab and scroll within the configured bounds, taking bounded observations as content is rendered. Screenshots are also different from sanitized source evidence because private content can remain visible in pixels.
 
 These boundaries are not entitlement mechanisms. Capture does not bypass authentication, access controls, paywalls, CAPTCHAs, rate limits, DRM, or platform policy.
 
@@ -605,7 +605,7 @@ or model.
 
 [Defuddle](https://github.com/kepano/defuddle) performs article extraction. [agent-browser](https://github.com/vercel-labs/agent-browser) provides optional rendered acquisition. The pinned [Sweet Cookie 0.4.3](https://github.com/steipete/sweet-cookie/releases/tag/v0.4.3) supports explicit browser-cookie import while retaining host-only scope and rejecting partitioned or container-scoped state that the capture lanes cannot replay faithfully.
 
-[yt-dlp](https://github.com/yt-dlp/yt-dlp) and [FFmpeg](https://ffmpeg.org) remain optional because only full audio or video localization needs them. `kb doctor` reports what is installed without probing cookie stores, and `kb adapters` reports the installed platform claims. A missing optional capability narrows the available route; it does not change the storage or graph model.
+[yt-dlp](https://github.com/yt-dlp/yt-dlp) and [FFmpeg](https://ffmpeg.org) remain optional because only full audio or video localization needs them. `wordcell doctor` reports what is installed without probing cookie stores, and `wordcell adapters` reports the installed platform claims. A missing optional capability narrows the available route; it does not change the storage or graph model.
 
 ## Extension boundaries
 
@@ -614,5 +614,5 @@ New platform adapters should improve the strength of a capture claim, not merely
 New graph policy should remain a pure function of vault content and explicit configuration. Derived reports may guide an agent or person, but the tool should not silently mutate authored prose. This keeps automation reviewable and lets users replace any analysis layer without migrating their notes.
 
 Repository context follows the same separation. The CLI reads the repository
-and vault as development inputs, but no application needs to import KB or
+and vault as development inputs, but no application needs to import Wordcell or
 read a scope hub at runtime.

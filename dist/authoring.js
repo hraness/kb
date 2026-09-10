@@ -13,7 +13,7 @@ import {
   normalizeRelationPredicate,
   noteRevision,
   removeNoteRelation
-} from "./index-dbfcfrdp.js";
+} from "./index-6sw24nvv.js";
 import"./index-3rm7cz6h.js";
 import"./index-ekpwvbra.js";
 export {

@@ -4,7 +4,6 @@ import { readFile } from "node:fs/promises";
 import { resolve } from "node:path";
 
 import {
-  validateNpmStageWorkflow,
   validateReleaseWorkflow,
   validateWorkflowYaml,
 } from "./check-workflow-yaml.ts";
@@ -45,7 +44,6 @@ jobs:
 
   test("locks workflow-level execution semantics outside jobs", async () => {
     for (const [path, validate] of [
-      ["../.github/workflows/npm-stage.yml", validateNpmStageWorkflow],
       ["../.github/workflows/release.yml", validateReleaseWorkflow],
     ] as const) {
       const source = await readFile(resolve(import.meta.dir, path), "utf8");
@@ -62,399 +60,42 @@ jobs:
     }
   });
 
-  test("requires a fresh default-branch HEAD guard at the final publication boundary", async () => {
-    const path = resolve(import.meta.dir, "../.github/workflows/npm-stage.yml");
-    const source = await readFile(path, "utf8");
-    const finalGuard = 'git --git-dir="$current_main" fetch';
-    const finalGuardIndex = source.lastIndexOf(finalGuard);
-    expect(finalGuardIndex).toBeGreaterThan(-1);
-    const missingFinalGuard =
-      source.slice(0, finalGuardIndex) +
-      "git status --short" +
-      source.slice(finalGuardIndex + finalGuard.length);
-    expect(() => validateNpmStageWorkflow(source, "npm-stage.yml")).not.toThrow();
-    expect(() => validateNpmStageWorkflow(
-      missingFinalGuard,
-      "npm-stage.yml",
-    )).toThrow("must re-read current main and npm latest at the final mutation boundary");
-  });
-
-  test("requires the prior npm latest release closure at both staging boundaries", async () => {
-    const path = resolve(import.meta.dir, "../.github/workflows/npm-stage.yml");
-    const source = await readFile(path, "utf8");
-    const marker = "lacks one annotated Git tag";
-    const firstIndex = source.indexOf(marker);
-    const finalIndex = source.lastIndexOf(marker);
-    expect(firstIndex).toBeGreaterThan(-1);
-    expect(finalIndex).toBeGreaterThan(firstIndex);
-    for (const message of [
-      marker,
-      "lacks its exact immutable GitHub Release",
-      "is not reachable from current main",
-    ]) {
-      expect(source.match(new RegExp(message, "gu")) ?? []).toHaveLength(2);
-    }
-    const withoutFirstClosure =
-      source.slice(0, firstIndex) +
-      "has no release tag" +
-      source.slice(firstIndex + marker.length);
-    const withoutFinalClosure =
-      source.slice(0, finalIndex) +
-      "has no release tag" +
-      source.slice(finalIndex + marker.length);
-    expect(() => validateNpmStageWorkflow(source, "npm-stage.yml")).not.toThrow();
-    expect(() => validateNpmStageWorkflow(
-      withoutFirstClosure,
-      "npm-stage.yml",
-    )).toThrow("pending-stage guard must prove the prior npm latest release closure");
-    expect(() => validateNpmStageWorkflow(
-      withoutFinalClosure,
-      "npm-stage.yml",
-    )).toThrow("staged-publication boundary must prove the prior npm latest release closure");
-
+  test("publishes npm only from the environment-bound OIDC job after the immutable Release", async () => {
+    const source = await readFile(resolve(import.meta.dir, "../.github/workflows/release.yml"), "utf8");
+    expect(() => validateReleaseWorkflow(source, "release.yml")).not.toThrow();
     for (const [needle, replacement, message] of [
-      [
-        'const priorTag = `v${latestValue}`;',
-        'const priorTag = "v0.1.0";',
-        "pending-stage guard must prove",
-      ],
-      [
-        'prior_version="$(FINAL_LATEST="$final_latest" node -p',
-        'prior_version="$(CURRENT_LATEST="$current_latest" node -p',
-        "must",
-      ],
-      [
-        'if (typeof current !== "string" || final !== current)',
-        "if (false)",
-        "must",
-      ],
-      [
-        '"$final_default_sha" != "$EXPECTED_SOURCE_SHA"',
-        "false",
-        "must",
-      ],
+      ["    environment: npm-release", "    environment: npm-stage", "npm-release environment"],
+      ["    needs: [verify, attest, publish]", "    needs: [verify, attest]", "must follow the immutable Release"],
+      ["          artifact-ids: ${{ needs.attest.outputs.artifact_id }}", "          name: attested-${{ needs.verify.outputs.artifact_name }}", "numeric identity"],
+      ['            if (payload.dist.integrity !== expectedIntegrity) {\n              throw new Error(`npm already publishes ${name}@${version} with different bytes; never overwrite it`);\n            }', "", "idempotent registry state"],
+      ['          if (latest?.id !== release.id || latest?.tag_name !== release.tag_name) throw new Error("Canonical release is not immutable Latest before npm publication");', "", "bind the immutable Release"],
+      ["            --provenance \\\n", "", "provenance"],
+      ["            --access public \\\n", "            --access public --tag next \\\n", "default-tag monotonicity"],
+      ['            --registry=https://registry.npmjs.org \\\n            --userconfig="$clean_user_config" \\\n            > "$publish_result"', '            --registry=https://registry.example.invalid \\\n            --userconfig="$clean_user_config" \\\n            > "$publish_result"', "canonical registry"],
+      ["      - name: Publish the exact canonical archive through npm trusted publishing", "      - name: Hidden registry mutation\n        run: npm dist-tag add @hraness/wordcell@0.18.0 latest\n      - name: Publish the exact canonical archive through npm trusted publishing", "exact reviewed step sequence"],
+      ['          ref: ${{ needs.verify.outputs.workflow_sha }}', "          ref: main", "exact reviewed verifier closure"],
+      ["            && npm audit signatures --json --include-attestations --omit=dev --registry=https://registry.npmjs.org > \"$work/audit.json\")", '            && printf "{}" > "$work/audit.json")', "signatures, and provenance"],
     ] as const) {
-      const weakened = needle.includes("final_") || needle.includes("FINAL_LATEST")
-        ? replaceLast(source, needle, replacement)
-        : source.replace(needle, replacement);
-      expect(weakened).not.toBe(source);
-      expect(() => validateNpmStageWorkflow(weakened, "npm-stage.yml")).toThrow(message);
+      expect(source).toContain(needle);
+      const changed = source.replace(needle, replacement);
+      expect(changed).not.toBe(source);
+      expect(() => validateReleaseWorkflow(changed, "release.yml")).toThrow(message);
     }
-
-    const weakenedFinalComparison = replaceLast(
-      source,
-      'comparison?.status !== "ahead" && comparison?.status !== "identical"',
-      "false",
-    );
-    expect(() => validateNpmStageWorkflow(
-      weakenedFinalComparison,
-      "npm-stage.yml",
-    )).toThrow("staged-publication boundary must prove");
-    const weakenedFinalRelease = replaceLast(
-      source,
-      "release?.tag_name !== priorTag",
-      "false",
-    );
-    expect(() => validateNpmStageWorkflow(
-      weakenedFinalRelease,
-      "npm-stage.yml",
-    )).toThrow("staged-publication boundary must prove");
-
-    for (const [needle, replacement, message] of [
-      [
-        'if (typeof final !== "string" || terminal !== final)',
-        "if (false)",
-        "staged-publication boundary must prove",
-      ],
-      [
-        "entries.length !== 5",
-        "entries.length < 0",
-        "staged-publication boundary must prove",
-      ],
-      [
-        "headEntries[0]?.sha !== expectedSourceSha",
-        "false",
-        "staged-publication boundary must prove",
-      ],
-      [
-        'terminalPriorIdentity.get("source") !== initialPriorIdentity.get("source")',
-        "false",
-        "staged-publication boundary must prove",
-      ],
-    ] as const) {
-      const weakenedTerminalGuard = replaceLast(source, needle, replacement);
-      expect(() => validateNpmStageWorkflow(
-        weakenedTerminalGuard,
-        "npm-stage.yml",
-      )).toThrow(message);
-    }
-    const terminalRegistryDrift = source.replace(
-      'terminal_latest="$(npm view "@hraness/kb" dist-tags.latest \\\n' +
-        "            --json \\\n" +
-        "            --registry=https://registry.npmjs.org)",
-      'terminal_latest="$(npm view "@hraness/kb" dist-tags.latest \\\n' +
-        "            --json \\\n" +
-        "            --registry=https://registry.example.invalid)",
-    );
-    expect(terminalRegistryDrift).not.toBe(source);
-    expect(() => validateNpmStageWorkflow(
-      terminalRegistryDrift,
-      "npm-stage.yml",
-    )).toThrow("terminal npm latest read to the canonical registry");
-    const suppressedPeeledIdentity = source.replace(
-      "          git ls-remote --exit-code \\\n",
-      "          git ls-remote --exit-code --refs \\\n",
-    );
-    expect(suppressedPeeledIdentity).not.toBe(source);
-    expect(() => validateNpmStageWorkflow(
-      suppressedPeeledIdentity,
-      "npm-stage.yml",
-    )).toThrow("must retain peeled annotated-tag identity");
-  });
-
-  test("locks the OIDC staging job to its exact reviewed steps and sole mutation", async () => {
-    const source = await readFile(
-      resolve(import.meta.dir, "../.github/workflows/npm-stage.yml"),
-      "utf8",
-    );
-    const setupNode = "      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0";
-    const insertedStep = replaceLast(
-      source,
-      setupNode,
-      "      - name: Hidden registry mutation\n" +
-        "        run: npm dist-tag add @hraness/kb@0.18.0 latest\n" +
-        setupNode,
-    );
-    expect(() => validateNpmStageWorkflow(insertedStep, "npm-stage.yml")).toThrow(
-      "exact reviewed step sequence",
-    );
-    const unpinnedAction = replaceLast(
-      source,
-      "actions/setup-node@820762786026740c76f36085b0efc47a31fe5020",
-      "actions/setup-node@v7",
-    );
-    expect(() => validateNpmStageWorkflow(unpinnedAction, "npm-stage.yml")).toThrow(
-      "exact reviewed step sequence",
-    );
-    const bypassedReauthorization = source.replace(
-      "      - name: Reauthorize current npm staging attempt",
-      "      - name: Reauthorize current npm staging attempt\n        continue-on-error: true",
-    );
-    expect(() => validateNpmStageWorkflow(bypassedReauthorization, "npm-stage.yml")).toThrow(
-      "fail-closed step control flow",
-    );
-    const unconditionalMutation = source.replace(
-      "      - name: Revalidate current main and stage exact package",
-      "      - name: Revalidate current main and stage exact package\n        if: always()",
-    );
-    expect(() => validateNpmStageWorkflow(unconditionalMutation, "npm-stage.yml")).toThrow(
-      "fail-closed step control flow",
-    );
-    const extraMutation = source.replace(
-      '          npm stage publish "$TARBALL" \\',
-      '          npm publish "$TARBALL"\n          npm stage publish "$TARBALL" \\',
-    );
-    expect(extraMutation).not.toBe(source);
-    expect(() => validateNpmStageWorkflow(extraMutation, "npm-stage.yml")).toThrow(
-      "unexpected provider mutation command",
-    );
-    for (const mutation of [
-      "npm --registry=https://registry.npmjs.org publish hostile.tgz",
-      "git -c user.name=hostile push origin main",
-      "gh --repo hraness/kb release edit v0.18.0 --title hostile",
-      "GH_TOKEN=hostile gh release edit v0.18.0 --title hostile",
-      "gh api repos/hraness/kb --raw-field=hostile=true",
-      'node -e \'execute("gh", ["api", "--method", "DELETE"])\'',
-    ] as const) {
-      const injectedMutation = source.replace(
-        '          npm stage publish "$TARBALL" \\',
-        `          ${mutation}\n          npm stage publish "$TARBALL" \\`,
-      );
-      expect(injectedMutation).not.toBe(source);
-      expect(() => validateNpmStageWorkflow(injectedMutation, "npm-stage.yml")).toThrow(
-        "unexpected provider mutation command",
-      );
-    }
-    const wrappedMutation = source.replace(
-      '          npm stage publish "$TARBALL" \\',
-      "          bash -c 'npm publish hostile.tgz'\n" +
-        '          npm stage publish "$TARBALL" \\',
-    );
-    expect(() => validateNpmStageWorkflow(wrappedMutation, "npm-stage.yml")).toThrow(
-      "exact reviewed workflow semantics",
-    );
-    for (const [needle, replacement] of [
-      ["          GH_TOKEN: ${{ github.token }}", "          GH_TOKEN: ${{ secrets.ADMIN }}"],
-      [
-        "          EXPECTED_SOURCE_SHA: ${{ needs.verify.outputs.source_sha }}",
-        "          EXPECTED_SOURCE_SHA: ${{ github.sha }}",
-      ],
-      [
-        "          TARBALL: ${{ steps.artifact.outputs.tarball }}",
-        "          TARBALL: ${{ steps.artifact.outputs.tarball }}\n          EXTRA: hostile",
-      ],
-    ] as const) {
-      const weakenedEnvironment = replaceLast(source, needle, replacement);
-      expect(() => validateNpmStageWorkflow(weakenedEnvironment, "npm-stage.yml")).toThrow(
-        "exact reviewed environment",
-      );
-    }
-  });
-
-  test("inspects terminal npm mutations before trusting a stage-job display name", async () => {
-    const path = resolve(import.meta.dir, "../.github/workflows/npm-stage.yml");
-    const source = await readFile(path, "utf8");
-    const delayed = source
-      .replace("const terminalWrites =", "const delayedTerminalWrites =")
-      .replace(
-        "              const match = /^Stage exact package v",
-        "              const terminalWrites = delayedTerminalWrites;\n" +
-          "              const match = /^Stage exact package v",
-      );
-    expect(delayed).not.toBe(source);
-    expect(() => validateNpmStageWorkflow(source, "npm-stage.yml")).not.toThrow();
-    expect(() => validateNpmStageWorkflow(delayed, "npm-stage.yml")).toThrow(
-      "must inspect terminal writes before trusting a job display name",
-    );
-  });
-
-  test("keeps npm staging version-selected, environment-bound, tokenless, artifact-bound, and stage-only", async () => {
-    const path = resolve(import.meta.dir, "../.github/workflows/npm-stage.yml");
-    const source = await readFile(path, "utf8");
-
-    for (const required of [
-      "workflow_dispatch:",
-      "publish_to_npm:",
-      "resolved_stage_version:",
-      "required: false",
-      "default: false",
-      "type: boolean",
-      "name: Select stable package version",
-      "github.event.before",
-      "git merge-base --is-ancestor",
-      'git show "$BEFORE_SHA:package.json"',
-      "scripts/npm-stage-selection.ts",
-      "needs: select",
-      "if: needs.select.outputs.should_stage == 'true'",
-      "contents: read",
-      "environment: npm-stage",
-      "if: inputs.publish_to_npm == true",
-      "actions: read",
-      "contents: read",
-      "id-token: write",
-      "Reauthorize current npm staging attempt",
-      "Reject unresolved stable-stage intent",
-      "Record cleared stable-stage intent v${{ inputs.resolved_stage_version }}",
-      "Record exclusive stable-stage intent",
-      "Verified package version components exceed Number.MAX_SAFE_INTEGER",
-      'EXPECTED_WORKFLOW_ID: "344070109"',
-      "attempt.triggering_actor?.id !== actorId",
-      "runs-on: ubuntu-latest",
-      "node-version: \"24\"",
-      "package-manager-cache: false",
-      "npm@11.19.0",
-      "bun-version: \"1.3.14\"",
-      "bun install --frozen-lockfile --ignore-scripts",
-      "bun run check",
-      "git status --porcelain --untracked-files=all -- dist bun.lock",
-      'scripts/github-release.ts download "$canonical_directory"',
-      "scripts/package-smoke.ts",
-      "npm-package.sha256",
-      "actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c",
-      "git init --quiet --bare \"$current_main\"",
-      "npm stage publish \"$TARBALL\"",
-      "npm config get tag",
-      "Pinned npm's clean default publication tag is not latest",
-      "--registry=https://registry.npmjs.org",
-    ] as const) {
-      expect(source).toContain(required);
-    }
-
-    expect(source).not.toContain("secrets.NPM_TOKEN");
-    expect(source).not.toContain("NODE_AUTH_TOKEN");
-    expect(source).not.toMatch(/\bnpm publish\b/u);
-    expect(source).not.toContain("--tag latest");
-    expect(source.match(/id-token: write/gu) ?? []).toHaveLength(1);
-    expect(source.match(/Verified package version components exceed Number\.MAX_SAFE_INTEGER/gu) ?? [])
-      .toHaveLength(3);
-    const stage = source.slice(source.indexOf("\n  stage:\n"));
-    expect(stage).not.toContain("actions/checkout@");
-    expect(stage).not.toContain("setup-bun@");
-    expect(stage).not.toContain("./scripts/");
-  });
-
-  test("requires the exact environment and fail-closed version selector", async () => {
-    const path = resolve(import.meta.dir, "../.github/workflows/npm-stage.yml");
-    const source = await readFile(path, "utf8");
-    expect(() => validateNpmStageWorkflow(
-      source.replace("environment: npm-stage", "environment: unprotected"),
-      "npm-stage.yml",
-    )).toThrow("exact npm-stage environment");
-    expect(() => validateNpmStageWorkflow(
-      source.replace(
-        'git show "$BEFORE_SHA:package.json"',
-        'cp package.json "$previous_manifest"',
-      ),
-      "npm-stage.yml",
-    )).toThrow("package-version selection is missing");
-    expect(() => validateNpmStageWorkflow(
-      source.replace("default: false", "default: true"),
-      "npm-stage.yml",
-    )).toThrow("fail-closed boolean publish_to_npm input");
-    expect(() => validateNpmStageWorkflow(
-      source.replace(/(resolved_stage_version:[\s\S]*?default:) ""/u, '$1 "0.19.0"'),
-      "npm-stage.yml",
-    )).toThrow("empty-by-default resolved_stage_version");
-    expect(() => validateNpmStageWorkflow(
-      source.replace(/(release_tag:[\s\S]*?default:) ""/u, '$1 "v0.19.3"'),
-      "npm-stage.yml",
-    )).toThrow("empty-by-default canonical release_tag");
-    expect(() => validateNpmStageWorkflow(
-      source.replace(
-        "if: inputs.publish_to_npm == true",
-        "if: always()",
-      ),
-      "npm-stage.yml",
-    )).toThrow("explicit publish_to_npm opt-in");
-    expect(() => validateNpmStageWorkflow(
-      source.replace(
-        "      actions: read\n      contents: read\n      id-token: write",
-        "      contents: read\n      id-token: write",
-      ),
-      "npm-stage.yml",
-    )).toThrow("actions: read, contents: read, and id-token: write");
-    expect(() => validateNpmStageWorkflow(
-      source.replace(
-        "attempt.triggering_actor?.id !== actorId",
-        "attempt.triggering_actor?.id !== 123456",
-      ),
-      "npm-stage.yml",
-    )).toThrow("staging attempt authorization is missing");
-    expect(() => validateNpmStageWorkflow(
-      source.replace("npm config get tag", "npm config get fund"),
-      "npm-stage.yml",
-    )).toThrow("must recheck current default-branch HEAD");
-    expect(() => validateNpmStageWorkflow(
-      source.replace(
-        "BigInt(Number.MAX_SAFE_INTEGER)",
-        "BigInt(9007199254740992)",
-      ),
-      "npm-stage.yml",
-    )).toThrow("must reject unsafe stable-version components");
-    expect(() => validateNpmStageWorkflow(
-      source.replace(
-        "actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a",
-        "actions/upload-artifact@v7",
-      ),
-      "npm-stage.yml",
-    )).toThrow("exact reviewed step sequence");
+    const extraOidc = source.replace("  admit_npm:\n    name: Admit the public npm package\n    needs: [verify, publish_npm]\n    permissions:\n      contents: read", "  admit_npm:\n    name: Admit the public npm package\n    needs: [verify, publish_npm]\n    permissions:\n      contents: read\n      id-token: write");
+    expect(extraOidc).not.toBe(source);
+    expect(() => validateReleaseWorkflow(extraOidc, "release.yml")).toThrow("read-only job after publication");
+    const publicationJob = source.slice(source.indexOf("\n  publish_npm:\n"), source.indexOf("\n  admit_npm:\n"));
+    expect(publicationJob).not.toContain("actions/checkout@");
+    expect(publicationJob).not.toContain("setup-bun@");
+    expect(publicationJob).not.toContain("./scripts/");
+    expect(publicationJob).not.toContain("secrets.");
   });
 
   test("rejects a canonical release that waits on npm or signs with unchecked authority", async () => {
     const source = await readFile(resolve(import.meta.dir, "../.github/workflows/release.yml"), "utf8");
     const npmDependency = source.replace(
       '          node "$GITHUB_WORKSPACE/scripts/github-release.ts" prepare "$artifact_directory"',
-      '          npm view @hraness/kb dist-tags.latest\n' +
+      '          npm view @hraness/wordcell dist-tags.latest\n' +
         '          node "$GITHUB_WORKSPACE/scripts/github-release.ts" prepare "$artifact_directory"',
     );
     expect(npmDependency).not.toBe(source);

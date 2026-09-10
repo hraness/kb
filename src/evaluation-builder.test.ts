@@ -32,7 +32,7 @@ describe("evaluation builder public boundary", () => {
       "--build",
       "--config",
       "/tmp/build.json",
-    ])).toThrow("Usage: kb-evaluation-builder");
+    ])).toThrow("Usage: wordcell-evaluation-builder");
   });
 
   test("uses canonical JSON bytes for immutable build commitments", () => {

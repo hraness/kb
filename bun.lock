@@ -3,7 +3,7 @@
   "configVersion": 1,
   "workspaces": {
     "": {
-      "name": "@hraness/kb",
+      "name": "@hraness/wordcell",
       "dependencies": {
         "@hraness/oh": "github:hraness/oh#v0.2.0",
         "@steipete/sweet-cookie": "0.4.3",

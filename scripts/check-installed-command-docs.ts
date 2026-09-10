@@ -1,7 +1,7 @@
 import { readdir, readFile } from "node:fs/promises";
 import { join, relative, resolve } from "node:path";
 
-export const canonicalMetadataToolBuildCommand = "kb url-metadata tool build";
+export const canonicalMetadataToolBuildCommand = "wordcell url-metadata tool build";
 export const staleMetadataToolBuildCommand = "bun run url-metadata:tool:build";
 
 export function staleInstalledCommandPaths(
@@ -45,7 +45,7 @@ if (import.meta.main) {
   }
   for (const requiredPath of [
     "docs/capture.md",
-    "skills/kb/references/save-url.md",
+    "skills/wordcell/references/save-url.md",
   ]) {
     const file = files.find(({ path }) => path === requiredPath);
     if (!file?.contents.includes(canonicalMetadataToolBuildCommand)) {

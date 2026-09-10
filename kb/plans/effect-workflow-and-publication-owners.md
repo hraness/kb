@@ -30,7 +30,7 @@ The workflow scheduler and single-note publication transaction now have native E
 
 The public boundaries remain `src/workflow.ts` and `src/authoring.ts`. Each invokes one finite product-local runtime. The respective model files preserve pure definitions and policy, platform files expose native operations, and program files own admission, settlement and cleanup. Callers do not supply Effect services or a runtime.
 
-The existing NoteLock provider, read-only note APIs, graph/retrieval policy, QMD implementation and capture publication remain outside this change. Effect 3.22.1 is an exact runtime dependency under the existing external-package build convention. Direct's immutable checker edition 1.5.0 remains development source; KB owns the explicit local role map. These boundaries follow [[notes/repository-seams|Repository seams]].
+The existing NoteLock provider, read-only note APIs, graph/retrieval policy, QMD implementation and capture publication remain outside this change. Effect 3.22.1 is an exact runtime dependency under the existing external-package build convention. Direct's immutable checker edition 1.5.0 remains development source; Wordcell owns the explicit local role map. These boundaries follow [[notes/repository-seams|Repository seams]].
 
 ## Workflow compatibility
 
@@ -53,7 +53,7 @@ Failure selection remains phase-specific. Fallback temporary-handle close is obs
 1. Workflow implementation and independent source review are accepted. Focused workflow and bundled-workflow tests passed 37 cases and 1,641 assertions, including 64 generated schedules. The explicit test parameter type then passed its 19-case causal replay and broad compiler check.
 2. Publication's original native baseline passed seven cases and failed the expected premature-release case. The direct observation was lock release while sibling sync remained pending; the test failed before asserting the competing lock result. The migrated focused suite passed 46 cases and 310 assertions, including the same native lifetime seam, synchronous second admission failure, cleanup precedence, held acquisition and preservation of visible bytes.
 3. The local architecture policy and all 13 canonical checker tests passed with 146 assertions. The first combined compiler run found only two unused extracted imports; those imports were removed. The compiler rerun then passed with the combined workflow, authoring and checker source.
-4. The integration owner must regenerate distribution files, inspect the package source closure, run the unchanged required repository gate, complete KB maintenance, and deliver through current-head pull-request checks. Focused evidence does not replace those gates.
+4. The integration owner must regenerate distribution files, inspect the package source closure, run the unchanged required repository gate, complete Wordcell maintenance, and deliver through current-head pull-request checks. Focused evidence does not replace those gates.
 
 Reproducible focused commands from the repository root are:
 

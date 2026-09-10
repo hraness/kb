@@ -1,0 +1,4 @@
+User-agent: *
+Allow: /
+
+Sitemap: https://wordcell.io/sitemap.xml

@@ -17,7 +17,7 @@ function record(value: unknown, label: string): Record<string, unknown> {
 
 function subject(packageVersion: string): readonly Record<string, unknown>[] {
   return [{
-    name: `pkg:npm/%40hraness/kb@${packageVersion}`,
+    name: `pkg:npm/%40hraness/wordcell@${packageVersion}`,
     digest: { sha512: tarballSha512 },
   }];
 }
@@ -52,7 +52,7 @@ function bundle(
 
 function validInput(packageVersion = version) {
   const attestationMetadata = {
-    url: `https://registry.npmjs.org/-/npm/v1/attestations/@hraness%2fkb@${packageVersion}`,
+    url: `https://registry.npmjs.org/-/npm/v1/attestations/@hraness%2fwordcell@${packageVersion}`,
     provenance: { predicateType: provenancePredicateType },
   };
   const publishStatement = {
@@ -60,7 +60,7 @@ function validInput(packageVersion = version) {
     subject: subject(packageVersion),
     predicateType: publishPredicateType,
     predicate: {
-      name: "@hraness/kb",
+      name: "@hraness/wordcell",
       version: packageVersion,
       registry: "https://registry.npmjs.org",
     },
@@ -74,27 +74,27 @@ function validInput(packageVersion = version) {
         buildType: "https://slsa-framework.github.io/github-actions-buildtypes/workflow/v1",
         externalParameters: {
           workflow: {
-            ref: "refs/heads/main",
-            repository: "https://github.com/hraness/kb",
-            path: ".github/workflows/npm-stage.yml",
+            ref: `refs/tags/v${packageVersion}`,
+            repository: "https://github.com/hraness/wordcell",
+            path: ".github/workflows/release.yml",
           },
         },
         internalParameters: {
           github: {
-            event_name: "workflow_dispatch",
+            event_name: "push",
             repository_id: "1308971873",
             repository_owner_id: "307125679",
           },
         },
         resolvedDependencies: [{
-          uri: "git+https://github.com/hraness/kb@refs/heads/main",
+          uri: `git+https://github.com/hraness/wordcell@refs/tags/v${packageVersion}`,
           digest: { gitCommit: sourceSha },
         }],
       },
       runDetails: {
         builder: { id: "https://github.com/actions/runner/github-hosted" },
         metadata: {
-          invocationId: "https://github.com/hraness/kb/actions/runs/123456/attempts/2",
+          invocationId: "https://github.com/hraness/wordcell/actions/runs/123456/attempts/2",
         },
       },
     },
@@ -104,9 +104,9 @@ function validInput(packageVersion = version) {
       invalid: [],
       missing: [],
       verified: [{
-        name: "@hraness/kb",
+        name: "@hraness/wordcell",
         version: packageVersion,
-        location: "node_modules/@hraness/kb",
+        location: "node_modules/@hraness/wordcell",
         registry: "https://registry.npmjs.org/",
         attestations: structuredClone(attestationMetadata),
         attestationBundles: [
@@ -124,11 +124,13 @@ function validInput(packageVersion = version) {
       }],
     },
     expectedSourceSha: sourceSha,
+    expectedRunId: "123456",
+    maximumRunAttempt: "2",
     expectedTarballSha512: tarballSha512,
     expectedVersion: packageVersion,
     registryLatest: packageVersion,
     registryView: {
-      name: "@hraness/kb",
+      name: "@hraness/wordcell",
       version: packageVersion,
       dist: {
         integrity: `sha512-${Buffer.from(tarballSha512, "hex").toString("base64")}`,
@@ -202,7 +204,7 @@ function mutateStatement(
 describe("npm release attestation", () => {
   test("binds the cryptographically audited package to the exact workflow and source", () => {
     expect(verifyNpmReleaseAttestation(validInput())).toEqual({
-      invocationId: "https://github.com/hraness/kb/actions/runs/123456/attempts/2",
+      invocationId: "https://github.com/hraness/wordcell/actions/runs/123456/attempts/2",
       sourceSha,
       tarballSha512,
       version,
@@ -290,7 +292,7 @@ describe("npm release attestation", () => {
         label: "event",
         mutate: (input) => mutateStatement(input, provenancePredicateType, (decoded) => {
           const build = record(record(decoded.predicate, "predicate").buildDefinition, "build");
-          record(record(build.internalParameters, "internal").github, "github").event_name = "push";
+          record(record(build.internalParameters, "internal").github, "github").event_name = "workflow_dispatch";
         }),
       },
       {
@@ -331,7 +333,7 @@ describe("npm release attestation", () => {
           const build = record(record(decoded.predicate, "predicate").buildDefinition, "build");
           const dependencies = build.resolvedDependencies;
           if (!Array.isArray(dependencies)) throw new TypeError("dependencies must be an array");
-          record(dependencies[0], "dependency").uri = "git+https://github.com/hraness/kb@refs/tags/v0.20.0";
+          record(dependencies[0], "dependency").uri = "git+https://github.com/hraness/wordcell@refs/heads/main";
         }),
       },
       {
@@ -393,7 +395,7 @@ describe("npm release attestation", () => {
       {
         label: "missing cryptographic evidence",
         mutate: (input) => {
-          input.audit.missing.push({ name: "@hraness/kb", version });
+          input.audit.missing.push({ name: "@hraness/wordcell", version });
         },
       },
     ];
@@ -418,4 +420,12 @@ describe("npm release attestation", () => {
         .toThrow("Number.MAX_SAFE_INTEGER");
     }
   });
+});
+
+
+test("npm provenance binds this run while accepting an earlier successful attempt", () => {
+  expect(verifyNpmReleaseAttestation({ ...validInput(), maximumRunAttempt: "3" }).version).toBe(version);
+  for (const override of [{ expectedRunId: "123457" }, { maximumRunAttempt: "1" }, { expectedRunId: "0" }, { maximumRunAttempt: "9007199254740992" }]) {
+    expect(() => verifyNpmReleaseAttestation({ ...validInput(), ...override })).toThrow();
+  }
 });

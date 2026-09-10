@@ -675,7 +675,7 @@ describe("single-note authoring", () => {
       .filter((name) => name.endsWith(".tmp"))).toEqual([]);
   });
 
-  test("does not overwrite a non-KB replacement after the final optimistic read", async () => {
+  test("does not overwrite a non-Wordcell replacement after the final optimistic read", async () => {
     const { root, cache } = await fixture();
     const sourcePath = await writeNote(root, "notes/source");
     await writeNote(root, "notes/target");

@@ -152,7 +152,7 @@ describe("local attachment parsing", () => {
 
 describe("local attachment validation", () => {
   test("resolves source-relative Markdown and documented Obsidian paths without reading binaries", async () => {
-    const root = await mkdtemp(join(tmpdir(), "hraness-kb-attachments-"));
+    const root = await mkdtemp(join(tmpdir(), "hraness-wordcell-attachments-"));
     try {
       await mkdir(join(root, "notes", "deep"), { recursive: true });
       await mkdir(join(root, "assets"), { recursive: true });
@@ -189,7 +189,7 @@ describe("local attachment validation", () => {
   });
 
   test("rejects missing, escaping, ambiguous, and case-mismatched targets", async () => {
-    const root = await mkdtemp(join(tmpdir(), "hraness-kb-attachments-"));
+    const root = await mkdtemp(join(tmpdir(), "hraness-wordcell-attachments-"));
     try {
       await mkdir(join(root, "notes"), { recursive: true });
       await mkdir(join(root, "a"), { recursive: true });
@@ -227,7 +227,7 @@ describe("local attachment validation", () => {
   });
 
   test("reports missing nested and reference-style attachments", async () => {
-    const root = await mkdtemp(join(tmpdir(), "hraness-kb-attachments-"));
+    const root = await mkdtemp(join(tmpdir(), "hraness-wordcell-attachments-"));
     try {
       await mkdir(join(root, "notes"), { recursive: true });
       const report = await validateMarkdownAttachments({
@@ -251,8 +251,8 @@ describe("local attachment validation", () => {
   });
 
   test("rejects symbolic links, hard links, and non-regular attachment targets", async () => {
-    const root = await mkdtemp(join(tmpdir(), "hraness-kb-attachments-"));
-    const outside = await mkdtemp(join(tmpdir(), "hraness-kb-attachments-outside-"));
+    const root = await mkdtemp(join(tmpdir(), "hraness-wordcell-attachments-"));
+    const outside = await mkdtemp(join(tmpdir(), "hraness-wordcell-attachments-outside-"));
     try {
       await mkdir(join(root, "notes"), { recursive: true });
       await mkdir(join(root, "assets"), { recursive: true });
@@ -287,8 +287,8 @@ describe("local attachment validation", () => {
   });
 
   test("rejects a symbolic-link vault root before traversal", async () => {
-    const root = await mkdtemp(join(tmpdir(), "hraness-kb-attachments-"));
-    const parent = await mkdtemp(join(tmpdir(), "hraness-kb-attachments-link-"));
+    const root = await mkdtemp(join(tmpdir(), "hraness-wordcell-attachments-"));
+    const parent = await mkdtemp(join(tmpdir(), "hraness-wordcell-attachments-link-"));
     const linkedRoot = join(parent, "vault");
     try {
       await symlink(root, linkedRoot);

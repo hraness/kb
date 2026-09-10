@@ -1,0 +1,4 @@
+interface:
+  display_name: "Wordcell"
+  short_description: "Set up, query, capture, and maintain Markdown memory"
+  default_prompt: "Use $wordcell to set up or work with this hraness/wordcell knowledge base, routing the request before any runtime preparation and loading only the references needed."

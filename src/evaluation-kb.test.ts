@@ -127,7 +127,7 @@ async function emptyRepositoryFixture(): Promise<{
   readonly repository: string;
   readonly root: string;
 }> {
-  const repository = await mkdtemp(join(tmpdir(), "hraness-kb-evaluation-snapshot-"));
+  const repository = await mkdtemp(join(tmpdir(), "hraness-wordcell-evaluation-snapshot-"));
   temporaryRoots.push(repository);
   const root = join(repository, "kb");
   await mkdir(root);
@@ -220,8 +220,8 @@ describe("frozen evaluation snapshot", () => {
   });
 
   test("rejects roots outside the repository, mismatched roots, and symlink escapes before Git", async () => {
-    const repository = await mkdtemp(join(tmpdir(), "hraness-kb-evaluation-confinement-"));
-    const outside = await mkdtemp(join(tmpdir(), "hraness-kb-evaluation-outside-"));
+    const repository = await mkdtemp(join(tmpdir(), "hraness-wordcell-evaluation-confinement-"));
+    const outside = await mkdtemp(join(tmpdir(), "hraness-wordcell-evaluation-outside-"));
     temporaryRoots.push(repository, outside);
     const root = join(repository, "kb");
     const other = join(repository, "other");
@@ -312,7 +312,7 @@ async function adapterRepositoryFixture(): Promise<{
   readonly root: string;
   readonly contextId: string;
 }> {
-  const repository = await mkdtemp(join(tmpdir(), "hraness-kb-evaluation-adapters-"));
+  const repository = await mkdtemp(join(tmpdir(), "hraness-wordcell-evaluation-adapters-"));
   temporaryRoots.push(repository);
   const root = join(repository, "kb");
   await mkdir(join(root, "notes"), { recursive: true });

@@ -123,7 +123,7 @@ function initializeRepository(): {
   const repository = temporary("kb-git-history");
   git(repository, "init", "--quiet");
   git(repository, "config", "user.email", "kb@example.test");
-  git(repository, "config", "user.name", "KB Test");
+  git(repository, "config", "user.name", "Wordcell Test");
   const root = join(repository, "kb");
 
   write(repository, "kb/notes/memory.md", "# Durable memory\n");
@@ -181,7 +181,7 @@ describe("Git history indexing", () => {
     const repository = temporary("kb-git-literal-pathspec");
     git(repository, "init", "--quiet");
     git(repository, "config", "user.email", "kb@example.test");
-    git(repository, "config", "user.name", "KB Test");
+    git(repository, "config", "user.name", "Wordcell Test");
     write(repository, "outside.md", "# Outside\n");
     git(repository, "add", "-A");
     git(repository, "commit", "--quiet", "-m", "Unrelated repository history");

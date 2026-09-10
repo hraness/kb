@@ -33,7 +33,7 @@ const cleanupRoots: string[] = [];
 const digest = "a".repeat(64);
 
 async function temporaryStore(): Promise<{ readonly root: string; readonly store: CaptureJobStore }> {
-  const created = await mkdtemp(join(tmpdir(), "hraness-kb-capture-jobs-"));
+  const created = await mkdtemp(join(tmpdir(), "hraness-wordcell-capture-jobs-"));
   const root = await realpath(created);
   cleanupRoots.push(root);
   const jobs = join(root, "jobs");

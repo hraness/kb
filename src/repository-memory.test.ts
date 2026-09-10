@@ -141,7 +141,7 @@ describe("repository memory classification", () => {
 
 describe("repository filesystem state", () => {
   test("distinguishes files, directories, absence, and symlinks without rewriting", async () => {
-    const root = await mkdtemp(join(tmpdir(), "hraness-kb-memory-state-"));
+    const root = await mkdtemp(join(tmpdir(), "hraness-wordcell-memory-state-"));
     try {
       await mkdir(join(root, "packages", "kb"), { recursive: true });
       await writeFile(join(root, "packages", "kb", "query.ts"), "export {};\n", "utf8");
@@ -166,7 +166,7 @@ describe("repository filesystem state", () => {
 
 describe("bounded repository memory context", () => {
   test("groups current and historical records, reports match state, and bounds details", async () => {
-    const root = await mkdtemp(join(tmpdir(), "hraness-kb-memory-context-"));
+    const root = await mkdtemp(join(tmpdir(), "hraness-wordcell-memory-context-"));
     try {
       await mkdir(join(root, "packages", "kb", "src"), { recursive: true });
       await writeFile(join(root, "packages", "kb", "src", "query.ts"), "export {};\n", "utf8");
@@ -257,7 +257,7 @@ describe("bounded repository memory context", () => {
   });
 
   test("rejects cross-record case-fold collisions and symlink scopes", async () => {
-    const root = await mkdtemp(join(tmpdir(), "hraness-kb-memory-invalid-"));
+    const root = await mkdtemp(join(tmpdir(), "hraness-wordcell-memory-invalid-"));
     try {
       await mkdir(join(root, "packages", "KB"), { recursive: true });
       await symlink(join(root, "packages", "KB"), join(root, "linked"));
@@ -300,7 +300,7 @@ describe("bounded repository memory context", () => {
 
 describe("whole-vault repository memory audit", () => {
   test("inspects every valid declaration while separating errors, absence, and history", async () => {
-    const root = await mkdtemp(join(tmpdir(), "hraness-kb-memory-audit-"));
+    const root = await mkdtemp(join(tmpdir(), "hraness-wordcell-memory-audit-"));
     try {
       await mkdir(join(root, "packages", "kb"), { recursive: true });
       await mkdir(join(root, "docs"), { recursive: true });

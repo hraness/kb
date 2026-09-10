@@ -5,7 +5,7 @@ import { basename, join, resolve } from "node:path";
 
 import { inspectPackageArtifact } from "./package-artifact.js";
 
-const packageName = "@hraness/kb";
+const packageName = "@hraness/wordcell";
 const npmRegistry = "https://registry.npmjs.org";
 const requiredNpmVersion = "11.19.0";
 const maximumStableVersionPart = BigInt(Number.MAX_SAFE_INTEGER);
@@ -96,16 +96,18 @@ function verifyPublicManifest(manifest: Record<string, unknown>): string {
   stringField(manifest, "description", "package.json");
   keywordField(manifest, "keywords", "package.json");
   exactField(manifest, "license", "MIT", "package.json");
-  exactField(manifest, "contentPolicy", { class: "dual-use" }, "package.json");
+  if (Object.hasOwn(manifest, "contentPolicy")) {
+    throw new Error("package.json must carry no npm content-policy declaration; Wordcell is published as ordinary software");
+  }
   exactField(manifest, "type", "module", "package.json");
   exactField(manifest, "packageManager", "bun@1.3.14", "package.json");
   exactField(manifest, "engines", { bun: ">=1.3.14" }, "package.json");
   exactField(manifest, "repository", {
     type: "git",
-    url: "git+https://github.com/hraness/kb.git",
+    url: "git+https://github.com/hraness/wordcell.git",
   }, "package.json");
-  exactField(manifest, "homepage", "https://hraness.com/kb", "package.json");
-  exactField(manifest, "bugs", { url: "https://github.com/hraness/kb/issues" }, "package.json");
+  exactField(manifest, "homepage", "https://wordcell.io", "package.json");
+  exactField(manifest, "bugs", { url: "https://github.com/hraness/wordcell/issues" }, "package.json");
   exactField(manifest, "publishConfig", {
     access: "public",
     registry: npmRegistry,
@@ -205,7 +207,7 @@ try {
   if (filename !== basename(filename) || !filename.endsWith(".tgz")) {
     throw new Error(`npm pack returned an unsafe filename: ${filename}`);
   }
-  const expectedFilename = `hraness-kb-${manifestVersion}.tgz`;
+  const expectedFilename = `hraness-wordcell-${manifestVersion}.tgz`;
   if (filename !== expectedFilename) {
     throw new Error(`npm pack returned ${filename}, expected ${expectedFilename}`);
   }

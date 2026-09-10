@@ -15,18 +15,18 @@ const packageBudget = Object.freeze({
 });
 
 const requiredPaths = Object.freeze([
-  "DISCLOSURE",
   "LICENSE",
   "README.md",
   "package.json",
   "dist/cli.js",
+  "dist/kb-alias.js",
   "dist/evaluation-builder.js",
   "dist/index.js",
-  "skills/kb/AGENTS.md",
-  "skills/kb/SKILL.md",
-  "skills/kb/agents/openai.yaml",
-  "skills/kb/references/query.md",
-  "skills/kb/references/save-url.md",
+  "skills/wordcell/AGENTS.md",
+  "skills/wordcell/SKILL.md",
+  "skills/wordcell/agents/openai.yaml",
+  "skills/wordcell/references/query.md",
+  "skills/wordcell/references/save-url.md",
   "src/cli.ts",
   "src/clip/metadata-search-tool/Cargo.lock",
   "src/clip/metadata-search-tool/Cargo.toml",
@@ -133,25 +133,24 @@ function relativePackagePath(path: string, type: "directory" | "file"): string {
 
 function verifyAllowedPath(path: string, type: "directory" | "file"): void {
   const allowed = type === "file"
-    ? path === "DISCLOSURE"
-      || path === "LICENSE"
+    ? path === "LICENSE"
       || path === "README.md"
       || path === "package.json"
       || path.startsWith("dist/")
-      || path.startsWith("skills/kb/")
+      || path.startsWith("skills/wordcell/")
       || path.startsWith("src/")
     : path === "dist"
       || path.startsWith("dist/")
       || path === "skills"
-      || path === "skills/kb"
-      || path.startsWith("skills/kb/")
+      || path === "skills/wordcell"
+      || path.startsWith("skills/wordcell/")
       || path === "src"
       || path.startsWith("src/");
   if (!allowed) throw new Error(`Unexpected package path: ${path}`);
   if (type === "file" && /\.(?:property\.)?test\.[cm]?[jt]sx?$/u.test(path)) {
     throw new Error(`Test source entered the package: ${path}`);
   }
-  if (type === "file" && path.endsWith("/AGENTS.md") && path !== "skills/kb/AGENTS.md") {
+  if (type === "file" && path.endsWith("/AGENTS.md") && path !== "skills/wordcell/AGENTS.md") {
     throw new Error(`Repository guidance entered the package: ${path}`);
   }
   if (/(?:^|\/)(?:\.env(?:\.|$)|\.git(?:\/|$)|node_modules(?:\/|$))/u.test(path)) {

@@ -109,17 +109,17 @@ test("the shipped skill resources preserve routing and companion contracts", asy
     manifestSource,
     skillFiles,
   ] = await Promise.all([
-    readFile(resolve(repositoryRoot, "skills/kb/SKILL.md"), "utf8"),
-    readFile(resolve(repositoryRoot, "skills/kb/references/customize.md"), "utf8"),
-    readFile(resolve(repositoryRoot, "skills/kb/references/companion-skills.md"), "utf8"),
-    readFile(resolve(repositoryRoot, "skills/kb/templates/companion-skill.template.md"), "utf8"),
-    readFile(resolve(repositoryRoot, "skills/kb/references/percolate.md"), "utf8"),
+    readFile(resolve(repositoryRoot, "skills/wordcell/SKILL.md"), "utf8"),
+    readFile(resolve(repositoryRoot, "skills/wordcell/references/customize.md"), "utf8"),
+    readFile(resolve(repositoryRoot, "skills/wordcell/references/companion-skills.md"), "utf8"),
+    readFile(resolve(repositoryRoot, "skills/wordcell/templates/companion-skill.template.md"), "utf8"),
+    readFile(resolve(repositoryRoot, "skills/wordcell/references/percolate.md"), "utf8"),
     readFile(resolve(repositoryRoot, "docs/design.md"), "utf8"),
     readFile(resolve(repositoryRoot, "README.md"), "utf8"),
     readFile(resolve(repositoryRoot, "src/cli.ts"), "utf8"),
     readFile(resolve(repositoryRoot, "src/index.ts"), "utf8"),
     readFile(resolve(repositoryRoot, "package.json"), "utf8"),
-    regularFiles(resolve(repositoryRoot, "skills/kb")),
+    regularFiles(resolve(repositoryRoot, "skills/wordcell")),
   ]);
   const manifest = JSON.parse(manifestSource) as {
     readonly exports?: unknown;
@@ -191,8 +191,8 @@ test("the shipped skill resources preserve routing and companion contracts", asy
     "references/url-platforms.md",
     "templates/companion-skill.template.md",
   ]);
-  expect(manifest.version).toBe("0.19.6");
-  expect(manifestFiles).toContain("skills/kb");
+  expect(manifest.version).toBe("0.20.0");
+  expect(manifestFiles).toContain("skills/wordcell");
   expect(publicSourceFiles).toContain("src/repository-memory.ts");
   expect(Object.keys(manifest.exports as Record<string, unknown>).toSorted()).toEqual([
     ".",
@@ -266,10 +266,10 @@ test("the shipped skill resources preserve routing and companion contracts", asy
   ]);
   const usage = /export const usage = `([\s\S]*?)`;/u.exec(cli)?.[1] ?? "";
   expect(createHash("sha256").update(usage).digest("hex"))
-    .toBe("4e3c1e971eeef76a4b7479466914480162c1f3f2b6ab3ad2babcbd121a668576");
+    .toBe("9dc49c9eef419459920fc6951906e1e46c841739e1f0370998a3ad45cbd92646");
   const commandIdentities = usage
     .split("\n")
-    .filter((line) => line.startsWith("  kb "))
+    .filter((line) => line.startsWith("  wordcell "))
     .map((line) => {
       const tokens = line.trim().split(/\s+/u);
       const command = tokens[1] ?? "";
@@ -459,7 +459,7 @@ test("path escape and symbolic links fail before mutation", async () => {
 
 test("portable path aliases fail before inspection or mutation", async () => {
   for (const [firstTarget, secondTarget] of [
-    ["Save-Decision-KB/SKILL.md", "save-decision-kb/skill.md"],
+    ["Save-Decision-Wordcell/SKILL.md", "save-decision-wordcell/skill.md"],
     ["caf\u00e9/SKILL.md", "cafe\u0301/SKILL.md"],
     ["\u03a3/SKILL.md", "\u03c2/skill.md"],
     ["Stra\u00dfe/SKILL.md", "STRASSE/skill.md"],

@@ -2460,7 +2460,7 @@ export async function buildKbEvidenceRoutingEvaluation(
 }
 
 export const kbEvidenceRoutingBuildUsage =
-  "Usage: kb-evaluation-builder <--anchor-seal|--build> --config <checked-config.json> --artifact-root <artifact-B>";
+  "Usage: wordcell-evaluation-builder <--anchor-seal|--build> --config <checked-config.json> --artifact-root <artifact-B>";
 
 export function parseKbEvidenceRoutingBuildCliArguments(arguments_: readonly string[]): {
   readonly mode: "anchor-seal" | "build";

@@ -20,7 +20,7 @@ import { basename, dirname, isAbsolute, join, resolve } from "node:path";
 
 export type MetadataSearchToolAction = "build" | "check";
 
-const TEMPORARY_DIRECTORY_PREFIX = "hraness-kb-metadata-search-tool-";
+const TEMPORARY_DIRECTORY_PREFIX = "hraness-wordcell-metadata-search-tool-";
 const MAX_EXECUTABLE_BYTES = 64 * 1024 * 1024;
 const COPY_BUFFER_BYTES = 64 * 1024;
 

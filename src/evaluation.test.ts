@@ -48,7 +48,7 @@ function corpusInput(): unknown {
       },
       {
         id: "concept-test",
-        text: "How does the KB keep semantic state disposable?",
+        text: "How does the Wordcell keep semantic state disposable?",
         class: "conceptual-recall",
         split: "test",
         answer: "answerable",

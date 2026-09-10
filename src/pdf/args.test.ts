@@ -63,7 +63,7 @@ describe("PDF CLI argument parsing", () => {
   test("rejects ambiguous paths, missing option values, and unsafe bounds", () => {
     expect(parsePdfArguments(["one.pdf", "two.pdf"])).toEqual({
       ok: false,
-      message: "kb pdf requires exactly one PDF path or public URL",
+      message: "wordcell pdf requires exactly one PDF path or public URL",
     });
     expect(parsePdfArguments(["document.pdf", "--slug"])).toEqual({
       ok: false,

@@ -224,7 +224,7 @@ function fixtureMeasurer(
 
 describe("evaluation measurement parent boundary", () => {
   test("adapts an exact cold-index child response for the v2 runner", async () => {
-    const temporary = await mkdtemp(join(tmpdir(), "hraness-kb-measurement-test-"));
+    const temporary = await mkdtemp(join(tmpdir(), "hraness-wordcell-measurement-test-"));
     const seen: EvaluationMeasurementChildRequestV2[] = [];
     try {
       const measure = fixtureMeasurer(temporary, successfulFactory(seen));
@@ -265,7 +265,7 @@ describe("evaluation measurement parent boundary", () => {
   });
 
   test("measures one shared QMD substrate per sealed profile repetition", async () => {
-    const temporary = await mkdtemp(join(tmpdir(), "hraness-kb-measurement-test-"));
+    const temporary = await mkdtemp(join(tmpdir(), "hraness-wordcell-measurement-test-"));
     const seen: EvaluationMeasurementChildRequestV2[] = [];
     try {
       const measure = fixtureMeasurer(temporary, successfulFactory(seen));
@@ -302,7 +302,7 @@ describe("evaluation measurement parent boundary", () => {
   });
 
   test("prepares in one child and measures the exact update in a second fresh child", async () => {
-    const temporary = await mkdtemp(join(tmpdir(), "hraness-kb-measurement-test-"));
+    const temporary = await mkdtemp(join(tmpdir(), "hraness-wordcell-measurement-test-"));
     const seen: EvaluationMeasurementChildRequestV2[] = [];
     try {
       const measure = fixtureMeasurer(temporary, successfulFactory(seen));
@@ -329,7 +329,7 @@ describe("evaluation measurement parent boundary", () => {
   });
 
   test("fails closed on malformed output, timeout, nonzero exit, nonzero LLM work, and count drift", async () => {
-    const temporary = await mkdtemp(join(tmpdir(), "hraness-kb-measurement-test-"));
+    const temporary = await mkdtemp(join(tmpdir(), "hraness-wordcell-measurement-test-"));
     try {
       const cases: readonly [string, EvaluationMeasurementChildProcessFactoryV2][] = [
         ["malformed", () => Promise.resolve({
@@ -361,7 +361,7 @@ describe("evaluation measurement parent boundary", () => {
   });
 
   test("rejects an incremental mutation that drifts from the sealed experiment before spawning", async () => {
-    const temporary = await mkdtemp(join(tmpdir(), "hraness-kb-measurement-test-"));
+    const temporary = await mkdtemp(join(tmpdir(), "hraness-wordcell-measurement-test-"));
     let spawned = 0;
     try {
       const measure = fixtureMeasurer(temporary, () => {
@@ -401,7 +401,7 @@ describe("evaluation measurement parent boundary", () => {
   });
 
   test("returns unavailable without spawning for retrievers without a QMD lane", async () => {
-    const temporary = await mkdtemp(join(tmpdir(), "hraness-kb-measurement-test-"));
+    const temporary = await mkdtemp(join(tmpdir(), "hraness-wordcell-measurement-test-"));
     const exactDescriptor: EvaluationRetrieverDescriptorV2 = { ...descriptor, lanes: ["exact"] };
     let spawned = 0;
     try {
@@ -432,12 +432,12 @@ describe("evaluation measurement parent boundary", () => {
 
 describe("evaluation measurement child boundary", () => {
   test("materializes, indexes, mutates, and then measures one changed note with pinned model bytes", async () => {
-    const temporary = await mkdtemp(join(tmpdir(), "hraness-kb-measurement-child-test-"));
+    const temporary = await mkdtemp(join(tmpdir(), "hraness-wordcell-measurement-child-test-"));
     const repository = join(temporary, "repository");
     const root = join(repository, "kb");
     const modelFile = join(temporary, "pinned.gguf");
     const workRoot = await realpath(
-      await mkdtemp(join(temporary, "hraness-kb-evaluation-measurement-")),
+      await mkdtemp(join(temporary, "hraness-wordcell-evaluation-measurement-")),
     );
     const xdgCache = join(workRoot, "cache", "xdg");
     const requests: SemanticIndexOptions[] = [];
@@ -558,7 +558,7 @@ describe("evaluation measurement child boundary", () => {
   });
 
   test("counts the isolated cache exactly and rejects symlink aliases", async () => {
-    const temporary = await mkdtemp(join(tmpdir(), "hraness-kb-cache-measurement-test-"));
+    const temporary = await mkdtemp(join(tmpdir(), "hraness-wordcell-cache-measurement-test-"));
     await mkdir(join(temporary, "nested"));
     await writeFile(join(temporary, "one"), "1234", "utf8");
     await writeFile(join(temporary, "nested", "two"), "12345", "utf8");
