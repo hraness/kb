@@ -70,10 +70,10 @@ describe("portfolio registry", () => {
 
   test("validates explicit authority state instead of inferring a canonical vault", () => {
     const parsed = parsePortfolioRegistry({
-      ...registry([entry("hra"), entry("hra-v0"), entry("oprte")]),
+      ...registry([entry("oompa"), entry("hra-v0"), entry("oprte")]),
       authorityGroups: [{
         id: "hra-oprte",
-        members: ["hraness/hra", "hraness/hra-v0", "hraness/oprte"],
+        members: ["hraness/oompa", "hraness/hra-v0", "hraness/oprte"],
         state: "unresolved",
         protected: true,
         reason: "Owner decision is still required.",
@@ -84,12 +84,12 @@ describe("portfolio registry", () => {
       protected: true,
     }));
     expect(() => parsePortfolioRegistry({
-      ...registry([entry("hra"), entry("oprte")]),
+      ...registry([entry("oompa"), entry("oprte")]),
       authorityGroups: [{
         id: "hra-oprte",
-        members: ["hraness/hra", "hraness/oprte"],
+        members: ["hraness/oompa", "hraness/oprte"],
         state: "unresolved",
-        canonical: "hraness/hra",
+        canonical: "hraness/oompa",
       }],
     })).toThrow("must not declare");
   });
