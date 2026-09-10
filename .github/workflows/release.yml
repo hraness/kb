@@ -1035,11 +1035,19 @@ jobs:
             echo "::error::npm registry state is ambiguous"
             exit 1
           fi
-          latest_json="$(npm view @hraness/wordcell dist-tags --json \
-            --globalconfig="$clean_global_config" \
-            --registry=https://registry.npmjs.org \
-            --userconfig="$clean_user_config")"
-          LATEST_JSON="$latest_json" EXPECTED_VERSION="$EXPECTED_VERSION" node <<'NODE'
+          registry_json="$(mktemp "$RUNNER_TEMP/wordcell-npm-metadata.XXXXXX")"
+          node --input-type=module > "$registry_json" <<'NODE'
+          const response = await fetch("https://registry.npmjs.org/%40hraness%2Fwordcell", {
+            cache: "no-store", redirect: "error", signal: AbortSignal.timeout(30_000),
+            headers: { Accept: "application/json", "Cache-Control": "no-cache", "User-Agent": "wordcell-release" },
+          });
+          if (response.status !== 200) throw new Error(`npm package metadata returned HTTP ${response.status}`);
+          const text = await response.text();
+          if (text.length > 5_000_000) throw new Error("npm package metadata exceeds its bound");
+          process.stdout.write(text);
+          NODE
+          REGISTRY_JSON="$registry_json" EXPECTED_VERSION="$EXPECTED_VERSION" node <<'NODE'
+          const { readFileSync } = require("node:fs");
           const maximum = 9007199254740991n;
           const pattern = /^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$/u;
           const parse = (value, label) => {
@@ -1051,12 +1059,31 @@ jobs:
             }
             return components;
           };
+          const record = (value, label) => {
+            if (value === null || typeof value !== "object" || Array.isArray(value)) throw new Error(`${label} is not an object`);
+            return value;
+          };
           const candidate = parse(process.env.EXPECTED_VERSION ?? "", "release candidate");
-          const tags = JSON.parse(process.env.LATEST_JSON ?? "null");
-          if (tags === null || typeof tags !== "object" || Array.isArray(tags)) throw new Error("npm dist-tags is not an object");
-          if (!Object.hasOwn(tags, "latest")) {
-            if (Object.keys(tags).length !== 1 || tags.bootstrap !== `${process.env.EXPECTED_VERSION}-bootstrap.1`) {
-              throw new Error("Missing latest requires the exact reviewed prerelease bootstrap tag");
+          const metadata = record(JSON.parse(readFileSync(process.env.REGISTRY_JSON, "utf8")), "npm package metadata");
+          if (metadata.name !== "@hraness/wordcell") throw new Error("npm package metadata names another package");
+          const tags = record(metadata["dist-tags"], "npm dist-tags");
+          const versions = record(metadata.versions, "npm versions");
+          if (Object.hasOwn(versions, process.env.EXPECTED_VERSION)) throw new Error("npm candidate appeared after the exact-version check; reconcile before retrying");
+          const bootstrapVersion = "0.20.0-bootstrap.1";
+          if (!Object.hasOwn(tags, "latest") || tags.latest === bootstrapVersion) {
+            // One reviewed first-publication state, including the observed latest alias.
+            const tagKeys = Object.keys(tags).sort().join(",");
+            if (process.env.EXPECTED_VERSION !== "0.20.0"
+              || (tagKeys !== "bootstrap" && tagKeys !== "bootstrap,latest")
+              || tags.bootstrap !== bootstrapVersion
+              || (Object.hasOwn(tags, "latest") && tags.latest !== bootstrapVersion)
+              || Object.keys(versions).length !== 1 || !Object.hasOwn(versions, bootstrapVersion)) {
+              throw new Error("First publication requires only the exact reviewed bootstrap version and tags");
+            }
+            const bootstrap = record(versions[bootstrapVersion], "npm bootstrap version");
+            if (bootstrap.name !== "@hraness/wordcell" || bootstrap.version !== bootstrapVersion
+              || bootstrap.dist?.integrity !== "sha512-31YbWYj6wCg3TmuFtNAN3bqiOyZUmfPWIlqHzKVau5BRDr41hOx/sw9FZ0D9o4v3i9k8Ly61vRMXqtIFtvYneA==") {
+              throw new Error("npm bootstrap identity or archive differs from the reviewed artifact");
             }
             process.exit(0);
           }
