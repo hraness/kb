@@ -284,6 +284,7 @@
     "src/capture.ts",
     "src/url-intelligence.ts",
     "src/cli.ts",
+    "src/cli-program.ts",
     "src/kb-alias.ts",
     "src/clip/acquire.ts",
     "src/clip/archive-today.ts",

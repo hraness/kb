@@ -5,7 +5,7 @@ import {
   parseArguments,
   runExecutable,
   usage
-} from "./index-dza44gsa.js";
+} from "./index-sy0zety7.js";
 import"./index-bcknqxrq.js";
 import"./index-054mb7d3.js";
 import"./index-tkpxp48t.js";
@@ -45,6 +45,10 @@ import"./index-mxxxytys.js";
 import"./index-2gv8y733.js";
 import"./index-1xxnjn0d.js";
 import"./index-5n05se68.js";
+
+// src/cli.ts
+if (import.meta.main)
+  process.exitCode = await runExecutable();
 export {
   usage,
   runExecutable,

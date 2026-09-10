@@ -28,6 +28,7 @@ const requiredPaths = Object.freeze([
   "skills/wordcell/references/query.md",
   "skills/wordcell/references/save-url.md",
   "src/cli.ts",
+  "src/cli-program.ts",
   "src/clip/metadata-search-tool/Cargo.lock",
   "src/clip/metadata-search-tool/Cargo.toml",
   "src/clip/metadata-search-tool/runner.ts",

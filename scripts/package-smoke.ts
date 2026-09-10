@@ -68,7 +68,6 @@ const baselineRequiredNamedExports = {
   "@hraness/wordcell/search-rules": ["parseSearchRules", "prioritizeSearchHits"],
   "@hraness/wordcell/untrusted-content": ["createUntrustedToolResult", "projectUntrustedJson"],
 } as const;
-const binNames = ["wordcell", "kb", "wordcell-evaluation-builder"];
 // Match the repository's qualified compiler/declaration tuple. Bun's wildcard
 // Node type dependency can otherwise select incompatible declarations.
 const verificationToolchain = Object.freeze({
@@ -271,6 +270,20 @@ async function run(command: string[], cwd: string): Promise<void> {
   });
   const exitCode = await process.exited;
   if (exitCode !== 0) throw new Error(`Command failed (${String(exitCode)}): ${command.join(" ")}`);
+}
+
+async function verifyInstalledHelp(binary: string, cwd: string, expected: string, alias = false): Promise<void> {
+  const child = Bun.spawn([join(cwd, "node_modules", ".bin", binary), "--help"], {
+    cwd, env: environment, stdout: "pipe", stderr: "pipe",
+  });
+  const [exitCode, stdout, stderr] = await Promise.all([
+    child.exited, new Response(child.stdout).text(), new Response(child.stderr).text(),
+  ]);
+  if (exitCode !== 0 || !stdout.includes(expected)) {
+    throw new Error(`Installed ${binary} did not render its command help: exit=${exitCode}, stdout=${JSON.stringify(stdout)}, stderr=${JSON.stringify(stderr)}`);
+  }
+  const expectedStderr = alias ? "kb is now wordcell; the kb alias is removed in 0.21.0\n" : "";
+  if (stderr !== expectedStderr) throw new Error(`Installed ${binary} emitted unexpected diagnostics: ${JSON.stringify(stderr)}`);
 }
 
 function resolveGenuineNodeExecutable(): string {
@@ -624,9 +637,10 @@ try {
   await verifyInstalledMetadataSearchTool(npmConsumer);
   await run([nodeExecutable, "--input-type=module", "-e", `await import(${JSON.stringify(packageName)})`], consumer);
   await run([nodeExecutable, "--input-type=module", "-e", `await import(${JSON.stringify(packageName)})`], npmConsumer);
-  for (const binName of binNames) {
-    await run([join(consumer, "node_modules", ".bin", binName), "--help"], consumer);
-    await run([join(npmConsumer, "node_modules", ".bin", binName), "--help"], npmConsumer);
+  for (const installed of [consumer, npmConsumer]) {
+    await verifyInstalledHelp("wordcell", installed, "wordcell init [directory]");
+    await verifyInstalledHelp("kb", installed, "wordcell init [directory]", true);
+    await run([join(installed, "node_modules", ".bin", "wordcell-evaluation-builder"), "--help"], installed);
   }
   await run([
     join(consumer, "node_modules", ".bin", "wordcell"),
