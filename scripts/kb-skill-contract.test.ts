@@ -116,7 +116,7 @@ test("the shipped skill resources preserve routing and companion contracts", asy
     readFile(resolve(repositoryRoot, "skills/wordcell/references/percolate.md"), "utf8"),
     readFile(resolve(repositoryRoot, "docs/design.md"), "utf8"),
     readFile(resolve(repositoryRoot, "README.md"), "utf8"),
-    readFile(resolve(repositoryRoot, "src/cli.ts"), "utf8"),
+    readFile(resolve(repositoryRoot, "src/cli-program.ts"), "utf8"),
     readFile(resolve(repositoryRoot, "src/index.ts"), "utf8"),
     readFile(resolve(repositoryRoot, "package.json"), "utf8"),
     regularFiles(resolve(repositoryRoot, "skills/wordcell")),

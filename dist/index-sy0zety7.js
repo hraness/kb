@@ -122,7 +122,7 @@ import {
   sanitizeTerminalText
 } from "./index-1xxnjn0d.js";
 
-// src/cli.ts
+// src/cli-program.ts
 import { open } from "fs/promises";
 import { cpus, release, totalmem } from "os";
 import { relative, resolve as resolve3 } from "path";
@@ -780,7 +780,7 @@ ${urlMetadataUsage}`);
 if (false)
   ;
 
-// src/cli.ts
+// src/cli-program.ts
 var defaultOutput2 = {
   stdout: (value) => process.stdout.write(value),
   stderr: (value) => process.stderr.write(value)
@@ -3626,7 +3626,5 @@ async function runExecutable(rawArguments = process.argv.slice(2), dependencies 
     return exitCode;
   });
 }
-if (import.meta.main)
-  process.exitCode = await runExecutable();
 
 export { usage, parseArguments, main4 as main, runExecutable };

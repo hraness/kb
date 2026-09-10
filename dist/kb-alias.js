@@ -2,7 +2,7 @@
 // @bun
 import {
   runExecutable
-} from "./index-dza44gsa.js";
+} from "./index-sy0zety7.js";
 import"./index-bcknqxrq.js";
 import"./index-054mb7d3.js";
 import"./index-tkpxp48t.js";

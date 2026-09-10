@@ -1,0 +1,3662 @@
+import { open } from "node:fs/promises";
+import { cpus, release, totalmem } from "node:os";
+import { relative, resolve } from "node:path";
+import { format } from "node:util";
+
+import {
+  agentContextGuidePath,
+  agentContextMarkerForScope,
+  agentContextNoteId,
+  agentContextNotePath,
+  analyzeAgentContexts,
+  inspectAgentContextRepository,
+  normalizeRepositoryScope,
+  type AgentContextIssue,
+  type AgentContextRepositoryInspection,
+  type AgentContextTargetKind,
+} from "./agent-context.js";
+import {
+  auditAgentGuideRepository,
+  type AgentGuideAdvisory,
+  type AgentGuideAuditReport,
+  type AgentGuideDiscoveryIssue,
+} from "./agent-guide-audit.js";
+import {
+  addNoteRelation,
+  createNote,
+  removeNoteRelation,
+  type CreateNoteInput,
+  type NoteAuthoringResult,
+} from "./authoring.js";
+import {
+  validateMarkdownAttachments,
+  type AttachmentIssue,
+  type AttachmentValidationReport,
+} from "./attachments.js";
+import { main as runClipCommand } from "./clip/cli.js";
+import {
+  readCaptureBundle,
+  verifyCaptureBundle,
+  type ReadCaptureBundleOptions,
+} from "./clip/bundle-reader.js";
+import { diffCaptureBundle, type CaptureBundleDiffOptions } from "./clip/refresh.js";
+import { main as runUrlMetadataCommand } from "./clip/url-metadata-cli.js";
+import { redactSensitiveText } from "./clip/persist.js";
+import { sanitizeTerminalLine, sanitizeTerminalText } from "./clip/terminal.js";
+import { main as runPdfCommand } from "./pdf/cli.js";
+import {
+  buildRetrievalEvaluationReport,
+  MAX_EVALUATION_RESULTS_PER_QUERY,
+  MAX_EVALUATION_TIMEOUT_MS,
+  parseRetrievalEvaluationCorpus,
+  runRetrievalEvaluation,
+  type EvaluationEnvironment,
+  type EvaluationSplit,
+  type RetrievalEvaluationReport,
+} from "./evaluation.js";
+import {
+  knowledgeBaseEvaluationRetrieverIds,
+  openKnowledgeBaseEvaluation,
+} from "./evaluation-kb.js";
+import {
+  lookupNote,
+  renderCatalog,
+  type AuthoredRelation,
+  type Backlink,
+  type LinkIssue,
+  type MetadataScalar,
+  type RelationIssue,
+  type VaultAnalysis,
+} from "./graph.js";
+import { initVault, type InitVaultResult } from "./init.js";
+import type {
+  GitHistoryForNotesResult,
+  GitHistorySearchResult,
+} from "./git.js";
+import { navigateLinks, type LinkDirection, type LinkNeighborhood } from "./navigation.js";
+import {
+  MAX_PERCOLATION_MENTION_PAIRS,
+  MAX_PERCOLATION_MENTIONS,
+  MAX_PERCOLATION_NOTES,
+  MAX_SCOPED_PERCOLATION_MENTION_PAIRS,
+  percolateVault,
+  type PercolationCliOutputV2,
+  type PercolationResult,
+} from "./percolate.js";
+import {
+  auditKnowledgePortfolio,
+  openKnowledgePortfolio,
+  type PortfolioSearchResult,
+} from "./portfolio.js";
+import {
+  MAX_AUTHORIZED_VAULTS,
+  loadPortfolioRegistry,
+  snapshotPortfolioRegistry,
+  type PortfolioRegistryV1,
+} from "./portfolio-registry.js";
+import { parseVaultKey, type VaultKey } from "./portfolio-identity.js";
+import {
+  MAX_QUERY_FILTERS,
+  MAX_QUERY_TAGS,
+  queryVault,
+  validateQueryOptions,
+  type MetadataFilter,
+  type QueryDirection,
+  type QueryRow,
+  type QuerySort,
+} from "./query.js";
+import {
+  buildRepositoryMemoryContext,
+  MAX_REPOSITORY_SCOPES,
+  repositoryMemoryGroupKeys,
+  type RepositoryMemoryContext,
+} from "./repository-memory.js";
+import { validateSearchQuery } from "./search.js";
+import {
+  MAX_SEARCH_RULE_CONFIG_BYTES,
+  parseSearchRules,
+  type SearchRulesV1,
+} from "./search-rules.js";
+import {
+  indexSemanticVault,
+  qmdIndexerVersion,
+  recommendedEmbeddingModel,
+  recommendedEmbeddingModelSha256,
+  sha256EmbeddingModelFile,
+  type SemanticIndexResult,
+} from "./semantic.js";
+import {
+  DEFAULT_SEARCH_RESULTS,
+  MAX_SEARCH_CANDIDATES,
+  MAX_SEARCH_NOTE_REFERENCE_BYTES,
+  MAX_SEARCH_RELATED_SEEDS,
+  MAX_SEARCH_RESULTS,
+  openKnowledgeBase,
+  type KnowledgeBaseGraphOptions,
+  type KnowledgeBaseSearchMode,
+  type KnowledgeBaseSearchOrdering,
+  type KnowledgeBaseSearchResult,
+} from "./sdk.js";
+import {
+  refreshVault,
+  scanVault,
+  type ScanVaultOptions,
+  type VaultSnapshot,
+} from "./vault.js";
+import {
+  MAX_SOURCE_INBOX_PREFIXES,
+  MAX_SOURCE_INBOX_RESULTS,
+  sourceInbox,
+  type SourceInboxReport,
+} from "./source-inbox.js";
+
+type Output = {
+  readonly stdout: (value: string) => void;
+  readonly stderr: (value: string) => void;
+};
+
+const defaultOutput: Output = {
+  stdout: (value) => process.stdout.write(value),
+  stderr: (value) => process.stderr.write(value),
+};
+
+async function readBoundedUtf8(
+  path: string,
+  maximumBytes: number,
+  label: string,
+): Promise<string> {
+  const handle = await open(path, "r");
+  try {
+    const bytes = new Uint8Array(maximumBytes + 1);
+    let offset = 0;
+    while (offset < bytes.byteLength) {
+      const { bytesRead } = await handle.read(
+        bytes,
+        offset,
+        bytes.byteLength - offset,
+        null,
+      );
+      if (bytesRead === 0) break;
+      offset += bytesRead;
+    }
+    if (offset > maximumBytes) {
+      throw new Error(`${label} exceeds the ${maximumBytes}-byte limit`);
+    }
+    try {
+      return new TextDecoder("utf-8", { fatal: true }).decode(bytes.subarray(0, offset));
+    } catch (error) {
+      throw new Error(`${label} is not valid UTF-8`, { cause: error });
+    }
+  } finally {
+    await handle.close();
+  }
+}
+
+async function loadSearchRulesFile(path: string): Promise<SearchRulesV1> {
+  const text = await readBoundedUtf8(
+    path,
+    MAX_SEARCH_RULE_CONFIG_BYTES,
+    "search rules file",
+  );
+  let input: unknown;
+  try {
+    input = JSON.parse(text) as unknown;
+  } catch (error) {
+    throw new Error("search rules file is not valid JSON", { cause: error });
+  }
+  return parseSearchRules(input);
+}
+
+export const usage = `wordcell — auditable capture and derived links for Markdown vaults
+
+Usage:
+  wordcell init [directory] [--json]
+  wordcell clip <url|current> [capture options]
+  wordcell capture show <bundle> [--verify-assets] [--include-source-html] [--json]
+  wordcell capture verify <bundle> [--verify-assets] [--json]
+  wordcell capture diff <bundle> [--repo <repository>] [--ref <ref>] [--json]
+  wordcell url-metadata tool <build|check>
+  wordcell url-metadata backfill [metadata options]
+  wordcell inspect <url> [capture options]
+  wordcell pdf <file-or-url> [PDF options]
+  wordcell refresh [--root <directory>] [--index <path>] [--json]
+  wordcell check [--root <directory>] [--index <path>] [--no-catalog] [--json]
+  wordcell catalog [--root <directory>] [--index <path>] [--json]
+  wordcell graph [--root <directory>] [--index <path>] [--json]
+  wordcell backlinks <note> [--root <directory>] [--index <path>] [--json]
+  wordcell links <note> [--root <directory>] [--direction <in|out|both>] [--depth <count>] [--limit <count>] [--json]
+  wordcell note create <id> --title <title> [--type <type>] [--tag <tag>] [--body <markdown> | --body-file <path>] [--root <directory>] [--json]
+  wordcell relation add <source> <predicate> <target> [--root <directory>] [--expected-revision <sha256:...>] [--json]
+  wordcell relation remove <source> <predicate> <target> [--root <directory>] [--expected-revision <sha256:...>] [--json]
+  wordcell relation list <note> [--root <directory>] [--json]
+  wordcell percolate [note] [--root <directory>] [--min-support <count>] [--limit <count>] [--json]
+  wordcell list [--root <directory>] [--where <path=value>] [--has <path>] [--tag <tag>] [--scope <repository-path>] [--sort <field>] [--order <asc|desc>] [--limit <count>] [--json]
+  wordcell index [--root <directory>] [--database <path>] [--force] [--json]
+  wordcell search <query> [--root <directory>] [--repo <repository>] [--database <path>] [--mode <hybrid|exact|keyword|semantic>] [--rules <file>] [--priority] [--where <path=value>] [--has <path>] [--tag <tag>] [--scope <repository-path>] [--related <note>] [--graph-depth <1|2>] [--no-graph] [--history | --no-history | --require-history] [--limit <count>] [--candidate-limit <count>] [--min-score <score>] [--json]
+  wordcell history <note> [--root <directory>] [--repo <repository>] [--limit <count>] [--cochanged-limit <count>] [--json]
+  wordcell history search <query-or-path> [--root <directory>] [--repo <repository>] [--limit <count>] [--commit-limit <count>] [--cochanged-limit <count>] [--json]
+  wordcell evaluate <manifest.json> [--root <directory>] [--repo <repository>] [--database <path>] [--retriever <id>] [--split <development|test|all>] [--limit <count>] [--cutoff <count>] [--timeout <milliseconds>] [--baseline <id>] [--model-file <path>] [--cache-state <cold|mixed|warm>] [--json]
+  wordcell portfolio search <query> --registry <file> --workspace <directory> (--shared | --vault <owner/id>...) [--mode <hybrid|exact|keyword|semantic>] [--rules <file>] [--priority] [--limit <count>] [--require-all] [--json]
+  wordcell portfolio audit --registry <file> --workspace <directory> (--all | --shared | --vault <owner/id>...) [--strict] [--json]
+  wordcell inbox [--root <directory>] [--source-prefix <directory>] [--limit <count>] [--json]
+  wordcell context <repository-path> [--root <vault>] [--repo <repository>] [--kind <auto|file|directory>] [--json]
+  wordcell agents identity <repository-scope> [--json]
+  wordcell agents check [--root <vault>] [--repo <repository>] [--json]
+  wordcell agents audit [--root <vault>] [--repo <repository>] [--json]
+  wordcell doctor [--json]
+  wordcell adapters [--json]
+
+Run \`wordcell clip --help\` for web capture options or \`wordcell pdf --help\` for PDF conversion options.
+`;
+
+type VaultCommand = "refresh" | "check" | "graph" | "backlinks" | "links";
+
+type ParsedCommand =
+  | { readonly kind: "help" }
+  | { readonly kind: "clip"; readonly arguments: readonly string[] }
+  | {
+      readonly kind: "capture-bundle";
+      readonly action: "show" | "verify";
+      readonly path: string;
+      readonly options: ReadCaptureBundleOptions;
+      readonly json: boolean;
+    }
+  | {
+      readonly kind: "portfolio-search";
+      readonly registryPath: string;
+      readonly workspaceRoot: string;
+      readonly selection: "explicit" | "shared";
+      readonly vaults: readonly VaultKey[];
+      readonly failurePolicy: "partial" | "required";
+      readonly mode?: KnowledgeBaseSearchMode;
+      readonly ordering: KnowledgeBaseSearchOrdering;
+      readonly rulesPath?: string;
+      readonly limit?: number;
+      readonly query: string;
+      readonly json: boolean;
+    }
+  | {
+      readonly kind: "portfolio-audit";
+      readonly registryPath: string;
+      readonly workspaceRoot: string;
+      readonly selection: "all" | "explicit" | "shared";
+      readonly vaults: readonly VaultKey[];
+      readonly strict: boolean;
+      readonly json: boolean;
+    }
+  | {
+      readonly kind: "capture-diff";
+      readonly options: CaptureBundleDiffOptions;
+      readonly json: boolean;
+    }
+  | { readonly kind: "url-metadata"; readonly arguments: readonly string[] }
+  | { readonly kind: "pdf"; readonly arguments: readonly string[] }
+  | { readonly kind: "init"; readonly directory: string; readonly json: boolean }
+  | {
+      readonly kind: "catalog";
+      readonly root: string;
+      readonly options: ScanVaultOptions;
+      readonly json: boolean;
+    }
+  | {
+      readonly kind: "context";
+      readonly root: string;
+      readonly repository: string;
+      readonly target: string;
+      readonly targetKind: AgentContextTargetKind;
+      readonly json: boolean;
+    }
+  | {
+      readonly kind: "agent-identity";
+      readonly scope: string;
+      readonly json: boolean;
+    }
+  | {
+      readonly kind: "agents";
+      readonly action: "check" | "audit";
+      readonly root: string;
+      readonly repository: string;
+      readonly json: boolean;
+    }
+  | {
+      readonly kind: "index";
+      readonly root: string;
+      readonly database?: string;
+      readonly force: boolean;
+      readonly json: boolean;
+    }
+  | {
+      readonly kind: "search";
+      readonly root: string;
+      readonly repository: string;
+      readonly database?: string;
+      readonly mode?: KnowledgeBaseSearchMode;
+      readonly ordering: KnowledgeBaseSearchOrdering;
+      readonly rulesPath?: string;
+      readonly filters: readonly MetadataFilter[];
+      readonly tags: readonly string[];
+      readonly repositoryScopes: readonly string[];
+      readonly graph: false | KnowledgeBaseGraphOptions;
+      readonly history: false | "auto" | "required";
+      readonly limit?: number;
+      readonly candidateLimit?: number;
+      readonly minScore?: number;
+      readonly query: string;
+      readonly json: boolean;
+    }
+  | {
+      readonly kind: "history";
+      readonly action: "note" | "search";
+      readonly root: string;
+      readonly repository: string;
+      readonly query: string;
+      readonly limit?: number;
+      readonly commitLimit?: number;
+      readonly cochangedLimit?: number;
+      readonly json: boolean;
+    }
+  | {
+      readonly kind: "evaluate";
+      readonly manifest: string;
+      readonly root: string;
+      readonly repository: string;
+      readonly database?: string;
+      readonly retrievers: readonly string[];
+      readonly split: EvaluationSplit | "all";
+      readonly limit: number;
+      readonly cutoff: number;
+      readonly timeoutMs: number;
+      readonly baseline: string;
+      readonly modelFile?: string;
+      readonly cacheState: "cold" | "mixed" | "not-applicable" | "warm";
+      readonly json: boolean;
+    }
+  | {
+      readonly kind: "list";
+      readonly root: string;
+      readonly options: ScanVaultOptions;
+      readonly filters: readonly MetadataFilter[];
+      readonly tags: readonly string[];
+      readonly repositoryScopes: readonly string[];
+      readonly sort: QuerySort;
+      readonly direction: QueryDirection;
+      readonly limit?: number;
+      readonly json: boolean;
+    }
+  | {
+      readonly kind: "inbox";
+      readonly root: string;
+      readonly options: ScanVaultOptions;
+      readonly sourcePrefixes: readonly string[];
+      readonly limit: number;
+      readonly json: boolean;
+    }
+  | {
+      readonly kind: VaultCommand;
+      readonly root: string;
+      readonly options: ScanVaultOptions;
+      readonly json: boolean;
+      readonly note?: string;
+      readonly direction?: LinkDirection;
+      readonly depth?: number;
+      readonly limit?: number;
+      readonly noCatalog?: boolean;
+    }
+  | {
+      readonly kind: "note-create";
+      readonly root: string;
+      readonly input: Omit<CreateNoteInput, "body">;
+      readonly body?: string;
+      readonly bodyFile?: string;
+      readonly json: boolean;
+    }
+  | {
+      readonly kind: "relation";
+      readonly action: "add" | "remove" | "list";
+      readonly root: string;
+      readonly source: string;
+      readonly predicate?: string;
+      readonly target?: string;
+      readonly expectedRevision?: `sha256:${string}`;
+      readonly json: boolean;
+    }
+  | {
+      readonly kind: "percolate";
+      readonly root: string;
+      readonly note?: string;
+      readonly minSupport: number;
+      readonly limit: number;
+      readonly json: boolean;
+    };
+
+type ParseResult =
+  | { readonly ok: true; readonly value: ParsedCommand }
+  | { readonly ok: false; readonly message: string };
+
+type CliDependencies = {
+  readonly runClipCommand?: typeof runClipCommand;
+  readonly readCaptureBundle?: typeof readCaptureBundle;
+  readonly verifyCaptureBundle?: typeof verifyCaptureBundle;
+  readonly diffCaptureBundle?: typeof diffCaptureBundle;
+  readonly loadPortfolioRegistry?: typeof loadPortfolioRegistry;
+  readonly openKnowledgePortfolio?: typeof openKnowledgePortfolio;
+  readonly auditKnowledgePortfolio?: typeof auditKnowledgePortfolio;
+  readonly runUrlMetadataCommand?: typeof runUrlMetadataCommand;
+  readonly runPdfCommand?: typeof runPdfCommand;
+  readonly initVault?: typeof initVault;
+  readonly scanVault?: typeof scanVault;
+  readonly refreshVault?: typeof refreshVault;
+  readonly indexSemanticVault?: typeof indexSemanticVault;
+  readonly openKnowledgeBase?: typeof openKnowledgeBase;
+  readonly openKnowledgeBaseEvaluation?: typeof openKnowledgeBaseEvaluation;
+  readonly digestEvaluationModel?: (path: string) => Promise<string>;
+  readonly evaluationNow?: () => Date;
+  readonly createNote?: typeof createNote;
+  readonly addNoteRelation?: typeof addNoteRelation;
+  readonly removeNoteRelation?: typeof removeNoteRelation;
+  readonly percolateVault?: typeof percolateVault;
+  readonly inspectAgentContextRepository?: typeof inspectAgentContextRepository;
+  readonly buildRepositoryMemoryContext?: typeof buildRepositoryMemoryContext;
+  readonly auditAgentGuideRepository?: typeof auditAgentGuideRepository;
+  readonly validateMarkdownAttachments?: typeof validateMarkdownAttachments;
+};
+
+function safe(value: string): string {
+  return sanitizeTerminalLine(redactSensitiveText(value));
+}
+
+function terminalSafeJson(value: unknown): string {
+  return `${JSON.stringify(
+    value,
+    (_key, candidate: unknown) => typeof candidate === "string"
+      ? sanitizeTerminalText(redactSensitiveText(candidate))
+      : candidate,
+    2,
+  )}\n`;
+}
+
+function readValue(arguments_: readonly string[], index: number): string | null {
+  const value = arguments_[index + 1];
+  return value === undefined || value.startsWith("--") ? null : value;
+}
+
+function parseCaptureBundleCommand(arguments_: readonly string[]): ParseResult {
+  const action = arguments_[0];
+  if (action !== "show" && action !== "verify") {
+    return { ok: false, message: "capture bundle action must be show or verify" };
+  }
+  let json = false;
+  let includeSourceHtml = false;
+  let verifyAssets = false;
+  const positional: string[] = [];
+  for (const argument of arguments_.slice(1)) {
+    if (argument === "--json") json = true;
+    else if (argument === "--verify-assets") verifyAssets = true;
+    else if (argument === "--include-source-html" && action === "show") includeSourceHtml = true;
+    else if (argument.startsWith("--")) return { ok: false, message: `unknown capture ${action} option: ${argument}` };
+    else positional.push(argument);
+  }
+  if (positional.length !== 1 || positional[0] === undefined) {
+    return { ok: false, message: `capture ${action} requires exactly one bundle path` };
+  }
+  return {
+    ok: true,
+    value: {
+      kind: "capture-bundle",
+      action,
+      path: positional[0],
+      options: { verifyAssets, ...(includeSourceHtml ? { includeSourceHtml: true } : {}) },
+      json,
+    },
+  };
+}
+
+function parseCaptureDiffCommand(arguments_: readonly string[]): ParseResult {
+  let repository = ".";
+  let ref = "HEAD";
+  let json = false;
+  const positional: string[] = [];
+  for (let index = 0; index < arguments_.length; index += 1) {
+    const argument = arguments_[index];
+    if (argument === undefined) continue;
+    if (argument === "--json") json = true;
+    else if (argument === "--repo" || argument === "--ref") {
+      const value = readValue(arguments_, index);
+      if (value === null) return { ok: false, message: `${argument} requires a value` };
+      if (argument === "--repo") repository = value;
+      else ref = value;
+      index += 1;
+    } else if (argument.startsWith("--")) return { ok: false, message: `unknown capture diff option: ${argument}` };
+    else positional.push(argument);
+  }
+  if (positional.length !== 1 || positional[0] === undefined) {
+    return { ok: false, message: "capture diff requires exactly one bundle path" };
+  }
+  return {
+    ok: true,
+    value: {
+      kind: "capture-diff",
+      options: { bundle: positional[0], repository, ref },
+      json,
+    },
+  };
+}
+
+function parseVaultCommand(command: VaultCommand, arguments_: readonly string[]): ParseResult {
+  let root = ".";
+  let index: string | undefined;
+  let json = false;
+  let direction: LinkDirection = "both";
+  let depth = 1;
+  let limit: number | undefined;
+  let noCatalog = false;
+  const positional: string[] = [];
+
+  for (let cursor = 0; cursor < arguments_.length; cursor += 1) {
+    const argument = arguments_[cursor];
+    if (argument === undefined) continue;
+    if (argument === "--json") {
+      json = true;
+      continue;
+    }
+    if (argument === "--no-catalog" && command === "check") {
+      noCatalog = true;
+      continue;
+    }
+    if (argument === "--root" || argument === "--index") {
+      const value = readValue(arguments_, cursor);
+      if (value === null) return { ok: false, message: `${argument} requires a value` };
+      if (argument === "--root") root = value;
+      else index = value;
+      cursor += 1;
+      continue;
+    }
+    if (command === "links" && (argument === "--direction" || argument === "--depth" || argument === "--limit")) {
+      const value = readValue(arguments_, cursor);
+      if (value === null) return { ok: false, message: `${argument} requires a value` };
+      if (argument === "--direction") {
+        if (value !== "in" && value !== "out" && value !== "both") {
+          return { ok: false, message: "--direction must be in, out, or both" };
+        }
+        direction = value;
+      } else if (argument === "--depth") {
+        const parsed = Number(value);
+        if (!Number.isSafeInteger(parsed) || parsed < 1 || parsed > 10) {
+          return { ok: false, message: "--depth must be an integer from 1 through 10" };
+        }
+        depth = parsed;
+      } else {
+        const parsed = Number(value);
+        if (!Number.isSafeInteger(parsed) || parsed < 1 || parsed > 1_000) {
+          return { ok: false, message: "--limit must be an integer from 1 through 1000" };
+        }
+        limit = parsed;
+      }
+      cursor += 1;
+      continue;
+    }
+    if (argument.startsWith("--")) return { ok: false, message: `unknown ${command} option` };
+    positional.push(argument);
+  }
+
+  if (command === "backlinks" || command === "links") {
+    const note = positional[0];
+    if (positional.length !== 1 || note === undefined) {
+      return { ok: false, message: `${command} requires exactly one note path, title, or alias` };
+    }
+    return {
+      ok: true,
+      value: {
+        kind: command,
+        root,
+        options: index === undefined ? {} : { index },
+        json,
+        note,
+        ...(command === "links"
+          ? { direction, depth, ...(limit === undefined ? {} : { limit }) }
+          : {}),
+      },
+    };
+  }
+  if (positional.length !== 0) return { ok: false, message: `${command} does not accept positional arguments` };
+  return {
+    ok: true,
+    value: {
+      kind: command,
+      root,
+      options: index === undefined ? {} : { index },
+      json,
+      ...(command === "check" && noCatalog ? { noCatalog: true } : {}),
+    },
+  };
+}
+
+function parseCatalogCommand(arguments_: readonly string[]): ParseResult {
+  let root = ".";
+  let index: string | undefined;
+  let json = false;
+  for (let cursor = 0; cursor < arguments_.length; cursor += 1) {
+    const argument = arguments_[cursor];
+    if (argument === "--json") {
+      json = true;
+      continue;
+    }
+    if (argument === "--root" || argument === "--index") {
+      const value = readValue(arguments_, cursor);
+      if (value === null) return { ok: false, message: `${argument} requires a value` };
+      if (argument === "--root") root = value;
+      else index = value;
+      cursor += 1;
+      continue;
+    }
+    return {
+      ok: false,
+      message: argument?.startsWith("--") === true
+        ? "unknown catalog option"
+        : "catalog does not accept positional arguments",
+    };
+  }
+  return {
+    ok: true,
+    value: {
+      kind: "catalog",
+      root,
+      options: index === undefined
+        ? { mentionScope: false }
+        : { index, mentionScope: false },
+      json,
+    },
+  };
+}
+
+type MetadataScalarParse =
+  | { readonly ok: true; readonly value: MetadataScalar }
+  | { readonly ok: false; readonly message: string };
+
+function metadataScalar(raw: string): MetadataScalarParse {
+  const value = raw.trim();
+  if (value.startsWith('"') || value.endsWith('"')) {
+    try {
+      const parsed: unknown = JSON.parse(value);
+      return typeof parsed === "string"
+        ? { ok: true, value: parsed }
+        : { ok: false, message: "quoted --where values must be strings" };
+    } catch {
+      return { ok: false, message: "double-quoted --where values must be valid JSON strings" };
+    }
+  }
+  if (value.startsWith("'") || value.endsWith("'")) {
+    if (!(value.startsWith("'") && value.endsWith("'") && value.length >= 2)) {
+      return { ok: false, message: "single-quoted --where values must have a closing quote" };
+    }
+    return { ok: true, value: value.slice(1, -1).replaceAll("''", "'") };
+  }
+  if (value === "null") return { ok: true, value: null };
+  if (value === "true") return { ok: true, value: true };
+  if (value === "false") return { ok: true, value: false };
+  if (/^-?(?:0|[1-9]\d*)(?:\.\d+)?$/u.test(value)) {
+    const number = Number(value);
+    if (Number.isFinite(number)) {
+      if (Number.isInteger(number) && !Number.isSafeInteger(number)) {
+        return { ok: false, message: "numeric --where values must be safe integers; quote large identifiers" };
+      }
+      return { ok: true, value: number };
+    }
+  }
+  return { ok: true, value };
+}
+
+function querySort(raw: string): QuerySort | null {
+  const value = raw.trim();
+  if (value === "title" || value === "path" || value === "inbound" || value === "outbound") {
+    return { kind: "builtin", field: value };
+  }
+  const path = value.replace(/^(?:meta|metadata)\./u, "");
+  return path === "" ? null : { kind: "metadata", path };
+}
+
+function parseListCommand(arguments_: readonly string[]): ParseResult {
+  let root = ".";
+  let index: string | undefined;
+  let json = false;
+  let sort: QuerySort = { kind: "builtin", field: "path" };
+  let direction: QueryDirection = "asc";
+  let limit: number | undefined;
+  const filters: MetadataFilter[] = [];
+  const tags: string[] = [];
+  const repositoryScopes: string[] = [];
+
+  for (let cursor = 0; cursor < arguments_.length; cursor += 1) {
+    const argument = arguments_[cursor];
+    if (argument === undefined) continue;
+    if (argument === "--json") {
+      json = true;
+      continue;
+    }
+    if (
+      argument === "--root"
+      || argument === "--index"
+      || argument === "--where"
+      || argument === "--has"
+      || argument === "--tag"
+      || argument === "--scope"
+      || argument === "--repository-scope"
+      || argument === "--sort"
+      || argument === "--order"
+      || argument === "--limit"
+    ) {
+      const value = readValue(arguments_, cursor);
+      if (value === null) return { ok: false, message: `${argument} requires a value` };
+      if (argument === "--root") root = value;
+      else if (argument === "--index") index = value;
+      else if (argument === "--tag") {
+        if (tags.length >= MAX_QUERY_TAGS) {
+          return {
+            ok: false,
+            message: `Query tags may contain at most ${MAX_QUERY_TAGS} entries.`,
+          };
+        }
+        tags.push(value);
+      } else if (argument === "--scope" || argument === "--repository-scope") {
+        if (repositoryScopes.length >= MAX_REPOSITORY_SCOPES) {
+          return {
+            ok: false,
+            message: `Repository scope filters may contain at most ${MAX_REPOSITORY_SCOPES} entries.`,
+          };
+        }
+        repositoryScopes.push(value);
+      } else if (argument === "--has") {
+        if (value.trim() === "") return { ok: false, message: "--has requires a metadata path" };
+        if (filters.length >= MAX_QUERY_FILTERS) {
+          return {
+            ok: false,
+            message: `Query filters may contain at most ${MAX_QUERY_FILTERS} entries.`,
+          };
+        }
+        filters.push({ kind: "exists", path: value });
+      } else if (argument === "--where") {
+        const equals = value.indexOf("=");
+        const path = equals === -1 ? "" : value.slice(0, equals).trim();
+        if (path === "") return { ok: false, message: "--where requires path=value" };
+        const scalar = metadataScalar(value.slice(equals + 1));
+        if (!scalar.ok) return scalar;
+        if (filters.length >= MAX_QUERY_FILTERS) {
+          return {
+            ok: false,
+            message: `Query filters may contain at most ${MAX_QUERY_FILTERS} entries.`,
+          };
+        }
+        filters.push({ kind: "equals", path, value: scalar.value });
+      } else if (argument === "--sort") {
+        const parsed = querySort(value);
+        if (parsed === null) return { ok: false, message: "--sort requires a field" };
+        sort = parsed;
+      } else if (argument === "--order") {
+        if (value !== "asc" && value !== "desc") {
+          return { ok: false, message: "--order must be asc or desc" };
+        }
+        direction = value;
+      } else {
+        const parsed = Number(value);
+        if (!Number.isSafeInteger(parsed) || parsed < 0) {
+          return { ok: false, message: "--limit must be a non-negative integer" };
+        }
+        limit = parsed;
+      }
+      cursor += 1;
+      continue;
+    }
+    return {
+      ok: false,
+      message: argument.startsWith("--")
+        ? "unknown list option"
+        : "list does not accept positional arguments",
+    };
+  }
+
+  try {
+    validateQueryOptions({
+      filters,
+      tags,
+      repositoryScopes,
+      sort,
+      direction,
+      ...(limit === undefined ? {} : { limit }),
+    });
+  } catch (error: unknown) {
+    return {
+      ok: false,
+      message: error instanceof Error ? error.message : String(error),
+    };
+  }
+  return {
+    ok: true,
+    value: {
+      kind: "list",
+      root,
+      options: index === undefined ? {} : { index },
+      filters,
+      tags,
+      repositoryScopes,
+      sort,
+      direction,
+      ...(limit === undefined ? {} : { limit }),
+      json,
+    },
+  };
+}
+
+function parseInboxCommand(arguments_: readonly string[]): ParseResult {
+  let root = ".";
+  let index: string | undefined;
+  let json = false;
+  let limit = 100;
+  const sourcePrefixes: string[] = [];
+  for (let cursor = 0; cursor < arguments_.length; cursor += 1) {
+    const argument = arguments_[cursor];
+    if (argument === undefined) continue;
+    if (argument === "--json") {
+      json = true;
+      continue;
+    }
+    if (
+      argument === "--root"
+      || argument === "--index"
+      || argument === "--limit"
+      || argument === "--source-prefix"
+    ) {
+      const value = readValue(arguments_, cursor);
+      if (value === null) return { ok: false, message: `${argument} requires a value` };
+      if (argument === "--root") root = value;
+      else if (argument === "--index") index = value;
+      else if (argument === "--source-prefix") {
+        if (sourcePrefixes.length >= MAX_SOURCE_INBOX_PREFIXES) {
+          return {
+            ok: false,
+            message: `Source inbox accepts at most ${MAX_SOURCE_INBOX_PREFIXES} source prefixes.`,
+          };
+        }
+        sourcePrefixes.push(value);
+      } else {
+        const parsed = Number(value);
+        if (!Number.isSafeInteger(parsed) || parsed < 0 || parsed > MAX_SOURCE_INBOX_RESULTS) {
+          return {
+            ok: false,
+            message: `--limit must be an integer from 0 through ${MAX_SOURCE_INBOX_RESULTS}`,
+          };
+        }
+        limit = parsed;
+      }
+      cursor += 1;
+      continue;
+    }
+    return {
+      ok: false,
+      message: argument.startsWith("--")
+        ? "unknown inbox option"
+        : "inbox does not accept positional arguments",
+    };
+  }
+  return {
+    ok: true,
+    value: {
+      kind: "inbox",
+      root,
+      options: index === undefined ? { mentionScope: false } : { index, mentionScope: false },
+      sourcePrefixes,
+      limit,
+      json,
+    },
+  };
+}
+
+function parseSemanticCommand(command: "index" | "search", arguments_: readonly string[]): ParseResult {
+  let root = ".";
+  let repository = ".";
+  let database: string | undefined;
+  let force = false;
+  let json = false;
+  let mode: KnowledgeBaseSearchMode | undefined;
+  let priority = false;
+  let rulesPath: string | undefined;
+  let limit: number | undefined;
+  let candidateLimit: number | undefined;
+  let minScore: number | undefined;
+  let graphDepth: number | undefined;
+  let noGraph = false;
+  let history = false;
+  let noHistory = false;
+  let requireHistory = false;
+  const filters: MetadataFilter[] = [];
+  const tags: string[] = [];
+  const repositoryScopes: string[] = [];
+  const related: string[] = [];
+  const positional: string[] = [];
+
+  for (let cursor = 0; cursor < arguments_.length; cursor += 1) {
+    const argument = arguments_[cursor];
+    if (argument === undefined) continue;
+    if (argument === "--json") {
+      json = true;
+      continue;
+    }
+    if (argument === "--force" && command === "index") {
+      force = true;
+      continue;
+    }
+    if (argument === "--no-graph" && command === "search") {
+      noGraph = true;
+      continue;
+    }
+    if (argument === "--no-history" && command === "search") {
+      noHistory = true;
+      continue;
+    }
+    if (argument === "--history" && command === "search") {
+      history = true;
+      continue;
+    }
+    if (argument === "--require-history" && command === "search") {
+      requireHistory = true;
+      continue;
+    }
+    if (argument === "--priority" && command === "search") {
+      priority = true;
+      continue;
+    }
+    if (
+      argument === "--root"
+      || argument === "--database"
+      || (command === "search" && (argument === "--repo" || argument === "--rules"))
+    ) {
+      const value = readValue(arguments_, cursor);
+      if (value === null) return { ok: false, message: `${argument} requires a value` };
+      if (argument === "--root") root = value;
+      else if (argument === "--repo") repository = value;
+      else if (argument === "--rules") rulesPath = value;
+      else database = value;
+      cursor += 1;
+      continue;
+    }
+    if (command === "search" && (
+      argument === "--mode"
+      || argument === "--limit"
+      || argument === "--candidate-limit"
+      || argument === "--min-score"
+      || argument === "--where"
+      || argument === "--has"
+      || argument === "--tag"
+      || argument === "--scope"
+      || argument === "--repository-scope"
+      || argument === "--related"
+      || argument === "--graph-depth"
+    )) {
+      const value = readValue(arguments_, cursor);
+      if (value === null) return { ok: false, message: `${argument} requires a value` };
+      if (argument === "--mode") {
+        if (value !== "hybrid" && value !== "exact" && value !== "semantic" && value !== "keyword") {
+          return { ok: false, message: "--mode must be hybrid, exact, keyword, or semantic" };
+        }
+        mode = value;
+      } else if (argument === "--where") {
+        const equals = value.indexOf("=");
+        const path = equals === -1 ? "" : value.slice(0, equals).trim();
+        if (path === "") return { ok: false, message: "--where requires path=value" };
+        const scalar = metadataScalar(value.slice(equals + 1));
+        if (!scalar.ok) return scalar;
+        if (filters.length >= MAX_QUERY_FILTERS) {
+          return {
+            ok: false,
+            message: `Query filters may contain at most ${MAX_QUERY_FILTERS} entries.`,
+          };
+        }
+        filters.push({ kind: "equals", path, value: scalar.value });
+      } else if (argument === "--has") {
+        if (value.trim() === "") return { ok: false, message: "--has requires a metadata path" };
+        if (filters.length >= MAX_QUERY_FILTERS) {
+          return {
+            ok: false,
+            message: `Query filters may contain at most ${MAX_QUERY_FILTERS} entries.`,
+          };
+        }
+        filters.push({ kind: "exists", path: value });
+      } else if (argument === "--tag") {
+        if (tags.length >= MAX_QUERY_TAGS) {
+          return {
+            ok: false,
+            message: `Query tags may contain at most ${MAX_QUERY_TAGS} entries.`,
+          };
+        }
+        tags.push(value);
+      } else if (argument === "--scope" || argument === "--repository-scope") {
+        if (repositoryScopes.length >= MAX_REPOSITORY_SCOPES) {
+          return {
+            ok: false,
+            message: `Repository scope filters may contain at most ${MAX_REPOSITORY_SCOPES} entries.`,
+          };
+        }
+        repositoryScopes.push(value);
+      } else if (argument === "--related") {
+        if (related.length >= MAX_SEARCH_RELATED_SEEDS) {
+          return {
+            ok: false,
+            message: `Hybrid search accepts at most ${MAX_SEARCH_RELATED_SEEDS} explicit related-note seeds.`,
+          };
+        }
+        if (Buffer.byteLength(value, "utf8") > MAX_SEARCH_NOTE_REFERENCE_BYTES) {
+          return {
+            ok: false,
+            message: `Search related-note seed ${related.length + 1} must be at most `
+              + `${MAX_SEARCH_NOTE_REFERENCE_BYTES.toLocaleString("en-US")} UTF-8 bytes.`,
+          };
+        }
+        if (value.trim() === "") {
+          return {
+            ok: false,
+            message: `Search related-note seed ${related.length + 1} must not be empty.`,
+          };
+        }
+        related.push(value);
+      } else if (argument === "--min-score") {
+        const parsed = Number(value);
+        if (!Number.isFinite(parsed) || parsed < 0 || parsed > 1) {
+          return { ok: false, message: "--min-score must be a number from 0 through 1" };
+        }
+        minScore = parsed;
+      } else {
+        const parsed = Number(value);
+        if (argument === "--limit" || argument === "--candidate-limit") {
+          const maximum = argument === "--limit"
+            ? MAX_SEARCH_RESULTS
+            : MAX_SEARCH_CANDIDATES;
+          if (!Number.isSafeInteger(parsed) || parsed < 1 || parsed > maximum) {
+            return {
+              ok: false,
+              message: `${argument} must be an integer from 1 through ${maximum}`,
+            };
+          }
+          if (argument === "--limit") limit = parsed;
+          else candidateLimit = parsed;
+        } else if (!Number.isSafeInteger(parsed) || parsed < 1 || parsed > 2) {
+          return { ok: false, message: "--graph-depth must be 1 or 2" };
+        } else {
+          graphDepth = parsed;
+        }
+      }
+      cursor += 1;
+      continue;
+    }
+    if (argument.startsWith("--")) return { ok: false, message: `unknown ${command} option` };
+    positional.push(argument);
+  }
+
+  if (command === "index") {
+    if (positional.length > 0) return { ok: false, message: "index does not accept positional arguments" };
+    return {
+      ok: true,
+      value: { kind: "index", root, ...(database === undefined ? {} : { database }), force, json },
+    };
+  }
+  if (noHistory && requireHistory) {
+    return {
+      ok: false,
+      message: "--no-history and --require-history cannot be used together",
+    };
+  }
+  if (history && noHistory) {
+    return {
+      ok: false,
+      message: "--history and --no-history cannot be used together",
+    };
+  }
+  if (history && requireHistory) {
+    return {
+      ok: false,
+      message: "--history and --require-history cannot be used together",
+    };
+  }
+  if (candidateLimit !== undefined && candidateLimit < (limit ?? DEFAULT_SEARCH_RESULTS)) {
+    return {
+      ok: false,
+      message: "Search candidate limit must be at least the result limit.",
+    };
+  }
+  if (mode === "exact" && minScore !== undefined) {
+    return {
+      ok: false,
+      message: "Search minimum score applies only to hybrid, keyword, or semantic mode.",
+    };
+  }
+  if (priority && rulesPath === undefined) {
+    return { ok: false, message: "--priority requires --rules" };
+  }
+  const rawQuery = positional.join(" ");
+  if (rawQuery.trim() === "") return { ok: false, message: "search requires a query" };
+  let query: string;
+  try {
+    query = validateSearchQuery(rawQuery).query;
+    validateQueryOptions({ filters, tags, repositoryScopes });
+  } catch (error: unknown) {
+    return {
+      ok: false,
+      message: error instanceof Error ? error.message : String(error),
+    };
+  }
+  return {
+    ok: true,
+    value: {
+      kind: "search",
+      root,
+      repository,
+      ...(database === undefined ? {} : { database }),
+      ...(mode === undefined ? {} : { mode }),
+      ordering: priority ? "priority-then-relevance" : "relevance",
+      ...(rulesPath === undefined ? {} : { rulesPath }),
+      filters,
+      tags,
+      repositoryScopes,
+      graph: noGraph
+        ? false
+        : {
+            ...(related.length === 0 ? {} : { related }),
+            ...(graphDepth === undefined ? {} : { depth: graphDepth }),
+          },
+      history: requireHistory ? "required" : history ? "auto" : false,
+      ...(limit === undefined ? {} : { limit }),
+      ...(candidateLimit === undefined ? {} : { candidateLimit }),
+      ...(minScore === undefined ? {} : { minScore }),
+      query,
+      json,
+    },
+  };
+}
+
+function parseContextCommand(arguments_: readonly string[]): ParseResult {
+  let root = ".";
+  let repository = ".";
+  let targetKind: AgentContextTargetKind = "auto";
+  let json = false;
+  const positional: string[] = [];
+
+  for (let cursor = 0; cursor < arguments_.length; cursor += 1) {
+    const argument = arguments_[cursor];
+    if (argument === undefined) continue;
+    if (argument === "--json") {
+      json = true;
+      continue;
+    }
+    if (argument === "--root" || argument === "--repo" || argument === "--kind") {
+      const value = readValue(arguments_, cursor);
+      if (value === null) return { ok: false, message: `${argument} requires a value` };
+      if (argument === "--root") root = value;
+      else if (argument === "--repo") repository = value;
+      else {
+        if (value !== "auto" && value !== "file" && value !== "directory") {
+          return { ok: false, message: "--kind must be auto, file, or directory" };
+        }
+        targetKind = value;
+      }
+      cursor += 1;
+      continue;
+    }
+    if (argument.startsWith("--")) return { ok: false, message: "unknown context option" };
+    positional.push(argument);
+  }
+  const target = positional[0];
+  if (target === undefined || positional.length !== 1) {
+    return { ok: false, message: "context requires exactly one repository path" };
+  }
+  return {
+    ok: true,
+    value: {
+      kind: "context",
+      root,
+      repository,
+      target,
+      targetKind,
+      json,
+    },
+  };
+}
+
+const MAX_HISTORY_QUERY_CHARACTERS = 500;
+const MAX_HISTORY_RESULT_LIMIT = 100;
+const MAX_HISTORY_COMMIT_LIMIT = 50;
+const MAX_HISTORY_COCHANGED_LIMIT = 100;
+
+function parseHistoryCommand(arguments_: readonly string[]): ParseResult {
+  const search = arguments_[0] === "search";
+  let root = ".";
+  let repository = ".";
+  let limit: number | undefined;
+  let commitLimit: number | undefined;
+  let cochangedLimit: number | undefined;
+  let json = false;
+  const positional: string[] = [];
+
+  for (let cursor = search ? 1 : 0; cursor < arguments_.length; cursor += 1) {
+    const argument = arguments_[cursor];
+    if (argument === undefined) continue;
+    if (argument === "--json") {
+      json = true;
+      continue;
+    }
+    if (
+      argument === "--root"
+      || argument === "--repo"
+      || argument === "--limit"
+      || argument === "--commit-limit"
+      || argument === "--cochanged-limit"
+    ) {
+      const value = readValue(arguments_, cursor);
+      if (value === null) return { ok: false, message: `${argument} requires a value` };
+      if (argument === "--root") root = value;
+      else if (argument === "--repo") repository = value;
+      else {
+        if (!search && argument === "--commit-limit") {
+          return {
+            ok: false,
+            message: "history <note> uses --limit for its per-note commit limit",
+          };
+        }
+        const maximum = argument === "--cochanged-limit"
+          ? MAX_HISTORY_COCHANGED_LIMIT
+          : argument === "--commit-limit"
+            ? MAX_HISTORY_COMMIT_LIMIT
+            : search
+              ? MAX_HISTORY_RESULT_LIMIT
+              : MAX_HISTORY_COMMIT_LIMIT;
+        const minimum = argument === "--cochanged-limit" ? 0 : 1;
+        const parsed = Number(value);
+        if (!Number.isSafeInteger(parsed) || parsed < minimum || parsed > maximum) {
+          return {
+            ok: false,
+            message: `${argument} must be an integer from ${minimum} through ${maximum}`,
+          };
+        }
+        if (argument === "--cochanged-limit") cochangedLimit = parsed;
+        else if (argument === "--commit-limit") commitLimit = parsed;
+        else limit = parsed;
+      }
+      cursor += 1;
+      continue;
+    }
+    if (argument.startsWith("--")) {
+      return { ok: false, message: `unknown history ${search ? "search " : ""}option` };
+    }
+    positional.push(argument);
+  }
+
+  const query = search ? positional.join(" ").trim() : positional[0]?.trim();
+  if (query === undefined || query === "" || (!search && positional.length !== 1)) {
+    return {
+      ok: false,
+      message: search
+        ? "history search requires a query or repository path"
+        : "history requires exactly one note path, title, or alias",
+    };
+  }
+  if (query.length > MAX_HISTORY_QUERY_CHARACTERS || /[\0\r\n]/u.test(query)) {
+    return {
+      ok: false,
+      message: `history ${search ? "search query" : "note"} must be one to ${MAX_HISTORY_QUERY_CHARACTERS} characters on one line`,
+    };
+  }
+  return {
+    ok: true,
+    value: {
+      kind: "history",
+      action: search ? "search" : "note",
+      root,
+      repository,
+      query,
+      ...(limit === undefined ? {} : { limit }),
+      ...(commitLimit === undefined ? {} : { commitLimit }),
+      ...(cochangedLimit === undefined ? {} : { cochangedLimit }),
+      json,
+    },
+  };
+}
+
+function parseAgentsCommand(arguments_: readonly string[]): ParseResult {
+  const action = arguments_[0];
+  if (action === "identity") {
+    let json = false;
+    const positional: string[] = [];
+    for (const argument of arguments_.slice(1)) {
+      if (argument === "--json") json = true;
+      else if (argument.startsWith("--")) {
+        return { ok: false, message: "unknown agents identity option" };
+      } else {
+        positional.push(argument);
+      }
+    }
+    const scope = positional[0];
+    if (scope === undefined || positional.length !== 1) {
+      return {
+        ok: false,
+        message: "agents identity requires exactly one repository scope",
+      };
+    }
+    return {
+      ok: true,
+      value: { kind: "agent-identity", scope, json },
+    };
+  }
+  if (action !== "check" && action !== "audit") {
+    return { ok: false, message: "agents requires identity, check, or audit" };
+  }
+  let root = ".";
+  let repository = ".";
+  let json = false;
+  for (let cursor = 1; cursor < arguments_.length; cursor += 1) {
+    const argument = arguments_[cursor];
+    if (argument === undefined) continue;
+    if (argument === "--json") {
+      json = true;
+      continue;
+    }
+    if (argument === "--root" || argument === "--repo") {
+      const value = readValue(arguments_, cursor);
+      if (value === null) return { ok: false, message: `${argument} requires a value` };
+      if (argument === "--root") root = value;
+      else repository = value;
+      cursor += 1;
+      continue;
+    }
+    return {
+      ok: false,
+      message: argument.startsWith("--")
+        ? `unknown agents ${action} option`
+        : `agents ${action} does not accept positional arguments`,
+    };
+  }
+  return {
+    ok: true,
+    value: { kind: "agents", action, root, repository, json },
+  };
+}
+
+function boundedInteger(
+  raw: string,
+  option: string,
+  minimum: number,
+  maximum: number,
+): number | ParseResult {
+  const value = Number(raw);
+  if (!Number.isSafeInteger(value) || value < minimum || value > maximum) {
+    return {
+      ok: false,
+      message: `${option} must be an integer from ${minimum} through ${maximum}`,
+    };
+  }
+  return value;
+}
+
+function parseEvaluationCommand(arguments_: readonly string[]): ParseResult {
+  let root = ".";
+  let repository = ".";
+  let database: string | undefined;
+  let split: EvaluationSplit | "all" = "test";
+  let limit = 20;
+  let cutoff = 10;
+  let timeoutMs = 30_000;
+  let baseline: string | undefined;
+  let modelFile: string | undefined;
+  let cacheState: "cold" | "mixed" | "warm" = "mixed";
+  let json = false;
+  const retrievers: string[] = [];
+  const positional: string[] = [];
+  const supported = new Set<string>(knowledgeBaseEvaluationRetrieverIds);
+
+  for (let cursor = 0; cursor < arguments_.length; cursor += 1) {
+    const argument = arguments_[cursor];
+    if (argument === undefined) continue;
+    if (argument === "--json") {
+      json = true;
+      continue;
+    }
+    if (
+      argument === "--root"
+      || argument === "--repo"
+      || argument === "--database"
+      || argument === "--retriever"
+      || argument === "--split"
+      || argument === "--limit"
+      || argument === "--cutoff"
+      || argument === "--timeout"
+      || argument === "--baseline"
+      || argument === "--model-file"
+      || argument === "--cache-state"
+    ) {
+      const value = readValue(arguments_, cursor);
+      if (value === null) return { ok: false, message: `${argument} requires a value` };
+      if (argument === "--root") root = value;
+      else if (argument === "--repo") repository = value;
+      else if (argument === "--database") database = value;
+      else if (argument === "--retriever") {
+        if (!supported.has(value)) {
+          return {
+            ok: false,
+            message: `--retriever must be one of ${knowledgeBaseEvaluationRetrieverIds.join(", ")}`,
+          };
+        }
+        retrievers.push(value);
+      } else if (argument === "--split") {
+        if (value !== "development" && value !== "test" && value !== "all") {
+          return { ok: false, message: "--split must be development, test, or all" };
+        }
+        split = value;
+      } else if (argument === "--limit" || argument === "--cutoff") {
+        const parsed = boundedInteger(
+          value,
+          argument,
+          1,
+          MAX_CLI_EVALUATION_RESULT_LIMIT,
+        );
+        if (typeof parsed !== "number") return parsed;
+        if (argument === "--limit") limit = parsed;
+        else cutoff = parsed;
+      } else if (argument === "--timeout") {
+        const parsed = boundedInteger(value, argument, 1, MAX_EVALUATION_TIMEOUT_MS);
+        if (typeof parsed !== "number") return parsed;
+        timeoutMs = parsed;
+      } else if (argument === "--baseline") baseline = value;
+      else if (argument === "--model-file") modelFile = value;
+      else {
+        if (value !== "cold" && value !== "mixed" && value !== "warm") {
+          return { ok: false, message: "--cache-state must be cold, mixed, or warm" };
+        }
+        cacheState = value;
+      }
+      cursor += 1;
+      continue;
+    }
+    if (argument.startsWith("--")) {
+      return { ok: false, message: "unknown evaluate option" };
+    }
+    positional.push(argument);
+  }
+
+  const manifest = positional[0];
+  if (manifest === undefined || positional.length !== 1) {
+    return { ok: false, message: "evaluate requires exactly one manifest path" };
+  }
+  const selected = retrievers.length === 0
+    ? [...knowledgeBaseEvaluationRetrieverIds]
+    : retrievers;
+  if (new Set(selected).size !== selected.length) {
+    return { ok: false, message: "--retriever values must not repeat" };
+  }
+  const selectedBaseline = baseline ?? (selected.includes("exact") ? "exact" : selected[0]);
+  if (selectedBaseline === undefined || !selected.includes(selectedBaseline)) {
+    return { ok: false, message: "--baseline must name a selected retriever" };
+  }
+  if (cutoff > limit) {
+    return { ok: false, message: "--cutoff must not exceed --limit" };
+  }
+  const needsModel = selected.includes("semantic") || selected.includes("hybrid");
+  if (needsModel && modelFile === undefined) {
+    return {
+      ok: false,
+      message: "semantic and hybrid evaluation require --model-file to bind the pinned model bytes",
+    };
+  }
+  if (!needsModel && modelFile !== undefined) {
+    return {
+      ok: false,
+      message: "--model-file is only valid when semantic or hybrid evaluation is selected",
+    };
+  }
+  return {
+    ok: true,
+    value: {
+      kind: "evaluate",
+      manifest,
+      root,
+      repository,
+      ...(database === undefined ? {} : { database }),
+      retrievers: selected,
+      split,
+      limit,
+      cutoff,
+      timeoutMs,
+      baseline: selectedBaseline,
+      ...(modelFile === undefined ? {} : { modelFile }),
+      cacheState: needsModel ? cacheState : "not-applicable",
+      json,
+    },
+  };
+}
+
+function parseNoteCommand(arguments_: readonly string[]): ParseResult {
+  if (arguments_[0] !== "create") {
+    return { ok: false, message: "note requires create" };
+  }
+  let root = ".";
+  let title: string | undefined;
+  let type = "note";
+  let body: string | undefined;
+  let bodyFile: string | undefined;
+  let json = false;
+  const tags: string[] = [];
+  const positional: string[] = [];
+  for (let cursor = 1; cursor < arguments_.length; cursor += 1) {
+    const argument = arguments_[cursor];
+    if (argument === undefined) continue;
+    if (argument === "--json") {
+      json = true;
+      continue;
+    }
+    if (
+      argument === "--root"
+      || argument === "--title"
+      || argument === "--type"
+      || argument === "--tag"
+      || argument === "--body"
+      || argument === "--body-file"
+    ) {
+      const value = readValue(arguments_, cursor);
+      if (value === null) return { ok: false, message: `${argument} requires a value` };
+      if (argument === "--root") root = value;
+      else if (argument === "--title") title = value;
+      else if (argument === "--type") type = value;
+      else if (argument === "--tag") tags.push(value);
+      else if (argument === "--body") body = value;
+      else bodyFile = value;
+      cursor += 1;
+      continue;
+    }
+    if (argument.startsWith("--")) {
+      return { ok: false, message: "unknown note create option" };
+    }
+    positional.push(argument);
+  }
+  const id = positional[0];
+  if (id === undefined || positional.length !== 1) {
+    return { ok: false, message: "note create requires exactly one canonical note ID" };
+  }
+  if (title === undefined) return { ok: false, message: "note create requires --title" };
+  if (body !== undefined && bodyFile !== undefined) {
+    return { ok: false, message: "note create accepts either --body or --body-file, not both" };
+  }
+  return {
+    ok: true,
+    value: {
+      kind: "note-create",
+      root,
+      input: { id, title, type, ...(tags.length === 0 ? {} : { tags }) },
+      ...(body === undefined ? {} : { body }),
+      ...(bodyFile === undefined ? {} : { bodyFile }),
+      json,
+    },
+  };
+}
+
+function isNoteRevision(value: string): value is `sha256:${string}` {
+  return /^sha256:[0-9a-f]{64}$/u.test(value);
+}
+
+function parseRelationCommand(arguments_: readonly string[]): ParseResult {
+  const action = arguments_[0];
+  if (action !== "add" && action !== "remove" && action !== "list") {
+    return { ok: false, message: "relation requires add, remove, or list" };
+  }
+  let root = ".";
+  let expectedRevision: `sha256:${string}` | undefined;
+  let json = false;
+  const positional: string[] = [];
+  for (let cursor = 1; cursor < arguments_.length; cursor += 1) {
+    const argument = arguments_[cursor];
+    if (argument === undefined) continue;
+    if (argument === "--json") {
+      json = true;
+      continue;
+    }
+    if (argument === "--root" || argument === "--expected-revision") {
+      const value = readValue(arguments_, cursor);
+      if (value === null) return { ok: false, message: `${argument} requires a value` };
+      if (argument === "--root") {
+        root = value;
+      } else {
+        if (!isNoteRevision(value)) {
+          return {
+            ok: false,
+            message: "--expected-revision must be sha256 followed by 64 lowercase hexadecimal characters",
+          };
+        }
+        expectedRevision = value;
+      }
+      cursor += 1;
+      continue;
+    }
+    if (argument.startsWith("--")) {
+      return { ok: false, message: `unknown relation ${action} option` };
+    }
+    positional.push(argument);
+  }
+  const source = positional[0];
+  if (action === "list") {
+    if (source === undefined || positional.length !== 1) {
+      return { ok: false, message: "relation list requires exactly one canonical note ID" };
+    }
+    if (expectedRevision !== undefined) {
+      return { ok: false, message: "relation list does not accept --expected-revision" };
+    }
+    return { ok: true, value: { kind: "relation", action, root, source, json } };
+  }
+  const predicate = positional[1];
+  const target = positional[2];
+  if (
+    source === undefined
+    || predicate === undefined
+    || target === undefined
+    || positional.length !== 3
+  ) {
+    return {
+      ok: false,
+      message: `relation ${action} requires exact source, predicate, and target IDs`,
+    };
+  }
+  return {
+    ok: true,
+    value: {
+      kind: "relation",
+      action,
+      root,
+      source,
+      predicate,
+      target,
+      ...(expectedRevision === undefined ? {} : { expectedRevision }),
+      json,
+    },
+  };
+}
+
+function parsePercolateCommand(arguments_: readonly string[]): ParseResult {
+  let root = ".";
+  let minSupport = 2;
+  let limit = 25;
+  let json = false;
+  const positional: string[] = [];
+  for (let cursor = 0; cursor < arguments_.length; cursor += 1) {
+    const argument = arguments_[cursor];
+    if (argument === undefined) continue;
+    if (argument === "--json") {
+      json = true;
+      continue;
+    }
+    if (argument === "--root" || argument === "--min-support" || argument === "--limit") {
+      const value = readValue(arguments_, cursor);
+      if (value === null) return { ok: false, message: `${argument} requires a value` };
+      if (argument === "--root") {
+        root = value;
+      } else {
+        const parsed = boundedInteger(
+          value,
+          argument,
+          argument === "--min-support" ? 2 : 1,
+          1_000,
+        );
+        if (typeof parsed !== "number") return parsed;
+        if (argument === "--min-support") minSupport = parsed;
+        else limit = parsed;
+      }
+      cursor += 1;
+      continue;
+    }
+    if (argument.startsWith("--")) {
+      return { ok: false, message: "unknown percolate option" };
+    }
+    positional.push(argument);
+  }
+  const note = positional[0];
+  if (positional.length > 1) {
+    return { ok: false, message: "percolate accepts at most one note ID" };
+  }
+  return {
+    ok: true,
+    value: {
+      kind: "percolate",
+      root,
+      ...(note === undefined ? {} : { note }),
+      minSupport,
+      limit,
+      json,
+    },
+  };
+}
+
+function parsePortfolioCommand(arguments_: readonly string[]): ParseResult {
+  const action = arguments_[0];
+  if (action !== "search" && action !== "audit") {
+    return { ok: false, message: "portfolio action must be search or audit" };
+  }
+  let registryPath: string | undefined;
+  let workspaceRoot: string | undefined;
+  let shared = false;
+  let all = false;
+  let requireAll = false;
+  let strict = false;
+  let json = false;
+  let mode: KnowledgeBaseSearchMode | undefined;
+  let priority = false;
+  let rulesPath: string | undefined;
+  let limit: number | undefined;
+  const vaults: VaultKey[] = [];
+  const positional: string[] = [];
+  for (let cursor = 1; cursor < arguments_.length; cursor += 1) {
+    const argument = arguments_[cursor];
+    if (argument === undefined) continue;
+    if (argument === "--json") json = true;
+    else if (argument === "--shared") shared = true;
+    else if (argument === "--all" && action === "audit") all = true;
+    else if (argument === "--require-all" && action === "search") requireAll = true;
+    else if (argument === "--priority" && action === "search") priority = true;
+    else if (argument === "--strict" && action === "audit") strict = true;
+    else if (
+      argument === "--registry"
+      || argument === "--workspace"
+      || argument === "--vault"
+      || (argument === "--rules" && action === "search")
+      || (argument === "--mode" && action === "search")
+      || (argument === "--limit" && action === "search")
+    ) {
+      const value = readValue(arguments_, cursor);
+      if (value === null) return { ok: false, message: `${argument} requires a value` };
+      cursor += 1;
+      if (argument === "--registry") registryPath = value;
+      else if (argument === "--workspace") workspaceRoot = value;
+      else if (argument === "--rules") rulesPath = value;
+      else if (argument === "--vault") {
+        try {
+          vaults.push(parseVaultKey(value).key);
+        } catch {
+          return { ok: false, message: "--vault must be a canonical owner/id key" };
+        }
+      } else if (argument === "--mode") {
+        if (value !== "exact" && value !== "hybrid" && value !== "keyword" && value !== "semantic") {
+          return { ok: false, message: "--mode must be exact, hybrid, keyword, or semantic" };
+        }
+        mode = value;
+      } else {
+        const checked = boundedInteger(value, "--limit", 1, MAX_SEARCH_RESULTS);
+        if (typeof checked !== "number") return checked;
+        limit = checked;
+      }
+    } else if (argument.startsWith("--")) {
+      return { ok: false, message: `unknown portfolio ${action} option` };
+    } else positional.push(argument);
+  }
+  if (registryPath === undefined || workspaceRoot === undefined) {
+    return { ok: false, message: `portfolio ${action} requires --registry and --workspace` };
+  }
+  if (new Set(vaults).size !== vaults.length) {
+    return { ok: false, message: "portfolio vault selections must be unique" };
+  }
+  const selectionCount = Number(shared) + Number(all) + Number(vaults.length > 0);
+  if (selectionCount !== 1) {
+    return {
+      ok: false,
+      message: action === "search"
+        ? "portfolio search requires exactly one of --shared or repeated --vault"
+        : "portfolio audit requires exactly one of --all, --shared, or repeated --vault",
+    };
+  }
+  if (action === "search") {
+    if (priority && rulesPath === undefined) {
+      return { ok: false, message: "--priority requires --rules" };
+    }
+    const rawQuery = positional.join(" ");
+    if (rawQuery.trim() === "") return { ok: false, message: "portfolio search requires a query" };
+    let query: string;
+    try {
+      query = validateSearchQuery(rawQuery).query;
+    } catch (error) {
+      return { ok: false, message: error instanceof Error ? error.message : String(error) };
+    }
+    return {
+      ok: true,
+      value: {
+        kind: "portfolio-search",
+        registryPath,
+        workspaceRoot,
+        selection: shared ? "shared" : "explicit",
+        vaults,
+        failurePolicy: requireAll ? "required" : "partial",
+        ...(mode === undefined ? {} : { mode }),
+        ordering: priority ? "priority-then-relevance" : "relevance",
+        ...(rulesPath === undefined ? {} : { rulesPath }),
+        ...(limit === undefined ? {} : { limit }),
+        query,
+        json,
+      },
+    };
+  }
+  if (positional.length > 0) return { ok: false, message: "portfolio audit does not accept positional arguments" };
+  return {
+    ok: true,
+    value: {
+      kind: "portfolio-audit",
+      registryPath,
+      workspaceRoot,
+      selection: all ? "all" : shared ? "shared" : "explicit",
+      vaults,
+      strict,
+      json,
+    },
+  };
+}
+
+export function parseArguments(arguments_: readonly string[]): ParseResult {
+  const command = arguments_[0];
+  if (command === undefined || command === "help" || command === "--help" || command === "-h") {
+    return { ok: true, value: { kind: "help" } };
+  }
+  if (command === "capture" && arguments_[1] === "diff") {
+    return parseCaptureDiffCommand(arguments_.slice(2));
+  }
+  if (command === "capture" && (arguments_[1] === "show" || arguments_[1] === "verify")) {
+    return parseCaptureBundleCommand(arguments_.slice(1));
+  }
+  if (command === "clip" || command === "capture" || command === "inspect") {
+    if (arguments_[1] === "--help" || arguments_[1] === "-h" || arguments_[1] === "help") {
+      return { ok: true, value: { kind: "clip", arguments: ["help"] } };
+    }
+    const delegated = command === "inspect" ? "inspect" : "capture";
+    return { ok: true, value: { kind: "clip", arguments: [delegated, ...arguments_.slice(1)] } };
+  }
+  if (command === "url-metadata") {
+    return { ok: true, value: { kind: "url-metadata", arguments: arguments_.slice(1) } };
+  }
+  if (command === "pdf") {
+    return { ok: true, value: { kind: "pdf", arguments: arguments_.slice(1) } };
+  }
+  if (command === "doctor" || command === "adapters") {
+    return { ok: true, value: { kind: "clip", arguments: arguments_ } };
+  }
+  if (command === "init") {
+    let directory = "kb";
+    let json = false;
+    const positional: string[] = [];
+    for (const argument of arguments_.slice(1)) {
+      if (argument === "--json") json = true;
+      else if (argument.startsWith("--")) return { ok: false, message: "unknown init option" };
+      else positional.push(argument);
+    }
+    if (positional.length > 1) return { ok: false, message: "init accepts at most one directory" };
+    if (positional[0] !== undefined) directory = positional[0];
+    return { ok: true, value: { kind: "init", directory, json } };
+  }
+  if (command === "refresh" || command === "check" || command === "graph" || command === "backlinks" || command === "links") {
+    return parseVaultCommand(command, arguments_.slice(1));
+  }
+  if (command === "catalog") return parseCatalogCommand(arguments_.slice(1));
+  if (command === "list" || command === "notes") return parseListCommand(arguments_.slice(1));
+  if (command === "inbox" || command === "source-inbox") {
+    return parseInboxCommand(arguments_.slice(1));
+  }
+  if (command === "index" || command === "search") {
+    return parseSemanticCommand(command, arguments_.slice(1));
+  }
+  if (command === "history") return parseHistoryCommand(arguments_.slice(1));
+  if (command === "portfolio") return parsePortfolioCommand(arguments_.slice(1));
+  if (command === "evaluate") return parseEvaluationCommand(arguments_.slice(1));
+  if (command === "context") return parseContextCommand(arguments_.slice(1));
+  if (command === "agents") return parseAgentsCommand(arguments_.slice(1));
+  if (command === "note") return parseNoteCommand(arguments_.slice(1));
+  if (command === "relation") return parseRelationCommand(arguments_.slice(1));
+  if (command === "percolate") return parsePercolateCommand(arguments_.slice(1));
+  return { ok: false, message: "unknown command" };
+}
+
+function embeddingCount(result: SemanticIndexResult): number {
+  return result.embedding?.chunksEmbedded ?? 0;
+}
+
+function renderSemanticIndex(result: SemanticIndexResult): string {
+  const changed = result.update.indexed + result.update.updated;
+  return [
+    `Indexed ${safe(result.root)} with QMD.`,
+    `Documents: ${changed} changed, ${result.update.unchanged} unchanged, ${result.update.removed} removed.`,
+    `Embeddings: ${embeddingCount(result)} chunks; model: ${safe(result.model)}.`,
+    `Database: ${safe(result.database)}`,
+    "",
+  ].join("\n");
+}
+
+function renderKnowledgeBaseSearch(result: KnowledgeBaseSearchResult): string {
+  const lines = [
+    `${result.mode[0]?.toLocaleUpperCase("en-US") ?? ""}${result.mode.slice(1)} results for “${safe(result.query)}” (${result.results.length})${result.partial ? " [partial]" : ""}`,
+  ];
+  if (result.results.length === 0) lines.push("  None.");
+  for (const hit of result.results) {
+    const location = `${safe(hit.path)}${hit.line === undefined ? "" : `:${hit.line}`}`;
+    const evidence = hit.evidence.map((item) => `${item.kind}#${item.rank}`).join(", ");
+    lines.push(`  ${hit.rank}. ${hit.score.toFixed(3)}  ${location} — ${safe(hit.title)} [${safe(evidence)}]`);
+    if (hit.snippet !== "") lines.push(`    ${safe(hit.snippet)}`);
+  }
+  if ((result.graph?.related.length ?? 0) > 0) {
+    lines.push(`  Related graph context: ${result.graph?.related.length ?? 0}`);
+  }
+  if (result.history?.status === "ready") {
+    const limited = result.history.limitedCommits?.length ?? 0;
+    lines.push(
+      `  Git provenance: ${result.history.notes.length} notes at ${safe(result.history.head.slice(0, 12))}`
+      + (limited === 0
+        ? ""
+        : `; ${limited} commit${limited === 1 ? "" : "s"} with incomplete co-change paths`),
+    );
+  }
+  return `${lines.join("\n")}\n`;
+}
+
+async function runSemantic(
+  command: Extract<ParsedCommand, { readonly kind: "index" | "search" }>,
+  output: Output,
+  dependencies: CliDependencies,
+): Promise<number> {
+  if (command.kind === "index") {
+    const result = await (dependencies.indexSemanticVault ?? indexSemanticVault)({
+      root: command.root,
+      ...(command.database === undefined ? {} : { database: command.database }),
+      force: command.force,
+    });
+    output.stdout(command.json ? terminalSafeJson(result) : sanitizeTerminalText(renderSemanticIndex(result)));
+    return 0;
+  }
+  const searchRules = command.rulesPath === undefined
+    ? undefined
+    : await loadSearchRulesFile(command.rulesPath);
+  const kb = await (dependencies.openKnowledgeBase ?? openKnowledgeBase)({
+    root: command.root,
+    repository: command.repository,
+    ...(command.database === undefined ? {} : { database: command.database }),
+    ...(searchRules === undefined ? {} : { searchRules }),
+  });
+  try {
+    const result = await kb.search({
+      query: command.query,
+      ...(command.mode === undefined ? {} : { mode: command.mode }),
+      ordering: command.ordering,
+      filters: command.filters,
+      tags: command.tags,
+      repositoryScopes: command.repositoryScopes,
+      graph: command.graph,
+      history: command.history,
+      ...(command.limit === undefined ? {} : { limit: command.limit }),
+      ...(command.candidateLimit === undefined
+        ? {}
+        : { candidateLimit: command.candidateLimit }),
+      ...(command.minScore === undefined ? {} : { minScore: command.minScore }),
+    });
+    output.stdout(command.json
+      ? terminalSafeJson(result)
+      : sanitizeTerminalText(renderKnowledgeBaseSearch(result)));
+    return 0;
+  } finally {
+    await kb.close();
+  }
+}
+
+function historyIsPartial(
+  result: GitHistoryForNotesResult | GitHistorySearchResult,
+): boolean {
+  return result.status === "unavailable" || (result.limitedCommits?.length ?? 0) > 0;
+}
+
+function renderHistoryAvailability(
+  result: GitHistoryForNotesResult | GitHistorySearchResult,
+): string[] {
+  if (result.status === "unavailable") {
+    return [`Git history unavailable: ${safe(result.reason)}`];
+  }
+  const limited = result.limitedCommits?.length ?? 0;
+  return limited === 0
+    ? []
+    : [
+        `Coverage: ${limited} oversized commit${limited === 1 ? "" : "s"} `
+          + "have incomplete co-change paths.",
+      ];
+}
+
+function renderNoteHistory(
+  note: { readonly id: string; readonly path: string; readonly title: string },
+  result: GitHistoryForNotesResult,
+): string {
+  const lines = [`Git history for ${safe(note.path)} — ${safe(note.title)}`];
+  lines.push(...renderHistoryAvailability(result));
+  if (result.status === "unavailable") return `${lines.join("\n")}\n`;
+  const provenance = result.notes.find(({ id }) => id === note.id);
+  const commits = provenance?.commits ?? [];
+  lines.push(`Head: ${safe(result.head)}; commits: ${commits.length}.`);
+  if (commits.length === 0) lines.push("  No indexed commits.");
+  for (const commit of commits) {
+    lines.push(
+      `  ${safe(commit.hash.slice(0, 12))}  ${safe(commit.committedAt)}  ${safe(commit.subject)}`,
+    );
+    for (const path of commit.cochangedPaths) lines.push(`    ${safe(path)}`);
+    if (commit.cochangeDetailsLimited === true) {
+      lines.push("    Co-change paths are incomplete for this oversized commit.");
+    }
+  }
+  return `${lines.join("\n")}\n`;
+}
+
+function renderHistorySearch(result: GitHistorySearchResult): string {
+  const lines = [
+    result.status === "ready"
+      ? `Git history results for “${safe(result.query)}” (${result.hits.length})`
+      : "Git history search",
+    ...renderHistoryAvailability(result),
+  ];
+  if (result.status === "unavailable") return `${lines.join("\n")}\n`;
+  if (result.hits.length === 0) lines.push("  None.");
+  for (const hit of result.hits) {
+    lines.push(`  ${hit.score.toFixed(3)}  ${safe(hit.path)}`);
+    for (const commit of hit.commits) {
+      const matches = commit.matchedPaths.length === 0
+        ? ""
+        : ` [${commit.matchedPaths.map(safe).join(", ")}]`;
+      lines.push(
+        `    ${safe(commit.hash.slice(0, 12))}  ${safe(commit.subject)}${matches}`,
+      );
+    }
+  }
+  return `${lines.join("\n")}\n`;
+}
+
+const MAX_EVALUATION_MANIFEST_BYTES = 16 * 1_024 * 1_024;
+const MAX_CLI_EVALUATION_RESULT_LIMIT = Math.min(100, MAX_EVALUATION_RESULTS_PER_QUERY);
+const MAX_CLI_EVALUATION_QUERIES = 500;
+const MAX_CLI_EVALUATION_RUNS = 4_000;
+
+function evaluationEnvironment(
+  command: Extract<ParsedCommand, { readonly kind: "evaluate" }>,
+  modelSha256: string | null,
+  now: () => Date,
+): EvaluationEnvironment {
+  const [modelId, modelRevision] = recommendedEmbeddingModel.split("#", 2);
+  const processor = cpus()[0]?.model.trim() || "unknown processor";
+  const hardware = `${processor}; ${cpus().length} logical CPUs; `
+    + `${(totalmem() / (1_024 ** 3)).toFixed(1)} GiB memory`;
+  return {
+    generatedAt: now().toISOString(),
+    runtime: {
+      bun: Bun.version,
+      node: process.versions.node,
+      os: `${process.platform} ${release()}`,
+      arch: process.arch,
+      hardware,
+    },
+    model: modelSha256 === null
+      ? {
+          kind: "none",
+          reason: "The selected retrievers do not use local vector embeddings.",
+        }
+      : {
+          kind: "local",
+          id: modelId ?? recommendedEmbeddingModel,
+          revision: modelRevision ?? "unversioned",
+          sha256: modelSha256,
+        },
+    cache: { state: command.cacheState },
+    retrievers: command.retrievers.map((id) => ({
+      id,
+      version: id === "keyword" || id === "semantic"
+        ? `qmd-${qmdIndexerVersion}/${id}`
+        : id === "hybrid"
+          ? `kb-rrf-v1+qmd-${qmdIndexerVersion}`
+          : `kb-${id}-v1`,
+      configuration: {
+        resultLimit: command.limit,
+        cutoff: command.cutoff,
+        split: command.split,
+      },
+    })),
+  };
+}
+
+function metricText(value: number | null): string {
+  return value === null ? "n/a" : value.toFixed(4);
+}
+
+function renderEvaluationReport(report: RetrievalEvaluationReport): string {
+  const lines = [
+    `Retrieval evaluation ${safe(report.corpus.id)}: ${report.queryCount} ${safe(report.split)} queries at cutoff ${report.cutoff}.`,
+    `Frozen repository: ${safe(report.corpus.frozen.repositoryCommit)}; vault tree: ${safe(report.corpus.frozen.vaultTree)}.`,
+  ];
+  for (const summary of report.summaries) {
+    lines.push(
+      `  ${safe(summary.retrieverId)}: ready ${summary.ready}, degraded ${summary.degraded}, unavailable ${summary.unavailable}, failed ${summary.failed}; `
+      + `recall ${metricText(summary.metrics.recall)}, MRR ${metricText(summary.metrics.reciprocalRank)}, `
+      + `nDCG ${metricText(summary.metrics.ndcg)}, no-answer ${metricText(summary.metrics.noAnswerAccuracy)}, `
+      + `p95 ${summary.latencyMs.p95?.toFixed(2) ?? "n/a"} ms.`,
+    );
+  }
+  lines.push(
+    "These measurements describe only the frozen corpus, selected retrievers, cache state, and recorded machine.",
+  );
+  return `${lines.join("\n")}\n`;
+}
+
+async function runEvaluation(
+  command: Extract<ParsedCommand, { readonly kind: "evaluate" }>,
+  output: Output,
+  dependencies: CliDependencies,
+): Promise<number> {
+  const source = await readBoundedUtf8(
+    command.manifest,
+    MAX_EVALUATION_MANIFEST_BYTES,
+    "evaluation manifest",
+  );
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(source) as unknown;
+  } catch (error: unknown) {
+    throw new TypeError("The evaluation manifest must contain valid JSON.", { cause: error });
+  }
+  const corpus = parseRetrievalEvaluationCorpus(parsed);
+  const queryCount = corpus.queries.filter(({ split }) =>
+    command.split === "all" || split === command.split).length;
+  if (queryCount > MAX_CLI_EVALUATION_QUERIES) {
+    throw new RangeError(
+      `CLI evaluation accepts at most ${MAX_CLI_EVALUATION_QUERIES} selected queries.`,
+    );
+  }
+  if (queryCount * command.retrievers.length > MAX_CLI_EVALUATION_RUNS) {
+    throw new RangeError(
+      `CLI evaluation accepts at most ${MAX_CLI_EVALUATION_RUNS} retriever/query runs.`,
+    );
+  }
+  const embeddingModelFile = command.modelFile === undefined
+    ? undefined
+    : resolve(command.modelFile);
+  const digestEvaluationModel = dependencies.digestEvaluationModel ?? sha256EmbeddingModelFile;
+  const modelSha256 = embeddingModelFile === undefined
+    ? null
+    : await digestEvaluationModel(embeddingModelFile);
+  if (
+    modelSha256 !== null
+    && modelSha256 !== recommendedEmbeddingModelSha256
+  ) {
+    throw new Error(
+      "The evaluation model does not match the pinned recommended model SHA-256.",
+    );
+  }
+  const evaluation = await (
+    dependencies.openKnowledgeBaseEvaluation ?? openKnowledgeBaseEvaluation
+  )({
+    corpus,
+    root: command.root,
+    repository: command.repository,
+    ...(command.database === undefined ? {} : { database: command.database }),
+    ...(embeddingModelFile === undefined ? {} : { embeddingModelFile }),
+  });
+  try {
+    const byId = new Map(evaluation.retrievers.map((retriever) => [retriever.id, retriever]));
+    const retrievers = command.retrievers.map((id) => {
+      const retriever = byId.get(id);
+      if (retriever === undefined) throw new Error(`Evaluation adapter ${id} is unavailable.`);
+      return retriever;
+    });
+    const runs = await runRetrievalEvaluation({
+      corpus,
+      retrievers,
+      split: command.split,
+      limit: command.limit,
+      timeoutMs: command.timeoutMs,
+    });
+    if (embeddingModelFile !== undefined) {
+      const afterSha256 = await digestEvaluationModel(embeddingModelFile);
+      if (afterSha256 !== modelSha256) {
+        throw new Error(
+          "The evaluation model changed while retrieval was running; retry.",
+        );
+      }
+    }
+    const report = buildRetrievalEvaluationReport({
+      corpus,
+      runs,
+      environment: evaluationEnvironment(
+        command,
+        modelSha256,
+        dependencies.evaluationNow ?? (() => new Date()),
+      ),
+      cutoff: command.cutoff,
+      baselineRetrieverId: command.baseline,
+      bootstrapSeed: 1,
+      bootstrapResamples: 10_000,
+    });
+    output.stdout(command.json
+      ? terminalSafeJson(report)
+      : sanitizeTerminalText(renderEvaluationReport(report)));
+    return 0;
+  } finally {
+    await evaluation.close();
+  }
+}
+
+async function runHistory(
+  command: Extract<ParsedCommand, { readonly kind: "history" }>,
+  output: Output,
+  dependencies: CliDependencies,
+): Promise<number> {
+  const kb = await (dependencies.openKnowledgeBase ?? openKnowledgeBase)({
+    root: command.root,
+    repository: command.repository,
+  });
+  try {
+    if (command.action === "note") {
+      const note = kb.read(command.query, { maxBytes: 1 });
+      const history = await kb.history(
+        [note.id],
+        {
+          ...(command.limit === undefined ? {} : { commitsPerNote: command.limit }),
+          ...(command.cochangedLimit === undefined
+            ? {}
+            : { cochangedPathsPerCommit: command.cochangedLimit }),
+        },
+      );
+      const payload = {
+        kind: "note" as const,
+        note: { id: note.id, path: note.path, title: note.title },
+        history,
+        partial: historyIsPartial(history),
+      };
+      output.stdout(command.json
+        ? terminalSafeJson(payload)
+        : sanitizeTerminalText(renderNoteHistory(payload.note, history)));
+      return 0;
+    }
+    const history = await kb.searchHistory({
+      query: command.query,
+      ...(command.limit === undefined ? {} : { limit: command.limit }),
+      ...(command.commitLimit === undefined
+        ? {}
+        : { commitsPerHit: command.commitLimit }),
+      ...(command.cochangedLimit === undefined
+        ? {}
+        : { cochangedPathsPerCommit: command.cochangedLimit }),
+    });
+    output.stdout(command.json
+      ? terminalSafeJson({
+          kind: "search",
+          history,
+          partial: historyIsPartial(history),
+        })
+      : sanitizeTerminalText(renderHistorySearch(history)));
+    return 0;
+  } finally {
+    await kb.close();
+  }
+}
+
+function issueJson(issue: LinkIssue): Record<string, unknown> {
+  return issue.kind === "broken"
+    ? { kind: issue.kind, source: issue.source, line: issue.line, target: issue.target }
+    : {
+        kind: issue.kind,
+        source: issue.source,
+        line: issue.line,
+        target: issue.target,
+        candidates: issue.candidates,
+      };
+}
+
+function relationIssueJson(issue: RelationIssue): Record<string, unknown> {
+  return { ...issue };
+}
+
+function summary(
+  snapshot: VaultSnapshot,
+  options: {
+    readonly noCatalog?: boolean;
+    readonly attachments?: AttachmentValidationReport;
+  } = {},
+): Record<string, unknown> {
+  return {
+    root: snapshot.root,
+    indexPath: snapshot.indexPath,
+    index: snapshot.index,
+    catalogRequired: options.noCatalog !== true,
+    noteCount: snapshot.analysis.noteCount,
+    contextualLinkCount: snapshot.analysis.contextualLinks.length,
+    backlinkCount: snapshot.analysis.backlinks.length,
+    authoredRelationCount: snapshot.analysis.authoredRelations.length,
+    issues: snapshot.analysis.issues.map(issueJson),
+    relationIssues: snapshot.analysis.relationIssues.map(relationIssueJson),
+    orphans: snapshot.analysis.orphans,
+    mentions: snapshot.analysis.mentions,
+    ...(options.attachments === undefined
+      ? {}
+      : {
+          attachments: {
+            referenceCount: options.attachments.references.length,
+            validatedCount: options.attachments.attachments.length,
+            truncated: options.attachments.truncated,
+            issues: options.attachments.issues,
+          },
+        }),
+  };
+}
+
+function renderIssue(issue: LinkIssue): string {
+  if (issue.kind === "broken") {
+    return `${safe(issue.source)}:${issue.line}: broken wikilink [[${safe(issue.target)}]]`;
+  }
+  return `${safe(issue.source)}:${issue.line}: ambiguous wikilink [[${safe(issue.target)}]] (${issue.candidates.map(safe).join(", ")})`;
+}
+
+function renderRelationIssue(issue: RelationIssue): string {
+  if (issue.kind === "malformed") {
+    return `${safe(issue.source)}:${issue.line}: malformed relationship${issue.predicate === undefined ? "" : ` ${safe(issue.predicate)}`}: ${safe(issue.message)}`;
+  }
+  if (issue.kind === "broken") {
+    return `${safe(issue.source)}:${issue.line}: broken relationship ${safe(issue.predicate)} → ${safe(issue.target)}`;
+  }
+  return `${safe(issue.source)}:${issue.line}: ambiguous relationship ${safe(issue.predicate)} → ${safe(issue.target)} (${issue.candidates.map(safe).join(", ")})`;
+}
+
+function renderAdvisories(analysis: VaultAnalysis): string[] {
+  const lines: string[] = [];
+  if (analysis.orphans.length > 0) {
+    lines.push(`Advisory: ${analysis.orphans.length} contextual orphan${analysis.orphans.length === 1 ? "" : "s"}.`);
+    for (const orphan of analysis.orphans) lines.push(`  ${safe(orphan)}`);
+  }
+  if (analysis.mentions.length > 0) {
+    lines.push(`Advisory: ${analysis.mentions.length} exact unlinked title or alias mention${analysis.mentions.length === 1 ? "" : "s"}.`);
+    for (const mention of analysis.mentions) {
+      lines.push(`  ${safe(mention.source)}:${mention.line} mentions “${safe(mention.phrase)}” (${safe(mention.target)})`);
+    }
+  }
+  return lines;
+}
+
+function checkExitCode(
+  snapshot: VaultSnapshot,
+  noCatalog = false,
+  attachments?: AttachmentValidationReport,
+): number {
+  return (
+    (!noCatalog && snapshot.index === "stale")
+    || snapshot.analysis.issues.length > 0
+    || snapshot.analysis.relationIssues.length > 0
+    || (attachments?.issues.length ?? 0) > 0
+    || attachments?.truncated === true
+  ) ? 3 : 0;
+}
+
+function renderAttachmentIssue(issue: AttachmentIssue): string {
+  const candidates = issue.candidates === undefined
+    ? ""
+    : ` (${issue.candidates.map(safe).join(", ")})`;
+  return `${safe(issue.source)}:${issue.line}: ${safe(issue.kind)} attachment ${safe(issue.target)}: ${safe(issue.message)}${candidates}`;
+}
+
+function renderSnapshot(
+  command: "refresh" | "check",
+  snapshot: VaultSnapshot,
+  noCatalog = false,
+  attachments?: AttachmentValidationReport,
+): string {
+  const lines = [
+    `${command === "refresh" ? "Refreshed" : "Checked"} ${safe(snapshot.root)}`,
+    `Index: ${noCatalog ? `not required (${snapshot.index})` : snapshot.index}; notes: ${snapshot.analysis.noteCount}; contextual links: ${snapshot.analysis.contextualLinks.length}; typed relationships: ${snapshot.analysis.authoredRelations.length}.`,
+  ];
+  if (!noCatalog && snapshot.index === "stale") {
+    lines.push(`error: generated catalog is stale (${safe(snapshot.indexPath)})`);
+  }
+  for (const issue of snapshot.analysis.issues) lines.push(`error: ${renderIssue(issue)}`);
+  for (const issue of snapshot.analysis.relationIssues) {
+    lines.push(`error: ${renderRelationIssue(issue)}`);
+  }
+  for (const issue of attachments?.issues ?? []) {
+    lines.push(`error: ${renderAttachmentIssue(issue)}`);
+  }
+  if (attachments?.truncated === true && attachments.issues.every(({ kind }) => kind !== "budget")) {
+    lines.push("error: attachment validation was truncated by a resource limit");
+  }
+  lines.push(...renderAdvisories(snapshot.analysis));
+  return `${lines.join("\n")}\n`;
+}
+
+function graphJson(snapshot: VaultSnapshot): Record<string, unknown> {
+  return { ...summary(snapshot), notes: snapshot.analysis.noteConnections };
+}
+
+function renderGraph(snapshot: VaultSnapshot): string {
+  const lines = [
+    `Graph: ${snapshot.analysis.noteCount} notes; ${snapshot.analysis.contextualLinks.length} contextual links; ${snapshot.analysis.authoredRelations.length} typed relationships.`,
+  ];
+  for (const note of snapshot.analysis.noteConnections) {
+    lines.push(`${safe(note.path)}  ← ${note.inboundContextualCount}  → ${note.outboundContextualCount}`);
+  }
+  if (snapshot.analysis.contextualLinks.length > 0) {
+    lines.push("Contextual edges:");
+    for (const link of snapshot.analysis.contextualLinks) {
+      lines.push(`  ${safe(link.source)}:${link.line} → ${safe(link.target)}`);
+    }
+  }
+  if (snapshot.analysis.authoredRelations.length > 0) {
+    lines.push("Typed relationships:");
+    for (const relation of snapshot.analysis.authoredRelations) {
+      lines.push(
+        `  ${safe(relation.source)}:${relation.provenance.line} ${safe(relation.predicate)} → ${safe(relation.target)}`,
+      );
+    }
+  }
+  for (const issue of snapshot.analysis.issues) lines.push(`error: ${renderIssue(issue)}`);
+  for (const issue of snapshot.analysis.relationIssues) {
+    lines.push(`error: ${renderRelationIssue(issue)}`);
+  }
+  lines.push(...renderAdvisories(snapshot.analysis));
+  return `${lines.join("\n")}\n`;
+}
+
+function backlinkPayload(
+  notePath: string,
+  backlinks: readonly Backlink[],
+  relationships: readonly AuthoredRelation[],
+): Record<string, unknown> {
+  return {
+    note: notePath,
+    count: backlinks.length + relationships.length,
+    backlinkCount: backlinks.length,
+    relationshipCount: relationships.length,
+    backlinks,
+    relationships,
+  };
+}
+
+function renderBacklinks(
+  notePath: string,
+  backlinks: readonly Backlink[],
+  relationships: readonly AuthoredRelation[],
+): string {
+  const lines = [
+    `Backlinks to ${safe(notePath)} (${backlinks.length} links, ${relationships.length} typed relationships)`,
+  ];
+  if (backlinks.length === 0 && relationships.length === 0) lines.push("  None.");
+  else for (const backlink of backlinks) lines.push(`  ${safe(backlink.source)}:${backlink.line}`);
+  for (const relation of relationships) {
+    lines.push(
+      `  ${safe(relation.source)}:${relation.provenance.line} ${safe(relation.predicate)} → ${safe(relation.target)}`,
+    );
+  }
+  return `${lines.join("\n")}\n`;
+}
+
+function renderLinks(neighborhood: LinkNeighborhood): string {
+  const lines = [
+    `Links around ${safe(neighborhood.note)} (${neighborhood.direction}, depth ${neighborhood.depth}, limit ${neighborhood.limit})`,
+  ];
+  for (const node of neighborhood.nodes) {
+    lines.push(
+      `  ${node.distance}  ${safe(node.path)} — ${safe(node.title)}  ← ${node.inboundContextualCount}  → ${node.outboundContextualCount}`,
+    );
+  }
+  if (neighborhood.edges.length > 0) {
+    lines.push("Edges:");
+    for (const edge of neighborhood.edges) {
+      lines.push(`  ${safe(edge.source)}:${edge.line} → ${safe(edge.target)}`);
+    }
+  }
+  if (neighborhood.relations.length > 0) {
+    lines.push("Typed relationships:");
+    for (const relation of neighborhood.relations) {
+      lines.push(
+        `  ${safe(relation.source)}:${relation.provenance.line} ${safe(relation.predicate)} → ${safe(relation.target)}`,
+      );
+    }
+  }
+  if (neighborhood.truncated) {
+    lines.push(
+      "Results were truncated by the node or connection limit; lower the depth or raise --limit.",
+    );
+  }
+  return `${lines.join("\n")}\n`;
+}
+
+function renderList(rows: readonly QueryRow[]): string {
+  const lines = [`Notes (${rows.length})`];
+  if (rows.length === 0) lines.push("  None.");
+  for (const row of rows) {
+    const tags = row.tags.length === 0 ? "" : `  #${row.tags.map(safe).join(" #")}`;
+    lines.push(
+      `  ${safe(row.path)} — ${safe(row.title)}  ← ${row.inboundContextualCount}  → ${row.outboundContextualCount}${tags}`,
+    );
+  }
+  return `${lines.join("\n")}\n`;
+}
+
+function renderSourceInbox(report: SourceInboxReport): string {
+  const lines = [
+    `Source inbox: ${report.pendingSources} pending of ${report.totalSources} captures; ${report.disposedSources} disposed.`,
+  ];
+  if (report.items.length === 0) lines.push("  None.");
+  for (const item of report.items) {
+    const clipped = item.clipped === null ? "undated" : item.clipped;
+    lines.push(`  ${safe(clipped)}  ${safe(item.path)} — ${safe(item.title)}  (${safe(item.reason)})`);
+  }
+  if (report.truncated) {
+    lines.push(`  … ${report.pendingSources - report.returnedSources} more; raise --limit to inspect them.`);
+  }
+  lines.push("Advisory only: a capture may remain an intentional leaf.");
+  return `${lines.join("\n")}\n`;
+}
+
+function renderAuthoringResult(
+  verb: string,
+  result: NoteAuthoringResult,
+): string {
+  return [
+    `${result.changed ? verb : "Unchanged"} ${safe(result.path)}`,
+    `Revision: ${safe(result.revision)}; outbound relationships: ${result.relations.length}.`,
+    "",
+  ].join("\n");
+}
+
+async function runNoteCreate(
+  command: Extract<ParsedCommand, { readonly kind: "note-create" }>,
+  output: Output,
+  dependencies: CliDependencies,
+): Promise<number> {
+  const body = command.body ?? (
+    command.bodyFile === undefined
+      ? undefined
+      : await readBoundedUtf8(command.bodyFile, 16 * 1024 * 1024, "note body")
+  );
+  const result = await (dependencies.createNote ?? createNote)(
+    command.root,
+    {
+      ...command.input,
+      ...(body === undefined ? {} : { body }),
+    },
+  );
+  output.stdout(command.json
+    ? terminalSafeJson(result)
+    : sanitizeTerminalText(renderAuthoringResult("Created", result)));
+  return 0;
+}
+
+async function runRelation(
+  command: Extract<ParsedCommand, { readonly kind: "relation" }>,
+  output: Output,
+  dependencies: CliDependencies,
+): Promise<number> {
+  if (command.action === "list") {
+    const snapshot = await (dependencies.scanVault ?? scanVault)(
+      command.root,
+      { mentionScope: false },
+    );
+    const lookup = lookupNote(snapshot.notes, command.source);
+    if (lookup.kind === "missing") {
+      if (command.json) {
+        output.stdout(terminalSafeJson({
+          ok: false,
+          kind: "missing",
+          note: command.source,
+        }));
+      } else {
+        output.stderr("error: note was not found\n");
+      }
+      return 3;
+    }
+    if (lookup.kind === "ambiguous") {
+      if (command.json) {
+        output.stdout(terminalSafeJson({
+          ok: false,
+          kind: "ambiguous",
+          candidates: lookup.candidates.map(({ id }) => id),
+        }));
+      } else {
+        output.stderr(`error: note is ambiguous (${lookup.candidates.map(({ id }) => safe(id)).join(", ")})\n`);
+      }
+      return 3;
+    }
+    const outbound = snapshot.analysis.authoredRelations.filter(
+      ({ source }) => source === lookup.note.id,
+    );
+    const inbound = snapshot.analysis.authoredRelations.filter(
+      ({ target }) => target === lookup.note.id,
+    );
+    const payload = {
+      note: lookup.note.id,
+      outboundCount: outbound.length,
+      inboundCount: inbound.length,
+      outbound,
+      inbound,
+    };
+    if (command.json) {
+      output.stdout(terminalSafeJson(payload));
+    } else {
+      const lines = [
+        `Relationships for ${safe(lookup.note.id)} (${outbound.length} out, ${inbound.length} in)`,
+      ];
+      if (outbound.length === 0 && inbound.length === 0) lines.push("  None.");
+      for (const relation of outbound) {
+        lines.push(`  → ${safe(relation.predicate)} → ${safe(relation.target)}`);
+      }
+      for (const relation of inbound) {
+        lines.push(`  ← ${safe(relation.predicate)} ← ${safe(relation.source)}`);
+      }
+      output.stdout(`${lines.join("\n")}\n`);
+    }
+    return 0;
+  }
+
+  const predicate = command.predicate;
+  const target = command.target;
+  if (predicate === undefined || target === undefined) {
+    throw new Error("relation command parser lost its predicate or target");
+  }
+  const options = command.expectedRevision === undefined
+    ? {}
+    : { expectedRevision: command.expectedRevision };
+  const result = command.action === "add"
+    ? await (dependencies.addNoteRelation ?? addNoteRelation)(
+        command.root,
+        command.source,
+        predicate,
+        target,
+        options,
+      )
+    : await (dependencies.removeNoteRelation ?? removeNoteRelation)(
+        command.root,
+        command.source,
+        predicate,
+        target,
+        options,
+      );
+  output.stdout(command.json
+    ? terminalSafeJson(result)
+    : sanitizeTerminalText(renderAuthoringResult(
+        "Updated",
+        result,
+      )));
+  return 0;
+}
+
+function renderPercolation(result: PercolationResult, note: string | undefined): string {
+  const lines = [
+    `Percolation${note === undefined ? "" : ` for ${safe(note)}`}: ${result.candidates.length} candidate${result.candidates.length === 1 ? "" : "s"}${result.truncated ? " (truncated)" : ""}.`,
+  ];
+  if (result.candidates.length === 0) lines.push("  None.");
+  for (const candidate of result.candidates) {
+    if (candidate.kind === "missing-concept") {
+      lines.push(
+        `  concept  #${safe(candidate.tag)} → ${safe(candidate.suggestedId)}  (${candidate.support} supporting notes)`
+          + (candidate.collidesWith === null
+            ? ""
+            : `; natural ID is occupied by ${safe(candidate.collidesWith)}`),
+      );
+    } else if (candidate.kind === "missing-relation") {
+      lines.push(
+        `  relation pair  {${safe(candidate.source)}, ${safe(candidate.target)}}  (predicate required; ${candidate.support} shared signals)`,
+      );
+    } else if (candidate.kind === "unlinked-mention") {
+      lines.push(
+        `  mention  ${safe(candidate.source)} → ${safe(candidate.target)}  (${candidate.support})`,
+      );
+    } else {
+      lines.push(
+        `  hygiene  ${safe(candidate.problem)} in ${safe(candidate.source)}${candidate.target === null ? "" : ` → ${safe(candidate.target)}`}: ${safe(candidate.message)}`,
+      );
+    }
+    for (const evidence of candidate.evidence.slice(0, 3)) {
+      if (evidence.kind === "tag") {
+        lines.push(`    ${safe(evidence.path)}  #${safe(evidence.tag)}`);
+      } else if (evidence.kind === "shared-tag") {
+        lines.push(`    ${safe(evidence.path)} shares #${safe(evidence.tag)}`);
+      } else if (evidence.kind === "shared-concept") {
+        lines.push(`    ${safe(evidence.path)} shares ${safe(evidence.concept)}`);
+      } else if (evidence.kind === "mention") {
+        lines.push(`    ${safe(evidence.source)}:${evidence.line} mentions “${safe(evidence.phrase)}”`);
+      } else if (evidence.kind === "relation") {
+        lines.push(
+          `    ${safe(evidence.source)}:${evidence.line} ${safe(evidence.predicate)} → ${safe(evidence.target)}`,
+        );
+      } else {
+        lines.push(`    ${safe(evidence.source)}:${evidence.line} ${safe(evidence.message)}`);
+      }
+    }
+    if (candidate.evidence.length > 3) {
+      lines.push(`    … ${candidate.evidence.length - 3} more evidence records`);
+    }
+  }
+  return `${lines.join("\n")}\n`;
+}
+
+async function runPercolate(
+  command: Extract<ParsedCommand, { readonly kind: "percolate" }>,
+  output: Output,
+  dependencies: CliDependencies,
+): Promise<number> {
+  const maxMentionPairs = command.note === undefined
+    ? MAX_PERCOLATION_MENTION_PAIRS
+    : MAX_SCOPED_PERCOLATION_MENTION_PAIRS;
+  const snapshot = await (dependencies.scanVault ?? scanVault)(
+    command.root,
+    {
+      maxNotes: MAX_PERCOLATION_NOTES,
+      maxMentionPairs,
+      maxMentions: Math.min(MAX_PERCOLATION_MENTIONS, maxMentionPairs),
+      ...(command.note === undefined ? {} : { mentionScope: command.note }),
+    },
+  );
+  const result = (dependencies.percolateVault ?? percolateVault)(
+    snapshot.notes,
+    snapshot.analysis,
+    {
+      ...(command.note === undefined ? {} : { note: command.note }),
+      minSupport: command.minSupport,
+      limit: command.limit,
+    },
+  );
+  const jsonOutput: PercolationCliOutputV2 = {
+    root: snapshot.root,
+    note: command.note ?? null,
+    minSupport: command.minSupport,
+    limit: command.limit,
+    schemaVersion: result.schemaVersion,
+    candidates: result.candidates,
+    truncated: result.truncated,
+  };
+  output.stdout(command.json
+    ? terminalSafeJson(jsonOutput)
+    : sanitizeTerminalText(renderPercolation(result, command.note)));
+  return 0;
+}
+
+async function runList(
+  command: Extract<ParsedCommand, { readonly kind: "list" }>,
+  output: Output,
+  dependencies: CliDependencies,
+): Promise<number> {
+  const snapshot = await (dependencies.scanVault ?? scanVault)(command.root, command.options);
+  const rows = queryVault(snapshot.notes, snapshot.analysis, {
+    filters: command.filters,
+    tags: command.tags,
+    repositoryScopes: command.repositoryScopes,
+    sort: command.sort,
+    direction: command.direction,
+    ...(command.limit === undefined ? {} : { limit: command.limit }),
+  });
+  output.stdout(command.json
+    ? terminalSafeJson({ root: snapshot.root, count: rows.length, notes: rows })
+    : sanitizeTerminalText(renderList(rows)));
+  return 0;
+}
+
+async function runCatalog(
+  command: Extract<ParsedCommand, { readonly kind: "catalog" }>,
+  output: Output,
+  dependencies: CliDependencies,
+): Promise<number> {
+  const snapshot = await (dependencies.scanVault ?? scanVault)(command.root, command.options);
+  const relativeIndex = relative(snapshot.root, snapshot.indexPath).split("\\").join("/");
+  const catalogNoteId = relativeIndex.toLocaleLowerCase("en-US").endsWith(".md")
+    ? relativeIndex.slice(0, -3)
+    : relativeIndex;
+  const catalog = renderCatalog(snapshot.notes, catalogNoteId);
+  output.stdout(command.json
+    ? terminalSafeJson({
+        root: snapshot.root,
+        catalogMode: snapshot.catalogMode,
+        noteCount: snapshot.analysis.noteCount,
+        catalog,
+      })
+    : sanitizeTerminalText(`${catalog}\n`));
+  return 0;
+}
+
+async function runInbox(
+  command: Extract<ParsedCommand, { readonly kind: "inbox" }>,
+  output: Output,
+  dependencies: CliDependencies,
+): Promise<number> {
+  const snapshot = await (dependencies.scanVault ?? scanVault)(command.root, command.options);
+  const report = sourceInbox(snapshot.notes, snapshot.analysis, {
+    limit: command.limit,
+    ...(command.sourcePrefixes.length === 0
+      ? {}
+      : { sourcePrefixes: command.sourcePrefixes }),
+  });
+  output.stdout(command.json
+    ? terminalSafeJson({ root: snapshot.root, ...report })
+    : sanitizeTerminalText(renderSourceInbox(report)));
+  return 0;
+}
+
+async function runInit(
+  command: Extract<ParsedCommand, { readonly kind: "init" }>,
+  output: Output,
+  initialize: typeof initVault,
+): Promise<number> {
+  const result: InitVaultResult = await initialize(command.directory);
+  if (command.json) output.stdout(terminalSafeJson(result));
+  else {
+    const relativeRoot = relative(process.cwd(), result.root) || ".";
+    output.stdout(`Initialized ${safe(relativeRoot)} with ${result.files.length} files.\n`);
+  }
+  return 0;
+}
+
+async function runCaptureBundle(
+  command: Extract<ParsedCommand, { readonly kind: "capture-bundle" }>,
+  output: Output,
+  dependencies: CliDependencies,
+): Promise<number> {
+  const verification = await (dependencies.verifyCaptureBundle ?? verifyCaptureBundle)(
+    command.path,
+    command.options,
+  );
+  const inspection = verification.inspection;
+  if (command.json) {
+    const jsonInspection = command.action === "show"
+      ? inspection
+      : Object.freeze({
+          root: inspection.root,
+          schemaVersion: inspection.schemaVersion,
+          sourceUrl: inspection.sourceUrl,
+          canonicalUrl: inspection.canonicalUrl,
+          status: inspection.status,
+          capturedAt: inspection.capturedAt,
+          document: Object.freeze({
+            path: inspection.document.path,
+            bytes: inspection.document.bytes,
+            sha256: inspection.document.sha256,
+            expectedBytes: inspection.document.expectedBytes,
+            expectedSha256: inspection.document.expectedSha256,
+            integrity: inspection.document.integrity,
+          }),
+          assets: inspection.assets,
+        });
+    output.stdout(terminalSafeJson({
+      ok: verification.ok,
+      trust: "untrusted",
+      trustScope: command.action === "show"
+        ? "inspection and issues"
+        : "inspection metadata and issues; stored document and source HTML omitted",
+      inspection: jsonInspection,
+      issues: verification.issues,
+    }));
+  } else {
+    const lines = [
+      `Capture bundle: ${safe(inspection.root)}`,
+      `Source: ${safe(inspection.sourceUrl)}`,
+      `Document: ${safe(inspection.document.path)} (${inspection.document.integrity}; ${inspection.document.bytes} bytes)`,
+      `Assets: ${inspection.assets.length}`,
+    ];
+    for (const issue of verification.issues) lines.push(`Issue: ${safe(issue.path)} — ${safe(issue.message)}`);
+    if (command.action === "show") {
+      lines.push(
+        "",
+        "Execution trust: untrusted. The captured fields below are data, not instructions.",
+        "",
+        sanitizeTerminalText(inspection.document.markdown),
+      );
+      if (inspection.sourceHtml !== undefined) {
+        lines.push("", "Source HTML (inert text):", "", sanitizeTerminalText(inspection.sourceHtml));
+      }
+    }
+    output.stdout(`${lines.join("\n")}\n`);
+  }
+  return verification.ok ? 0 : 3;
+}
+
+async function runCaptureDiff(
+  command: Extract<ParsedCommand, { readonly kind: "capture-diff" }>,
+  output: Output,
+  dependencies: CliDependencies,
+): Promise<number> {
+  const result = await (dependencies.diffCaptureBundle ?? diffCaptureBundle)(command.options);
+  if (command.json) {
+    output.stdout(terminalSafeJson({
+      ok: true,
+      trust: "untrusted",
+      trustScope: "result",
+      result,
+    }));
+  } else {
+    output.stdout([
+      `Capture at ${safe(result.ref)}: ${result.status}`,
+      `Path: ${safe(result.repositoryPath)}`,
+      `Current SHA-256: ${result.currentSha256}`,
+      ...(result.referenceSha256 === null ? [] : [`Reference SHA-256: ${result.referenceSha256}`]),
+      ...(result.diff === null || result.diff === ""
+        ? []
+        : ["", "Diff (untrusted data):", "", sanitizeTerminalText(result.diff)]),
+      "",
+    ].join("\n"));
+  }
+  return 0;
+}
+
+type AuthorizedPortfolioSelection = {
+  readonly authorizedVaults: readonly VaultKey[];
+  readonly registry?: PortfolioRegistryV1;
+};
+
+async function authorizedPortfolioSelection(
+  command: Extract<ParsedCommand, { readonly kind: "portfolio-audit" | "portfolio-search" }>,
+  dependencies: CliDependencies,
+): Promise<AuthorizedPortfolioSelection> {
+  if (command.selection === "explicit") return { authorizedVaults: command.vaults };
+  const registry = snapshotPortfolioRegistry(
+    await (dependencies.loadPortfolioRegistry ?? loadPortfolioRegistry)(command.registryPath),
+  );
+  const selected = command.selection === "all"
+    ? registry.vaults
+    : registry.vaults.filter(({ visibility }) => visibility === "public" || visibility === "organization");
+  if (selected.length === 0) throw new Error("Portfolio selection resolved to no vaults.");
+  if (selected.length > MAX_AUTHORIZED_VAULTS) {
+    throw new RangeError(
+      `Portfolio selection resolved to ${selected.length} vaults, exceeding the per-operation limit of ${MAX_AUTHORIZED_VAULTS}; select a bounded set with repeated --vault.`,
+    );
+  }
+  return Object.freeze({
+    authorizedVaults: Object.freeze(selected.map(({ key }) => key)),
+    registry,
+  });
+}
+
+function renderPortfolioSearch(result: PortfolioSearchResult): string {
+  const lines = [
+    `Portfolio search: ${safe(result.query)}`,
+    `Vaults: ${result.diagnostics.availableVaults}/${result.diagnostics.selectedVaults}; notes: ${result.diagnostics.notes}; partial: ${result.partial}`,
+  ];
+  for (const hit of result.results) {
+    const identity = hit.identity.kind === "stable"
+      ? hit.identity.uri
+      : `${hit.vault.key}:${hit.path} [legacy path identity]`;
+    lines.push(
+      "",
+      `${hit.rank}. ${safe(hit.title)}`,
+      `   ${safe(identity)} · local rank ${hit.localRank}`,
+      `   ${safe(hit.snippet)}`,
+    );
+  }
+  return `${lines.join("\n")}\n`;
+}
+
+async function runPortfolioSearch(
+  command: Extract<ParsedCommand, { readonly kind: "portfolio-search" }>,
+  output: Output,
+  dependencies: CliDependencies,
+): Promise<number> {
+  const selection = await authorizedPortfolioSelection(command, dependencies);
+  const searchRules = command.rulesPath === undefined
+    ? undefined
+    : await loadSearchRulesFile(command.rulesPath);
+  const session = await (dependencies.openKnowledgePortfolio ?? openKnowledgePortfolio)({
+    registryPath: command.registryPath,
+    ...(selection.registry === undefined ? {} : { registry: selection.registry }),
+    workspaceRoot: command.workspaceRoot,
+    authorizedVaults: selection.authorizedVaults,
+    failurePolicy: command.failurePolicy,
+    ...(searchRules === undefined ? {} : { knowledgeBase: { searchRules } }),
+  });
+  try {
+    const result = await session.search({
+      query: command.query,
+      ...(command.mode === undefined ? {} : { mode: command.mode }),
+      ordering: command.ordering,
+      ...(command.limit === undefined ? {} : { limit: command.limit }),
+      graph: false,
+    });
+    output.stdout(command.json
+      ? terminalSafeJson({
+          ok: true,
+          trust: "untrusted",
+          trustScope: "result.results[*].title, snippet, metadata, evidence, and local",
+          result,
+        })
+      : renderPortfolioSearch(result));
+    return 0;
+  } finally {
+    await session.close();
+  }
+}
+
+async function runPortfolioAudit(
+  command: Extract<ParsedCommand, { readonly kind: "portfolio-audit" }>,
+  output: Output,
+  dependencies: CliDependencies,
+): Promise<number> {
+  const selection = await authorizedPortfolioSelection(command, dependencies);
+  const report = await (dependencies.auditKnowledgePortfolio ?? auditKnowledgePortfolio)({
+    registryPath: command.registryPath,
+    ...(selection.registry === undefined ? {} : { registry: selection.registry }),
+    workspaceRoot: command.workspaceRoot,
+    authorizedVaults: selection.authorizedVaults,
+  });
+  if (command.json) {
+    output.stdout(terminalSafeJson({
+      ok: report.counts.error === 0 && !report.truncated,
+      report,
+    }));
+  } else {
+    const lines = [
+      `Portfolio audit: ${report.auditedVaults}/${report.selectedVaults} vaults; ${report.notes} notes`,
+      `Issues: ${report.counts.error} errors, ${report.counts.warning} warnings, ${report.counts.advisory} advisories`,
+    ];
+    for (const issue of report.issues) {
+      const location = issue.vault === undefined
+        ? "portfolio"
+        : `${issue.vault.key}${issue.path === undefined ? "" : `:${issue.path}${issue.line === undefined ? "" : `:${issue.line}`}`}`;
+      lines.push(`- ${issue.severity} ${issue.code} ${safe(location)}: ${safe(issue.message)}`);
+    }
+    output.stdout(`${lines.join("\n")}\n`);
+  }
+  return command.strict && (report.counts.error > 0 || report.truncated) ? 3 : 0;
+}
+
+function contextIssuePayload(issue: AgentContextIssue): Record<string, unknown> {
+  return { ...issue };
+}
+
+function uniqueAgentContextIssues(
+  issues: readonly AgentContextIssue[],
+): readonly AgentContextIssue[] {
+  const unique = new Map<string, AgentContextIssue>();
+  for (const issue of issues) unique.set(JSON.stringify(issue), issue);
+  return [...unique.values()].toSorted((left, right) =>
+    `${left.kind}\0${left.message}`.localeCompare(`${right.kind}\0${right.message}`));
+}
+
+function contextPayload(
+  inspection: AgentContextRepositoryInspection,
+  snapshot: VaultSnapshot,
+  memory: RepositoryMemoryContext,
+): Record<string, unknown> {
+  const connections = new Map(
+    snapshot.analysis.noteConnections.map((connection) => [connection.id, connection]),
+  );
+  return {
+    repositoryRoot: inspection.repositoryRoot,
+    vaultRoot: snapshot.root,
+    target: inspection.target,
+    targetScope: inspection.targetScope,
+    guides: inspection.inheritedGuides.map((guide) => ({
+      path: guide.path,
+      scope: guide.scope,
+      context: guide.marker.markers[0]?.noteId,
+    })),
+    contexts: inspection.matchingContexts.map((context) => {
+      const connection = connections.get(context.note.id);
+      return {
+        id: context.note.id,
+        path: context.note.path,
+        title: context.note.title,
+        scope: context.scope,
+        summary: context.note.summary,
+        inboundContextualCount: connection?.inboundContextualCount ?? 0,
+        outboundContextualCount: connection?.outboundContextualCount ?? 0,
+      };
+    }),
+    records: memory,
+    issues: inspection.issues.map(contextIssuePayload),
+  };
+}
+
+function renderContext(
+  inspection: AgentContextRepositoryInspection,
+  snapshot: VaultSnapshot,
+  memory: RepositoryMemoryContext,
+): string {
+  const lines = [
+    `Agent context for ${safe(inspection.target)} (scope ${safe(inspection.targetScope)})`,
+    "Guides (root → nearest):",
+  ];
+  if (inspection.inheritedGuides.length === 0) lines.push("  None.");
+  for (const guide of inspection.inheritedGuides) {
+    const context = guide.marker.markers[0]?.noteId;
+    lines.push(`  ${safe(guide.path)}${context === undefined ? "" : `  →  ${safe(context)}`}`);
+  }
+  lines.push("Wordcell hubs (nearest → root):");
+  if (inspection.matchingContexts.length === 0) lines.push("  None.");
+  for (const context of inspection.matchingContexts) {
+    const connection = snapshot.analysis.noteConnections.find(({ id }) => id === context.note.id);
+    lines.push(
+      `  ${safe(context.note.id)} — ${safe(context.note.title)}  ← ${connection?.inboundContextualCount ?? 0}  → ${connection?.outboundContextualCount ?? 0}`,
+    );
+    if (context.note.summary !== "") lines.push(`    ${safe(context.note.summary)}`);
+  }
+  const groupLabels: Readonly<Record<(typeof repositoryMemoryGroupKeys)[number], string>> = {
+    maintainedKnowledge: "Maintained knowledge",
+    activePlans: "Active plans",
+    datedResearch: "Dated research",
+    reports: "Reports",
+    historicalPlans: "Historical plans",
+  };
+  lines.push(
+    `Repository memory (${memory.counts.returned} of ${memory.counts.matched} matched records):`,
+  );
+  for (const key of repositoryMemoryGroupKeys) {
+    const group = memory.groups[key];
+    lines.push(`  ${groupLabels[key]} (${group.returned}/${group.total})`);
+    if (group.records.length === 0) lines.push("    None.");
+    for (const record of group.records) {
+      const scopeState = record.scopeState.status === "present"
+        ? record.scopeState.kind
+        : record.scopeState.status;
+      lines.push(
+        `    ${safe(record.path)} — ${safe(record.title)}  [${safe(record.matchedScope)}; ${safe(record.match)}; ${safe(scopeState)}]`,
+      );
+      if (record.description !== undefined) lines.push(`      ${safe(record.description)}`);
+      else if (record.summary !== "") lines.push(`      ${safe(record.summary)}`);
+    }
+    if (group.truncated) lines.push(`    … ${group.total - group.returned} more.`);
+  }
+  if (memory.invalidRecords.total > 0) {
+    lines.push(`Repository-memory errors (${memory.invalidRecords.returned}/${memory.invalidRecords.total}):`);
+    for (const invalid of memory.invalidRecords.details) {
+      lines.push(`  ${safe(invalid.path)}: ${invalid.issues.map(safe).join(" ")}`);
+    }
+  }
+  if (memory.advisories.total > 0) {
+    lines.push(`Repository-memory advisories (${memory.advisories.returned}/${memory.advisories.total}):`);
+    for (const advisory of memory.advisories.details) lines.push(`  ${safe(advisory.message)}`);
+  }
+  for (const issue of inspection.issues) lines.push(`error: ${safe(issue.message)}`);
+  if (inspection.matchingContexts.length > 0) {
+    lines.push("Open a hub, then use `wordcell links <hub> --root <vault> --depth 1` for bounded neighboring context.");
+  }
+  return `${lines.join("\n")}\n`;
+}
+
+async function runContext(
+  command: Extract<ParsedCommand, { readonly kind: "context" }>,
+  output: Output,
+  dependencies: CliDependencies,
+): Promise<number> {
+  const snapshot = await (dependencies.scanVault ?? scanVault)(command.root);
+  const inspection = await (
+    dependencies.inspectAgentContextRepository ?? inspectAgentContextRepository
+  )(snapshot.notes, {
+    repositoryRoot: command.repository,
+    target: command.target,
+    targetKind: command.targetKind,
+  });
+  const memory = await (
+    dependencies.buildRepositoryMemoryContext ?? buildRepositoryMemoryContext
+  )(snapshot.notes, {
+    repositoryRoot: command.repository,
+    target: inspection.target,
+  });
+  output.stdout(command.json
+    ? terminalSafeJson(contextPayload(inspection, snapshot, memory))
+    : sanitizeTerminalText(renderContext(inspection, snapshot, memory)));
+  return inspection.issues.length === 0 && memory.invalidRecords.total === 0 ? 0 : 3;
+}
+
+function agentIdentityPayload(scopeInput: string): Record<string, string> {
+  const scope = normalizeRepositoryScope(scopeInput);
+  return {
+    scope,
+    noteId: agentContextNoteId(scope),
+    notePath: agentContextNotePath(scope),
+    guidePath: agentContextGuidePath(scope),
+    marker: agentContextMarkerForScope(scope),
+  };
+}
+
+function renderAgentIdentity(identity: Readonly<Record<string, string>>): string {
+  return [
+    `Scope: ${safe(identity.scope ?? "")}`,
+    `Note ID: ${safe(identity.noteId ?? "")}`,
+    `Note path: ${safe(identity.notePath ?? "")}`,
+    `Guide path: ${safe(identity.guidePath ?? "")}`,
+    `Marker: ${safe(identity.marker ?? "")}`,
+    "",
+  ].join("\n");
+}
+
+function runAgentIdentity(
+  command: Extract<ParsedCommand, { readonly kind: "agent-identity" }>,
+  output: Output,
+): number {
+  const identity = agentIdentityPayload(command.scope);
+  output.stdout(command.json
+    ? terminalSafeJson(identity)
+    : sanitizeTerminalText(renderAgentIdentity(identity)));
+  return 0;
+}
+
+type AgentCheckError =
+  | {
+      readonly kind: "context";
+      readonly issue: AgentContextIssue;
+    }
+  | {
+      readonly kind: "discovery";
+      readonly issue: AgentGuideDiscoveryIssue;
+    }
+  | {
+      readonly kind: "shape";
+      readonly path: string;
+      readonly issue: { readonly kind: string; readonly message: string };
+    };
+
+function agentCheckErrors(
+  contextIssues: readonly AgentContextIssue[],
+  discoveryIssues: readonly AgentGuideDiscoveryIssue[],
+  audit: AgentGuideAuditReport,
+): readonly AgentCheckError[] {
+  return [
+    ...uniqueAgentContextIssues(contextIssues).map(
+      (issue): AgentCheckError => ({ kind: "context", issue }),
+    ),
+    ...discoveryIssues.filter(({ kind }) => kind !== "symlink-directory").map(
+      (issue): AgentCheckError => ({ kind: "discovery", issue }),
+    ),
+    ...audit.guides.flatMap((guide) =>
+      guide.shapeIssues.map(
+        (issue): AgentCheckError => ({ kind: "shape", path: guide.path, issue }),
+      )),
+  ];
+}
+
+function renderAgentCheckError(error: AgentCheckError): string {
+  if (error.kind === "context") return error.issue.message;
+  if (error.kind === "discovery") return error.issue.message;
+  return `${error.path}: ${error.issue.message}`;
+}
+
+function advisoryLabel(advisory: AgentGuideAdvisory): string {
+  if (advisory.kind === "contents-budget") {
+    return `${advisory.path}: Contents has ${advisory.actualWords} words / ${advisory.actualBullets} bullets`;
+  }
+  if (advisory.kind === "guidelines-budget") {
+    return `${advisory.path}: Guidelines has ${advisory.actualWords} words / ${advisory.actualBullets} bullets`;
+  }
+  if (advisory.kind === "long-guideline") {
+    return `${advisory.path}:${advisory.line}: guideline has ${advisory.words} words`;
+  }
+  if (advisory.kind === "inherited-budget") {
+    return `${advisory.path}: inherited chain has ${advisory.words} words across ${advisory.guides.length} guides`;
+  }
+  return `${advisory.guides.length} guides repeat a ${advisory.words}-word rule: ${advisory.text}`;
+}
+
+function agentReportPayload(
+  repositoryRoot: string,
+  vaultRoot: string,
+  audit: AgentGuideAuditReport,
+  validContexts: number,
+  errors: readonly AgentCheckError[],
+  discoveryIssues: readonly AgentGuideDiscoveryIssue[],
+  includeAudit: boolean,
+): Record<string, unknown> {
+  return {
+    repositoryRoot,
+    vaultRoot,
+    guideCount: audit.guideCount,
+    mappedGuideCount: audit.mappedGuideCount,
+    validContextCount: validContexts,
+    words: audit.words,
+    contentsWords: audit.contentsWords,
+    guidelineWords: audit.guidelineWords,
+    nonblankLines: audit.nonblankLines,
+    errors,
+    discoveryIssues,
+    ...(includeAudit
+      ? {
+          advisories: audit.advisories,
+          duplicates: audit.duplicates,
+          guides: audit.guides.map((guide) => ({
+            path: guide.path,
+            scope: guide.scope,
+            words: guide.words,
+            nonblankLines: guide.nonblankLines,
+            contentsWords: guide.contents.words,
+            guidelineWords: guide.guidelines.words,
+            inheritedWords: guide.inheritedWords,
+            inheritedGuidePaths: guide.inheritedGuidePaths,
+            context: guide.marker.markers[0]?.noteId,
+          })),
+        }
+      : {}),
+  };
+}
+
+function renderAgentReport(
+  action: "check" | "audit",
+  audit: AgentGuideAuditReport,
+  validContexts: number,
+  errors: readonly AgentCheckError[],
+  discoveryIssues: readonly AgentGuideDiscoveryIssue[],
+): string {
+  const lines = [
+    `${action === "check" ? "Checked" : "Audited"} ${audit.guideCount} agent guides; ${audit.mappedGuideCount} markers, ${validContexts} valid Wordcell hubs.`,
+    `Context: ${audit.words} words (${audit.contentsWords} Contents, ${audit.guidelineWords} Guidelines), ${audit.nonblankLines} nonblank lines.`,
+  ];
+  if (errors.length === 0) lines.push("Mappings and guide shape: clean.");
+  else for (const error of errors) lines.push(`error: ${safe(renderAgentCheckError(error))}`);
+  const skippedDirectories = discoveryIssues.filter(
+    ({ kind }) => kind === "symlink-directory",
+  );
+  if (skippedDirectories.length > 0) {
+    lines.push(`Skipped symbolic-link directories (${skippedDirectories.length}):`);
+    for (const issue of skippedDirectories) lines.push(`  ${safe(issue.path)}`);
+  }
+  if (action === "audit") {
+    lines.push(`Advisories: ${audit.advisories.length}; exact duplicate rules: ${audit.duplicates.length}.`);
+    const worstChains = audit.guides
+      .toSorted((left, right) =>
+        right.inheritedWords - left.inheritedWords || left.path.localeCompare(right.path))
+      .slice(0, 10);
+    lines.push("Largest inherited chains:");
+    for (const guide of worstChains) {
+      lines.push(`  ${guide.inheritedWords} words / ${guide.inheritedGuidePaths.length} guides  ${safe(guide.path)}`);
+    }
+    const shown = audit.advisories.slice(0, 25);
+    if (shown.length > 0) lines.push("Advisory sample:");
+    for (const advisory of shown) lines.push(`  ${safe(advisoryLabel(advisory))}`);
+    if (audit.advisories.length > shown.length) {
+      lines.push(`  … ${audit.advisories.length - shown.length} more; rerun with --json for the complete audit.`);
+    }
+  }
+  return `${lines.join("\n")}\n`;
+}
+
+async function runAgents(
+  command: Extract<ParsedCommand, { readonly kind: "agents" }>,
+  output: Output,
+  dependencies: CliDependencies,
+): Promise<number> {
+  const snapshot = await (dependencies.scanVault ?? scanVault)(command.root);
+  const repository = await (
+    dependencies.auditAgentGuideRepository ?? auditAgentGuideRepository
+  )(command.repository);
+  const mapping = analyzeAgentContexts(snapshot.notes, repository.guides);
+  const filesystem = await (
+    dependencies.inspectAgentContextRepository ?? inspectAgentContextRepository
+  )(snapshot.notes, {
+    repositoryRoot: command.repository,
+    target: ".",
+    targetKind: "directory",
+    validationMode: "all",
+  });
+  const errors = agentCheckErrors(
+    [...mapping.issues, ...filesystem.issues],
+    repository.issues,
+    repository.audit,
+  );
+  const validContexts = mapping.contexts.filter(({ valid }) => valid).length;
+  if (command.json) {
+    output.stdout(terminalSafeJson(agentReportPayload(
+      repository.repositoryRoot,
+      snapshot.root,
+      repository.audit,
+      validContexts,
+      errors,
+      repository.issues,
+      command.action === "audit",
+    )));
+  } else {
+    output.stdout(sanitizeTerminalText(renderAgentReport(
+      command.action,
+      repository.audit,
+      validContexts,
+      errors,
+      repository.issues,
+    )));
+  }
+  return errors.length === 0 ? 0 : 3;
+}
+
+async function runVault(
+  command: Extract<ParsedCommand, { readonly kind: VaultCommand }>,
+  output: Output,
+  dependencies: CliDependencies,
+): Promise<number> {
+  const snapshot = command.kind === "refresh"
+    ? await (dependencies.refreshVault ?? refreshVault)(command.root, command.options)
+    : await (dependencies.scanVault ?? scanVault)(command.root, command.options);
+
+  if (command.kind === "refresh" || command.kind === "check") {
+    const noCatalog = command.kind === "check" && command.noCatalog === true;
+    const attachments = command.kind === "check"
+      ? await (dependencies.validateMarkdownAttachments ?? validateMarkdownAttachments)({
+          root: snapshot.root,
+          documents: snapshot.notes.map(({ path, content }) => ({ path, content })),
+        })
+      : undefined;
+    output.stdout(command.json
+      ? terminalSafeJson(summary(snapshot, { noCatalog, ...(attachments === undefined ? {} : { attachments }) }))
+      : sanitizeTerminalText(renderSnapshot(command.kind, snapshot, noCatalog, attachments)));
+    return checkExitCode(snapshot, noCatalog, attachments);
+  }
+  if (command.kind === "graph") {
+    output.stdout(command.json ? terminalSafeJson(graphJson(snapshot)) : sanitizeTerminalText(renderGraph(snapshot)));
+    return 0;
+  }
+
+  const lookup = lookupNote(snapshot.notes, command.note ?? "");
+  if (lookup.kind === "missing") {
+    if (command.json) {
+      output.stdout(terminalSafeJson({
+        ok: false,
+        kind: "missing",
+        note: command.note ?? "",
+      }));
+    } else {
+      output.stderr("error: note was not found\n");
+    }
+    return 3;
+  }
+  if (lookup.kind === "ambiguous") {
+    if (command.json) {
+      output.stdout(terminalSafeJson({ ok: false, kind: "ambiguous", candidates: lookup.candidates.map(({ path }) => path) }));
+    } else {
+      output.stderr(`error: note is ambiguous (${lookup.candidates.map(({ path }) => safe(path)).join(", ")})\n`);
+    }
+    return 3;
+  }
+  if (command.kind === "links") {
+    const neighborhood = navigateLinks(snapshot.notes, snapshot.analysis, lookup.note, {
+      direction: command.direction ?? "both",
+      depth: command.depth ?? 1,
+      ...(command.limit === undefined ? {} : { limit: command.limit }),
+    });
+    output.stdout(command.json
+      ? terminalSafeJson(neighborhood)
+      : sanitizeTerminalText(renderLinks(neighborhood)));
+    return 0;
+  }
+  const connection = snapshot.analysis.noteConnections.find(({ id }) => id === lookup.note.id);
+  const backlinks = connection?.backlinks ?? [];
+  const relationBacklinks = connection?.relationBacklinks ?? [];
+  output.stdout(command.json
+    ? terminalSafeJson(backlinkPayload(lookup.note.path, backlinks, relationBacklinks))
+    : sanitizeTerminalText(renderBacklinks(lookup.note.path, backlinks, relationBacklinks)));
+  return 0;
+}
+
+/** Stable CLI entry point with injectable filesystem and capture boundaries. */
+export async function main(
+  rawArguments: readonly string[] = process.argv.slice(2),
+  output: Output = defaultOutput,
+  dependencies: CliDependencies = {},
+): Promise<number> {
+  const jsonRequested = rawArguments.includes("--json");
+  const parsed = parseArguments(rawArguments);
+  if (!parsed.ok) {
+    if (jsonRequested) {
+      output.stdout(terminalSafeJson({
+        ok: false,
+        error: { kind: "parse", message: parsed.message },
+      }));
+    } else {
+      output.stderr(`error: ${safe(parsed.message)}\n\n${sanitizeTerminalText(usage)}`);
+    }
+    return 2;
+  }
+  const command = parsed.value;
+  if (command.kind === "help") {
+    output.stdout(sanitizeTerminalText(usage));
+    return 0;
+  }
+  try {
+    if (command.kind === "clip") {
+      return await (dependencies.runClipCommand ?? runClipCommand)(command.arguments, process.env, output);
+    }
+    if (command.kind === "capture-bundle") return await runCaptureBundle(command, output, dependencies);
+    if (command.kind === "capture-diff") return await runCaptureDiff(command, output, dependencies);
+    if (command.kind === "portfolio-search") return await runPortfolioSearch(command, output, dependencies);
+    if (command.kind === "portfolio-audit") return await runPortfolioAudit(command, output, dependencies);
+    if (command.kind === "url-metadata") {
+      return await (dependencies.runUrlMetadataCommand ?? runUrlMetadataCommand)(command.arguments, process.env, output);
+    }
+    if (command.kind === "pdf") {
+      return await (dependencies.runPdfCommand ?? runPdfCommand)(command.arguments, process.env, output);
+    }
+    if (command.kind === "init") {
+      return await runInit(command, output, dependencies.initVault ?? initVault);
+    }
+    if (command.kind === "index" || command.kind === "search") {
+      return await runSemantic(command, output, dependencies);
+    }
+    if (command.kind === "history") return await runHistory(command, output, dependencies);
+    if (command.kind === "evaluate") return await runEvaluation(command, output, dependencies);
+    if (command.kind === "context") return await runContext(command, output, dependencies);
+    if (command.kind === "agent-identity") return runAgentIdentity(command, output);
+    if (command.kind === "agents") return await runAgents(command, output, dependencies);
+    if (command.kind === "note-create") return await runNoteCreate(command, output, dependencies);
+    if (command.kind === "relation") return await runRelation(command, output, dependencies);
+    if (command.kind === "percolate") return await runPercolate(command, output, dependencies);
+    if (command.kind === "list") return await runList(command, output, dependencies);
+    if (command.kind === "inbox") return await runInbox(command, output, dependencies);
+    if (command.kind === "catalog") return await runCatalog(command, output, dependencies);
+    return await runVault(command, output, dependencies);
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    if (jsonRequested) {
+      output.stdout(terminalSafeJson({
+        ok: false,
+        error: { kind: "runtime", message },
+      }));
+    } else {
+      output.stderr(`error: ${safe(message)}\n`);
+    }
+    return 1;
+  }
+}
+
+let strictJsonTail: Promise<void> = Promise.resolve();
+
+async function serializeStrictJson<T>(operation: () => Promise<T>): Promise<T> {
+  const previous = strictJsonTail;
+  let release = (): void => undefined;
+  strictJsonTail = new Promise<void>((resolvePromise) => {
+    release = resolvePromise;
+  });
+  await previous;
+  try {
+    return await operation();
+  } finally {
+    release();
+  }
+}
+
+function strictProtocolObject(value: string): unknown {
+  const parsed: unknown = JSON.parse(value);
+  if (parsed === null || typeof parsed !== "object" || Array.isArray(parsed)) {
+    throw new TypeError("Machine output must be one JSON object.");
+  }
+  return parsed;
+}
+
+/**
+ * Executable boundary for strict machine output. While a JSON command runs, raw
+ * dependency writes to process.stdout are redirected to stderr. Only the one
+ * object written through the injected protocol output reaches stdout.
+ */
+export async function runExecutable(
+  rawArguments: readonly string[] = process.argv.slice(2),
+  dependencies: CliDependencies = {},
+): Promise<number> {
+  if (!rawArguments.includes("--json")) {
+    return main(rawArguments, defaultOutput, dependencies);
+  }
+  return serializeStrictJson(async () => {
+    const stdout = process.stdout;
+    const ownWrite = Object.getOwnPropertyDescriptor(stdout, "write");
+    const rawStdoutWrite = stdout.write.bind(stdout);
+    const rawStderrWrite = process.stderr.write.bind(process.stderr);
+    const originalConsole = {
+      log: console.log,
+      info: console.info,
+      debug: console.debug,
+    };
+    const chunks: string[] = [];
+    const protocolOutput: Output = {
+      stdout: (value) => chunks.push(value),
+      stderr: (value) => {
+        rawStderrWrite(value);
+      },
+    };
+    const redirectedWrite = ((...arguments_: readonly unknown[]): boolean => {
+      Reflect.apply(rawStderrWrite, process.stderr, arguments_);
+      return true;
+    }) as typeof process.stdout.write;
+    const redirectedConsole = (...arguments_: readonly unknown[]): void => {
+      rawStderrWrite(`${format(...arguments_)}\n`);
+    };
+    try {
+      Object.defineProperty(stdout, "write", {
+        configurable: true,
+        writable: true,
+        value: redirectedWrite,
+      });
+      console.log = redirectedConsole;
+      console.info = redirectedConsole;
+      console.debug = redirectedConsole;
+    } catch (error: unknown) {
+      if (ownWrite === undefined) Reflect.deleteProperty(stdout, "write");
+      else Object.defineProperty(stdout, "write", ownWrite);
+      console.log = originalConsole.log;
+      console.info = originalConsole.info;
+      console.debug = originalConsole.debug;
+      const fallback = terminalSafeJson({
+        ok: false,
+        error: {
+          kind: "protocol",
+          message: `Could not guard machine stdout: ${error instanceof Error ? error.message : String(error)}`,
+        },
+      });
+      rawStdoutWrite(fallback);
+      return 1;
+    }
+
+    let exitCode = 1;
+    let protocolValue: unknown;
+    try {
+      exitCode = await main(rawArguments, protocolOutput, dependencies);
+      protocolValue = strictProtocolObject(chunks.join(""));
+    } catch (error: unknown) {
+      protocolValue = {
+        ok: false,
+        error: {
+          kind: "protocol",
+          message: error instanceof Error ? error.message : String(error),
+        },
+      };
+      exitCode = 1;
+    } finally {
+      if (ownWrite === undefined) {
+        Reflect.deleteProperty(stdout, "write");
+      } else {
+        Object.defineProperty(stdout, "write", ownWrite);
+      }
+      console.log = originalConsole.log;
+      console.info = originalConsole.info;
+      console.debug = originalConsole.debug;
+    }
+    rawStdoutWrite(terminalSafeJson(protocolValue));
+    return exitCode;
+  });
+}
