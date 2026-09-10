@@ -361,7 +361,7 @@ export function validateReleaseWorkflow(source: string, label: string): void {
   if (containsUnexpectedProviderInvocation(publicationCommands)) throw new Error(`${label} contains an unexpected provider mutation command outside its reviewed helper`);
   validateNpmPublicationJobs(publishNpm, admitNpm, label);
   if ((source.match(/id-token: write/gu) ?? []).length !== 2) throw new Error(`${label} must grant OIDC only to the attestation and npm publication jobs`);
-  validateReviewedWorkflowSemantics(workflow, "1cf4b5c999892031eefb3bd1523ab99a10f1e62d63394f70c3e3a9dea622f363", label);
+  validateReviewedWorkflowSemantics(workflow, "6c8aae13c95c77118cbf9e18ca211a64a4ef501ef2060e691fcf0383519f4682", label);
 }
 
 function validateNpmPublicationJobs(

@@ -175,13 +175,30 @@ safe. Never re-push the tag or create another release.
 npm requires the package to exist before a trusted publisher can be bound.
 Establish the new coordinate with a separately reviewed prerelease bootstrap
 artifact, then configure trusted publishing before tagging the first stable
-release. Use exactly `0.20.0-bootstrap.1` with the `bootstrap` dist-tag and no
-`latest` tag. The first stable workflow accepts that one exact bootstrap state.
-Retain its exact
-source and archive evidence, and inspect its complete packed manifest and
-contents before the owner-authenticated publication. Do not publish a dummy
-package or manually publish the stable release archive: the stable
-`admit_npm` gate requires the exact tag workflow's OIDC provenance.
+release. Publish exactly `0.20.0-bootstrap.1` with `--tag bootstrap`, then
+read back the complete registry version and tag inventory. npm documents that
+an explicit tag avoids `latest`; during the Soulscrape bootstrap on 2026-09-10,
+registry readback nevertheless showed both tags and a deletion attempt returned
+HTTP 400. That observation does not establish that npm requires `latest`.
+
+The first Wordcell stable publication accepts only candidate `0.20.0`, with the
+sole published version `0.20.0-bootstrap.1`. Tags must be exactly `bootstrap`,
+or exactly `bootstrap` and `latest`, all pointing to that bootstrap. Its package
+name, version and archive integrity must match the reviewed bootstrap from
+source `df48968ff2ef227acb47d72dada09be1ac5d4b60`:
+
+```text
+sha512-31YbWYj6wCg3TmuFtNAN3bqiOyZUmfPWIlqHzKVau5BRDr41hOx/sw9FZ0D9o4v3i9k8Ly61vRMXqtIFtvYneA==
+```
+
+A successful full package-metadata response supplies one coherent version and
+tag snapshot. Hidden versions, additional tags, other prereleases, conflicting
+identity or integrity, and failed or malformed reads stop publication. Later
+stable releases retain the strictly increasing stable `latest` guard. Retain
+the bootstrap source and archive evidence; do not rebuild or republish that
+immutable version to accommodate a later workflow change. Do not publish a
+dummy package or manually publish the stable archive: stable admission still
+requires the exact protected tag workflow's OIDC provenance and canonical bytes.
 
 The coordinator prepares and verifies the concrete bootstrap artifact before
 requesting the owner's interactive npm authentication. Preserve npm's current
