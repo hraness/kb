@@ -114,7 +114,7 @@ DNS.2 = alias.pinned.test
   };
   runOpenSsl([
     "req", "-x509", "-newkey", "rsa:2048", "-nodes", "-sha256",
-    "-days", "2", "-subj", "/CN=Wrench Test Root CA",
+    "-days", "2", "-subj", "/CN=Ghostget Test Root CA",
     "-keyout", authorityKeyPath, "-out", authorityCertificatePath,
     "-config", configurationPath, "-extensions", "authority",
   ]);
@@ -592,7 +592,7 @@ describe("pinned network transport", () => {
 
   test("verifies TLS SNI and certificates while pooling by exact origin and pinned IP", async () => {
     const nodeExecutable = resolveGenuineNodeExecutable();
-    const fixtureRoot = mkdtempSync(join(tmpdir(), "wrench-real-tls-"));
+    const fixtureRoot = mkdtempSync(join(tmpdir(), "ghostget-real-tls-"));
     chmodSync(fixtureRoot, 0o700);
     const eventsPath = join(fixtureRoot, "events.jsonl");
     const tls = generateTlsFixture(fixtureRoot);
