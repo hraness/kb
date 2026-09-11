@@ -418,8 +418,8 @@ export function validateKbSkillContractResources(
       errors.push(`SKILL.md must link ${link}`);
     }
   }
-  if (!resources.skill.includes("bun add --global --ignore-scripts https://github.com/hraness/wordcell/releases/download/v0.21.0/hraness-wordcell-0.21.0.tgz")) {
-    errors.push("SKILL.md must retain the immutable 0.21.0 GitHub runtime pin");
+  if (!resources.skill.includes("bun add --global --ignore-scripts https://github.com/hraness/wordcell/releases/download/v0.21.1/hraness-wordcell-0.21.1.tgz")) {
+    errors.push("SKILL.md must retain the immutable 0.21.1 GitHub runtime pin");
   }
   for (const [name, contents, headings] of [
     ["customize.md", resources.customize, CUSTOMIZE_HEADINGS],

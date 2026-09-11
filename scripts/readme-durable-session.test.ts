@@ -46,10 +46,11 @@ describe("durable-session documentation", () => {
       "## Install",
       "## Keep one decision available to the next session",
       "## Recover the stopped session",
-      "## A knowledge base for your coding agents",
-      "## Installation reference",
-      "## Command surface",
-      "## Agent skills",
+      "## What you can do",
+      "## How the files fit together",
+      "## Build with the TypeScript SDK",
+      "## Privacy and boundaries",
+      "## Documentation",
       "## Release notes",
     ] as const;
     const offsets = headings.map((heading) => readme.indexOf(heading));

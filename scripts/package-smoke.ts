@@ -519,6 +519,7 @@ async function verifyInstalledPackagePolicy(consumer: string): Promise<Readonly<
       path !== "LICENSE"
       && path !== "README.md"
       && path !== "package.json"
+      && path !== "assets/agent-skill.svg"
       && !path.startsWith("dist/")
       && !path.startsWith("skills/wordcell/")
       && !path.startsWith("src/")
