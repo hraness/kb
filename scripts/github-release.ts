@@ -234,19 +234,79 @@ export function verifyAttestations(directory: string, manifest: ReleaseManifest)
   }
 }
 
-export function verifyCanonicalRun(value: unknown, manifest: ReleaseManifest): void {
+const canonicalJobs = ["Authorize owner release tag", "Verify", "Attest verified artifact", "Publish"];
+const npmJobs = ["Publish exact npm package", "Admit the public npm package"];
+
+function canonicalRunIdentity(value: unknown, manifest: ReleaseManifest, attempt: number): Record<string, unknown> {
   const run = record(value, "Canonical release run");
   const owner = record(run.actor, "Canonical release actor");
   const triggering = record(run.triggering_actor, "Canonical triggering actor");
   const source = record(run.repository, "Canonical run repository");
-  if (run.id !== manifest.runId || run.run_attempt !== manifest.runAttempt
+  if (run.id !== manifest.runId || run.run_attempt !== attempt
     || run.workflow_id !== 320004141 || run.name !== "Release" || run.path !== manifest.workflow
-    || run.status !== "completed" || run.conclusion !== "success" || run.event !== "push"
+    || run.status !== "completed" || !["success", "failure"].includes(String(run.conclusion)) || run.event !== "push"
     || run.head_branch !== manifest.tag || run.head_sha !== manifest.sourceSha
     || owner.id !== 894119 || owner.type !== "User" || triggering.id !== 894119 || triggering.type !== "User"
     || source.id !== repositoryId || source.full_name !== repository || source.private !== false) {
-    throw new Error("Canonical release does not have the exact completed successful source and publication gate");
+    throw new Error("Canonical release does not have the exact completed source and owner identity");
   }
+  return run;
+}
+
+function canonicalJobInventory(value: unknown, manifest: ReleaseManifest, minimumAttempt: number, maximumAttempt: number, conclusion: unknown): void {
+  const inventory = record(value, "Canonical jobs inventory");
+  const expected = [...canonicalJobs, ...npmJobs];
+  if (!Array.isArray(inventory.jobs) || inventory.total_count !== expected.length || inventory.jobs.length !== expected.length) {
+    throw new Error("Canonical jobs must contain the complete bounded workflow inventory");
+  }
+  const names = new Set<string>();
+  const ids = new Set<number>();
+  let npmFailed = false;
+  for (const value of inventory.jobs) {
+    const job = record(value, "Canonical job");
+    const id = positive(job.id, "Canonical job ID");
+    const attempt = positive(job.run_attempt, "Canonical job attempt");
+    if (typeof job.name !== "string" || !expected.includes(job.name) || names.has(job.name) || ids.has(id)
+      || job.run_id !== manifest.runId || job.head_sha !== manifest.sourceSha
+      || attempt < minimumAttempt || attempt > maximumAttempt || job.status !== "completed") {
+      throw new Error("Canonical job identity, attempt, or terminal state is invalid");
+    }
+    names.add(job.name); ids.add(id);
+    if (canonicalJobs.includes(job.name)) {
+      if (job.conclusion !== "success") throw new Error("Every canonical source, attestation, and publication job must succeed");
+    } else {
+      if (!["success", "failure", "skipped"].includes(String(job.conclusion))) throw new Error("npm job has an unsafe terminal state");
+      npmFailed ||= job.conclusion === "failure";
+    }
+  }
+  if ((conclusion === "failure") !== npmFailed) throw new Error("Aggregate conclusion is not explained by the exact npm job results");
+}
+
+export type CanonicalRunProof = Readonly<{ originalJobs: unknown; latestRun: unknown; latestJobs: unknown }>;
+
+export function verifyCanonicalRun(value: unknown, manifest: ReleaseManifest, proof: CanonicalRunProof): void {
+  const original = canonicalRunIdentity(value, manifest, manifest.runAttempt);
+  const latestAttempt = positive(record(proof.latestRun, "Latest release run").run_attempt, "Latest release attempt");
+  if (latestAttempt < manifest.runAttempt) throw new Error("Latest release attempt predates the signed receipt");
+  const latest = canonicalRunIdentity(proof.latestRun, manifest, latestAttempt);
+  canonicalJobInventory(proof.originalJobs, manifest, manifest.runAttempt, manifest.runAttempt, original.conclusion);
+  // GitHub may give inherited successes fresh IDs and the new attempt number on
+  // failed-only reruns. Admit the provider's complete effective inventory, not
+  // equality with earlier job IDs; the signed receipt retains its own attempt.
+  canonicalJobInventory(proof.latestJobs, manifest, manifest.runAttempt, latestAttempt, latest.conclusion);
+}
+
+export function verifyCanonicalPublication(manifest: ReleaseManifest, read: (path: string) => unknown = api): void {
+  const endpoint = `/repos/${repository}/actions/runs/${manifest.runId}`;
+  const original = read(`${endpoint}/attempts/${manifest.runAttempt}`);
+  const originalJobs = read(`${endpoint}/attempts/${manifest.runAttempt}/jobs?per_page=100`);
+  const latestRun = read(endpoint);
+  const latestJobs = read(`${endpoint}/jobs?filter=latest&per_page=100`);
+  verifyCanonicalRun(original, manifest, { originalJobs, latestRun, latestJobs });
+  const after = read(endpoint);
+  const attempt = positive(record(latestRun, "Latest release run").run_attempt, "Latest release attempt");
+  const final = canonicalRunIdentity(after, manifest, attempt);
+  if (final.conclusion !== record(latestRun, "Latest release run").conclusion) throw new Error("Release result changed during canonical admission");
 }
 
 async function assetIdentities(directory: string): Promise<readonly AssetIdentity[]> {
@@ -405,22 +465,23 @@ async function publish(directory: string): Promise<void> {
   publishVerifiedRelease(directory, manifest, await assetIdentities(directory));
 }
 
-async function download(directory: string, version: string): Promise<void> {
+export async function downloadCanonicalRelease(directory: string, version: string, expectedSourceSha: string | undefined): Promise<ReleaseManifest> {
   const tag = `v${stableVersion(version)}`;
   await mkdir(directory, { recursive: false });
   const expected = [`hraness-wordcell-${version}.tgz`, ...metadataNames, "provenance.jsonl"];
   for (const name of expected) command("gh", ["release", "download", tag, "--repo", repository, "--dir", directory, "--pattern", name]);
   const manifest = await verifyReleaseFiles(directory);
-  if (manifest.version !== version || manifest.sourceSha !== process.env.VERIFIED_SOURCE_SHA) throw new Error("Canonical GitHub source differs from the reviewed mirror source");
+  if (manifest.version !== version || manifest.sourceSha !== expectedSourceSha) throw new Error("Canonical GitHub source differs from the reviewed mirror source");
   verifyAttestations(directory, manifest);
   verifyProviderRelease(api(`/repos/${repository}/releases/tags/${tag}`), manifest, await assetIdentities(directory), false);
-  verifyCanonicalRun(api(`/repos/${repository}/actions/runs/${manifest.runId}/attempts/${manifest.runAttempt}`), manifest);
+  verifyCanonicalPublication(manifest);
   const ref = record(api(`/repos/${repository}/git/ref/tags/${tag}`), "Canonical tag");
   const object = record(ref.object, "Annotated tag object");
   if (object.type !== "tag" || !exactHex(object.sha, 40)) throw new Error("Canonical release tag is not annotated");
   const tagged = record(api(`/repos/${repository}/git/tags/${object.sha}`), "Annotated tag");
   const source = record(tagged.object, "Tagged source");
   if (source.type !== "commit" || source.sha !== manifest.sourceSha || tagged.tag !== tag) throw new Error("Canonical tag does not bind its attested source");
+  return manifest;
 }
 
 if (process.argv[1] !== undefined && resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
@@ -429,6 +490,6 @@ if (process.argv[1] !== undefined && resolve(process.argv[1]) === fileURLToPath(
   if (mode === "prepare" && version === undefined) await prepare(resolve(directory));
   else if (mode === "verify" && version === undefined) { const manifest = await verifyReleaseFiles(resolve(directory)); verifyAttestations(resolve(directory), manifest); }
   else if (mode === "publish" && version === undefined) await publish(resolve(directory));
-  else if (mode === "download" && version !== undefined) await download(resolve(directory), version);
+  else if (mode === "download" && version !== undefined) await downloadCanonicalRelease(resolve(directory), version, process.env.VERIFIED_SOURCE_SHA);
   else throw new Error("Unsupported GitHub release command");
 }

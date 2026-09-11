@@ -1185,6 +1185,8 @@ jobs:
           [[ "$(node --version)" == v24.* ]]
       - run: bun install --frozen-lockfile --ignore-scripts
       - name: Verify the public registry archive, signatures, and provenance against the canonical asset
+        env:
+          GH_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
           if [[ ! "$VERIFIED_SOURCE_SHA" =~ ^[a-f0-9]{40}$ || \

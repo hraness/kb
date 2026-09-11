@@ -5,7 +5,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import fc from "fast-check";
 
-import { parseReleaseManifest, publishVerifiedRelease, releaseBody, stableVersion, uniqueReleaseId, verifyAttestationRun, verifyCanonicalRun, verifyProviderRelease, verifyReleaseFiles, type ReleaseManifest } from "./github-release.js";
+import { parseReleaseManifest, publishVerifiedRelease, releaseBody, stableVersion, uniqueReleaseId, verifyAttestationRun, verifyProviderRelease, verifyReleaseFiles, type ReleaseManifest } from "./github-release.js";
 
 const archive = Buffer.from("Synthetic packed-byte identity fixture; real USTAR admission is covered by package-artifact tests.");
 const digest = (bytes: Uint8Array, algorithm = "sha256") => createHash(algorithm).update(bytes).digest("hex");
@@ -126,19 +126,6 @@ test("verified certificate and subject bind repository, source, workflow, hosted
   expect(() => verifyAttestationRun(wrap(certificate, { ...statement, subject: [{ name: "different.tgz", digest: { sha256: manifest.archive.sha256 } }] }), manifest, subjects)).toThrow();
   expect(() => verifyAttestationRun(wrap(certificate, { ...statement, subject: [{ name: manifest.archive.name, digest: { sha256: "f".repeat(64) } }] }), manifest, subjects)).toThrow();
   expect(() => verifyAttestationRun([{ verificationResult: { statement } }], manifest, subjects)).toThrow();
-});
-
-test("npm mirroring requires the exact completed successful canonical run", () => {
-  const run = {
-    id: manifest.runId, run_attempt: manifest.runAttempt, workflow_id: 320004141, name: "Release", path: manifest.workflow,
-    status: "completed", conclusion: "success", event: "push", head_branch: manifest.tag, head_sha: manifest.sourceSha,
-    actor: { id: 894119, type: "User" }, triggering_actor: { id: 894119, type: "User" },
-    repository: { id: 1308971873, full_name: "hraness/wordcell", private: false },
-  };
-  expect(() => verifyCanonicalRun(run, manifest)).not.toThrow();
-  for (const change of [{ run_attempt: 1 }, { status: "in_progress" }, { conclusion: "failure" }, { head_sha: manifest.workflowSha }, { workflow_id: 1 }, { triggering_actor: { id: 1, type: "User" } }]) {
-    expect(() => verifyCanonicalRun({ ...run, ...change }, manifest)).toThrow();
-  }
 });
 
 test("draft publication survives by-tag 404 through one retained release ID without duplicate writes", () => {

@@ -1,0 +1,84 @@
+name: Admit published Wordcell 0.20.0
+
+on:
+  workflow_dispatch:
+
+permissions: {}
+
+concurrency:
+  group: stable-release
+  cancel-in-progress: false
+
+jobs:
+  admit:
+    name: Verify the existing 0.20.0 publication
+    permissions:
+      actions: read
+      contents: read
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    env:
+      WORKFLOW_SHA: ${{ github.workflow_sha }}
+    steps:
+      - name: Authorize owner recovery on current main before checkout
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          node <<'NODE'
+          const { readFileSync } = require("node:fs");
+          const { execFileSync } = require("node:child_process");
+          const env = process.env;
+          const repository = "hraness/wordcell";
+          const path = ".github/workflows/admit-published.yml";
+          const positive = (value) => typeof value === "string" && /^[1-9][0-9]*$/.test(value) && Number.isSafeInteger(Number(value)) && String(Number(value)) === value;
+          if (env.GITHUB_EVENT_NAME !== "workflow_dispatch" || env.GITHUB_REF !== "refs/heads/main"
+            || env.GITHUB_REPOSITORY !== repository || env.GITHUB_REPOSITORY_ID !== "1308971873" || env.GITHUB_ACTOR_ID !== "894119"
+            || typeof env.GITHUB_SHA !== "string" || env.GITHUB_SHA.length !== 40 || !/^[a-f0-9]+$/.test(env.GITHUB_SHA)
+            || env.WORKFLOW_SHA !== env.GITHUB_SHA || env.GITHUB_WORKFLOW_REF !== `${repository}/${path}@refs/heads/main`
+            || !positive(env.GITHUB_RUN_ID) || !positive(env.GITHUB_RUN_ATTEMPT)) throw new Error("Recovery requires owner dispatch on exact main");
+          const event = JSON.parse(readFileSync(env.GITHUB_EVENT_PATH, "utf8"));
+          if (event.sender?.id !== 894119 || event.sender?.type !== "User"
+            || event.repository?.id !== 1308971873 || event.repository?.full_name !== repository
+            || event.repository?.private !== false || event.repository?.visibility !== "public"
+            || event.repository?.default_branch !== "main" || event.repository?.owner?.id !== 307125679) throw new Error("Recovery event authority differs");
+          const api = (suffix) => JSON.parse(execFileSync("gh", ["api", "--method", "GET", `/repos/${repository}${suffix}`],
+            { encoding: "utf8", timeout: 90000, maxBuffer: 1000000, stdio: ["ignore", "pipe", "pipe"] }));
+          const main = api("/git/ref/heads/main");
+          const workflow = api("/actions/workflows/admit-published.yml");
+          const run = api(`/actions/runs/${env.GITHUB_RUN_ID}`);
+          if (main.object?.type !== "commit" || main.object?.sha !== env.GITHUB_SHA
+            || workflow.path !== path || workflow.state !== "active" || !Number.isSafeInteger(workflow.id) || workflow.id < 1
+            || run.id !== Number(env.GITHUB_RUN_ID) || run.run_attempt !== Number(env.GITHUB_RUN_ATTEMPT)
+            || run.workflow_id !== workflow.id || run.name !== "Admit published Wordcell 0.20.0" || run.path !== path
+            || run.head_sha !== env.GITHUB_SHA || run.head_branch !== "main" || run.event !== "workflow_dispatch"
+            || run.status !== "in_progress" || run.conclusion !== null
+            || run.actor?.id !== 894119 || run.actor?.type !== "User" || run.triggering_actor?.id !== 894119 || run.triggering_actor?.type !== "User"
+            || run.repository?.id !== 1308971873 || run.repository?.full_name !== repository || run.repository?.private !== false
+            || run.repository?.owner?.id !== 307125679) throw new Error("Recovery active workflow, owner, source, or attempt differs");
+          NODE
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          ref: ${{ github.sha }}
+          fetch-depth: 1
+          fetch-tags: false
+          persist-credentials: false
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: "24"
+          package-manager-cache: false
+          registry-url: "https://registry.npmjs.org"
+      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
+        with:
+          bun-version: "1.3.14"
+      - name: Pin npm
+        run: |
+          set -euo pipefail
+          npm install --global npm@11.19.0 --ignore-scripts --registry=https://registry.npmjs.org
+          test "$(npm --version)" = "11.19.0"
+          [[ "$(node --version)" == v24.* ]]
+      - run: bun install --frozen-lockfile --ignore-scripts
+      - name: Admit the original canonical and npm bytes without publication
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: bun run scripts/npm-admission-recovery.ts
