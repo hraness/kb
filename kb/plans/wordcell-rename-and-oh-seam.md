@@ -3,7 +3,7 @@ title: Wordcell rename and the Oh seam
 description: Rename the product from KB to Wordcell on wordcell.io with automatic npm publication, then compose Oh as the derived graph authority behind a single engine-neutral port.
 type: plan
 area: product-identity
-status: in-progress
+status: complete
 tags:
   - rename
   - publishing
@@ -202,17 +202,41 @@ Focused extraction and CLI/SDK tests passed. Initial adapter tests exposed
 noncanonical record-value ordering in Oh's search projection and rejection of
 shared references in a returned proof result. The adapter canonicalizes values
 before committing and distinguishes shared references from actual cycles.
-The required final gate and independent integration review remain pending.
+The required final source and site gates passed. Independent integration review
+findings were repaired and verified before merge.
 
 
 ## Result
 
-The Wordcell rename and 0.20.0 publication are complete. The 0.21.0 Oh source
-integration is implemented on `codex/wordcell-oh-integration`; required final
-validation, current-head review, protected publication and public readback are
-still part of delivery. The integration retains Markdown authority and the
-legacy graph/percolation contracts, and removes only the previously announced
-CLI alias at its minor boundary.
+The Wordcell rename and the Oh integration are delivered. Oh source PR
+[#46](https://github.com/hraness/wordcell/pull/46) merged as
+`b72cc41f873ada8c766ecc32a388124fc00c9524`, with the same tree as its reviewed
+head. Required CI and CodeQL passed on the PR and exact merged main.
+
+[Wordcell 0.21.0](https://github.com/hraness/wordcell/releases/tag/v0.21.0)
+is an immutable canonical GitHub Release, mirrored exactly to npm with
+`latest` at 0.21.0. Its archive SHA-256 is
+`9993cbd00bc92f29688aee670894fac7139636d24b25435e71ea65385e9e8b1b`.
+Release run [34554027830](https://github.com/hraness/wordcell/actions/runs/34554027830)
+completed successfully. npm initially returned a successful publication receipt
+while processing the package, so the immediate admission read returned 404.
+After exact public version, integrity and latest readback succeeded, only the
+failed read-only admission job was rerun. The signed source and publication
+remain attempt 1; successful final admission is attempt 2. No package or tag
+was republished or moved.
+
+The complete local source gate passed 1,351 tests and 16,251 assertions, plus
+13 architecture tests and 146 assertions. The site gate, native metadata-helper
+check, knowledge-base check and agent-guide audit passed. The downloaded public
+archive passed certificate/source/run verification and actual Bun/npm
+installations, Node 24 imports and strict consumer typing, graph queries and
+proof verification. Its 232 files exclude tests. Generated distribution and
+lockfile bytes stayed identical across the final source gate.
+
+The site publication datum points to that successful release run. The public
+README pins the available release. Markdown authority, existing vault formats,
+legacy graph reports and percolation V2 are retained; the deprecated CLI alias
+was removed at its announced 0.21.0 boundary.
 
 ## Durable memory
 

@@ -253,7 +253,7 @@ Treat the knowledge base as repository-adjacent durable memory. Authored Markdow
 
 ## Installation reference
 
-[Bun](https://bun.sh/docs/installation) is the required runtime. GitHub Releases are the canonical distribution, and each release publishes the same archive to npm as `@hraness/wordcell`. The examples target the prepared `0.21.0` release and become available when its GitHub release is published. Existing `@hraness/kb` installs remain available during that transition. For signed artifact verification, see [the release procedure](docs/publishing.md#verify-a-published-release).
+[Bun](https://bun.sh/docs/installation) is the required runtime. GitHub Releases are the canonical distribution, and each release publishes the same archive to npm as `@hraness/wordcell`. The examples pin the published `0.21.0` release. Historical `@hraness/kb` installs remain available under their original package name. For signed artifact verification, see [the release procedure](docs/publishing.md#verify-a-published-release).
 
 ### Tell your coding agent to install it
 
