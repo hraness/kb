@@ -19,6 +19,7 @@ import {
   searchableMarkdown,
   wikiLinks
 } from "./index-ekpwvbra.js";
+import"./index-z1w83f81.js";
 export {
   wikiLinks,
   searchableMarkdown,

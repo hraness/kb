@@ -53,9 +53,9 @@ rules, then repeat command discovery. Install Wordcell only while `wordcell` rem
 missing:
 
 ```sh
-command -v kb >/dev/null 2>&1 || {
+command -v wordcell >/dev/null 2>&1 || {
   command -v bun >/dev/null 2>&1 || exit 1
-  bun add --global --ignore-scripts https://github.com/hraness/wordcell/releases/download/v0.20.0/hraness-wordcell-0.20.0.tgz
+  bun add --global --ignore-scripts https://github.com/hraness/wordcell/releases/download/v0.21.0/hraness-wordcell-0.21.0.tgz
 }
 wordcell --help
 ```

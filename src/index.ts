@@ -19,3 +19,5 @@ export * from "./sdk.js";
 export * from "./source-inbox.js";
 export * from "./vault.js";
 export * from "./workflow.js";
+export * from "./graph-authority.js";
+export * from "./graph-percolation.js";

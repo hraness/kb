@@ -9,7 +9,7 @@ const ustarSignature = Buffer.from([0x75, 0x73, 0x74, 0x61, 0x72, 0x00, 0x30, 0x
 
 const packageBudget = Object.freeze({
   entryCount: { min: 190, max: 420 },
-  fileCount: { min: 190, max: 218 },
+  fileCount: { min: 190, max: 240 },
   packedBytes: { min: 950_000, max: 1_200_000 },
   unpackedBytes: { min: 4_500_000, max: 5_250_000 },
 });
@@ -19,7 +19,8 @@ const requiredPaths = Object.freeze([
   "README.md",
   "package.json",
   "dist/cli.js",
-  "dist/kb-alias.js",
+  "dist/graph-authority.js",
+  "dist/graph-percolation.js",
   "dist/evaluation-builder.js",
   "dist/index.js",
   "skills/wordcell/AGENTS.md",
@@ -35,6 +36,18 @@ const requiredPaths = Object.freeze([
   "src/clip/metadata-search-tool/src/main.rs",
   "src/evaluation-builder.ts",
   "src/index.ts",
+  "src/graph-authority.ts",
+  "src/graph-authority-model.ts",
+  "src/graph-cache-filesystem.ts",
+  "src/graph-facts.ts",
+  "src/graph-query.ts",
+  "src/graph-cli.ts",
+  "src/graph-percolation.ts",
+  "src/oh/authority.ts",
+  "src/oh/programs.ts",
+  "src/oh/schema.ts",
+  "src/oh/snapshot.ts",
+  "src/oh/validation.ts",
 ]);
 
 export type PackageArtifactEntry = Readonly<{

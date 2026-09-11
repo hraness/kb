@@ -191,7 +191,7 @@ test("the shipped skill resources preserve routing and companion contracts", asy
     "references/url-platforms.md",
     "templates/companion-skill.template.md",
   ]);
-  expect(manifest.version).toBe("0.20.0");
+  expect(manifest.version).toBe("0.21.0");
   expect(manifestFiles).toContain("skills/wordcell");
   expect(publicSourceFiles).toContain("src/repository-memory.ts");
   expect(Object.keys(manifest.exports as Record<string, unknown>).toSorted()).toEqual([
@@ -222,6 +222,8 @@ test("the shipped skill resources preserve routing and companion contracts", asy
     "./evaluation-kb",
     "./git",
     "./graph",
+    "./graph-authority",
+    "./graph-percolation",
     "./navigation",
     "./pdf",
     "./percolate",
@@ -263,10 +265,12 @@ test("the shipped skill resources preserve routing and companion contracts", asy
     'export * from "./source-inbox.js";',
     'export * from "./vault.js";',
     'export * from "./workflow.js";',
+    'export * from "./graph-authority.js";',
+    'export * from "./graph-percolation.js";',
   ]);
   const usage = /export const usage = `([\s\S]*?)`;/u.exec(cli)?.[1] ?? "";
   expect(createHash("sha256").update(usage).digest("hex"))
-    .toBe("9dc49c9eef419459920fc6951906e1e46c841739e1f0370998a3ad45cbd92646");
+    .toBe("3c2895355e9f3773ec08a99ed4d77f97792f2b06412e2ccc187627ff82e9bbb8");
   const commandIdentities = usage
     .split("\n")
     .filter((line) => line.startsWith("  wordcell "))
@@ -293,6 +297,9 @@ test("the shipped skill resources preserve routing and companion contracts", asy
     "doctor",
     "evaluate",
     "graph",
+    "graph query",
+    "graph rebuild",
+    "graph verify",
     "history",
     "history search",
     "inbox",

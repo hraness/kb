@@ -26,7 +26,63 @@ import {
   knowledgeBaseEvaluationRetrieverIds,
   openKnowledgeBaseEvaluation,
   verifyFrozenEvaluationSnapshot
-} from "./index-bs0yf4pp.js";
+} from "./index-pbr6rv47.js";
+import {
+  DEFAULT_SEARCH_RESULTS,
+  MAX_SEARCH_CANDIDATES,
+  MAX_SEARCH_NOTE_REFERENCE_BYTES,
+  MAX_SEARCH_RELATED_SEEDS,
+  MAX_SEARCH_RESULTS,
+  MIN_UNTRUSTED_CONTEXT_BYTES,
+  openKnowledgeBase,
+  packSearchContext,
+  packUntrustedSearchContext,
+  validateKnowledgeBaseSearchHistory
+} from "./index-vdw5yjfa.js";
+import"./index-4j3tt0c3.js";
+import"./index-adx6khj5.js";
+import {
+  MAX_EMBEDDING_MODEL_BYTES,
+  MAX_SEMANTIC_DATABASE_IDENTITY_BYTES,
+  attestSemanticWarmCache,
+  checkpointSemanticWarmCache,
+  createVerifiedEmbeddingModelLease,
+  indexSemanticVault,
+  openSemanticSearchSession,
+  openSemanticWarmSearchSession,
+  qmdIndexerVersion,
+  recommendedEmbeddingModel,
+  recommendedEmbeddingModelSha256,
+  searchSemanticVault,
+  semanticDatabasePath,
+  sha256EmbeddingModelFile
+} from "./index-115b07ap.js";
+import {
+  percolateWithGraph
+} from "./index-bgfzwt4h.js";
+import {
+  createGraphSnapshot,
+  openGraphAuthority,
+  queryGraph,
+  rebuildGraph,
+  verifyGraph
+} from "./index-bcfn9xah.js";
+import {
+  GRAPH_LIMITS,
+  GraphAuthorityError,
+  validateGraphQueryRequest
+} from "./index-11621h23.js";
+import {
+  MAX_NOTE_UTF8_BYTES,
+  MAX_SCANNED_NOTES,
+  MAX_VAULT_UTF8_BYTES,
+  VaultScanBudgetError,
+  defaultIgnoredDirectories,
+  markdownFiles,
+  readVaultNotes,
+  refreshVault,
+  scanVault
+} from "./index-0k2x4nn9.js";
 import {
   DEFAULT_PERCOLATION_LIMIT,
   DEFAULT_PERCOLATION_MIN_SUPPORT,
@@ -48,45 +104,6 @@ import {
   parsePercolationResultV2,
   percolateVault
 } from "./index-nd6nynv2.js";
-import {
-  DEFAULT_SEARCH_RESULTS,
-  MAX_SEARCH_CANDIDATES,
-  MAX_SEARCH_NOTE_REFERENCE_BYTES,
-  MAX_SEARCH_RELATED_SEEDS,
-  MAX_SEARCH_RESULTS,
-  MIN_UNTRUSTED_CONTEXT_BYTES,
-  openKnowledgeBase,
-  packSearchContext,
-  packUntrustedSearchContext,
-  validateKnowledgeBaseSearchHistory
-} from "./index-m7et4rz4.js";
-import"./index-adx6khj5.js";
-import {
-  MAX_EMBEDDING_MODEL_BYTES,
-  MAX_NOTE_UTF8_BYTES,
-  MAX_SCANNED_NOTES,
-  MAX_SEMANTIC_DATABASE_IDENTITY_BYTES,
-  MAX_VAULT_UTF8_BYTES,
-  VaultScanBudgetError,
-  attestSemanticWarmCache,
-  checkpointSemanticWarmCache,
-  createVerifiedEmbeddingModelLease,
-  defaultIgnoredDirectories,
-  indexSemanticVault,
-  markdownFiles,
-  openSemanticSearchSession,
-  openSemanticWarmSearchSession,
-  qmdIndexerVersion,
-  readVaultNotes,
-  recommendedEmbeddingModel,
-  recommendedEmbeddingModelSha256,
-  refreshVault,
-  scanVault,
-  searchSemanticVault,
-  semanticDatabasePath,
-  sha256EmbeddingModelFile
-} from "./index-n05s3wsb.js";
-import"./index-4j3tt0c3.js";
 import {
   GitHistoryError,
   MAX_GIT_HISTORY_COMMITS,
@@ -256,6 +273,7 @@ import {
   wikiLinks
 } from "./index-ekpwvbra.js";
 import"./index-1xxnjn0d.js";
+import"./index-z1w83f81.js";
 // src/oh-adoption.ts
 import { createHash } from "crypto";
 import { posix } from "path";
@@ -567,6 +585,7 @@ function createOhAdoptionPreparerV1(value) {
 export {
   workflowFromUnknown,
   wikiLinks,
+  verifyGraph,
   verifyFrozenEvaluationSnapshot,
   validateSearchQuery,
   validateSearchGitHistoryOptions,
@@ -574,6 +593,7 @@ export {
   validateQueryOptions,
   validateMarkdownAttachments,
   validateKnowledgeBaseSearchHistory,
+  validateGraphQueryRequest,
   validateGitHistoryForNotesRequest,
   validateGitHistoryForNotesOptions,
   validateAttachmentReferences,
@@ -598,10 +618,13 @@ export {
   refreshVault,
   recommendedEmbeddingModelSha256,
   recommendedEmbeddingModel,
+  rebuildGraph,
   readVaultNotes,
   queryVault,
+  queryGraph,
   qmdIndexerVersion,
   planStatuses,
+  percolateWithGraph,
   percolateVault,
   parseRetrievalEvaluationCorpus,
   parsePercolationResultV2,
@@ -621,6 +644,7 @@ export {
   openSemanticSearchSession,
   openKnowledgeBaseEvaluation,
   openKnowledgeBase,
+  openGraphAuthority,
   noteRevision,
   normalizeVaultPath,
   normalizeRepositoryScope,
@@ -658,6 +682,7 @@ export {
   createRepresentativeRetrievalFixture,
   createOhAdoptionPreparerV1,
   createNote,
+  createGraphSnapshot,
   createConceptNote,
   compareAgentGuideAudits,
   classifyRepositoryMemoryRecord,
@@ -772,7 +797,9 @@ export {
   MAX_ATTACHMENT_PATH_BYTES,
   MAX_ANALYZED_NOTES,
   InvalidCanonicalNoteIdError,
+  GraphAuthorityError,
   GitHistoryError,
+  GRAPH_LIMITS,
   FrozenEvaluationSnapshotError,
   DEFAULT_WORKFLOW_OUTPUT_BYTES,
   DEFAULT_SEARCH_RESULTS,

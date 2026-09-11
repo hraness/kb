@@ -9,6 +9,7 @@ import {
   sanitizeTerminalLine,
   sanitizeTerminalText
 } from "../index-1xxnjn0d.js";
+import"../index-z1w83f81.js";
 
 // src/clip/jobs.ts
 import { Buffer } from "buffer";

@@ -31,6 +31,7 @@ import"./index-e5fbsywq.js";
 import"./index-gh719d91.js";
 import"./index-mxxxytys.js";
 import"./index-1xxnjn0d.js";
+import"./index-z1w83f81.js";
 
 // src/pdf.ts
 var PDF_CAPTURE_MANIFEST_FILENAME2 = PDF_CAPTURE_MANIFEST_FILENAME;

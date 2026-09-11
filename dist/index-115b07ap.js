@@ -1,433 +1,48 @@
 // @bun
 import {
+  MAX_NOTE_UTF8_BYTES,
+  MAX_SCANNED_NOTES,
+  MAX_VAULT_UTF8_BYTES,
+  VaultScanBudgetError,
+  scanVault
+} from "./index-0k2x4nn9.js";
+import {
   fuseRankedCandidates,
   validateSearchQuery
 } from "./index-why54q5p.js";
-import {
-  MAX_ANALYZED_NOTES,
-  analyzeVault,
-  isCanonicalNoteId,
-  lookupNote,
-  normalizeVaultPath,
-  parseNote,
-  renderCatalog,
-  replaceCatalog
-} from "./index-ekpwvbra.js";
 
 // src/semantic.ts
 import { createHash as createHash2 } from "crypto";
-import { constants as constants3 } from "fs";
+import { constants as constants2 } from "fs";
 import {
   chmod,
-  lstat as lstat3,
+  lstat as lstat2,
   mkdir as mkdir2,
   mkdtemp,
-  open as open3,
-  realpath as realpath3,
-  rm as rm3,
+  open as open2,
+  realpath as realpath2,
+  rm as rm2,
   stat
 } from "fs/promises";
 import { homedir, tmpdir } from "os";
-import { dirname as dirname3, isAbsolute as isAbsolute2, join as join3, relative as relative3, resolve as resolve3, sep as sep3 } from "path";
+import { dirname as dirname2, isAbsolute as isAbsolute2, join as join2, relative as relative2, resolve as resolve2, sep as sep2 } from "path";
 
 // src/semantic-runtime.ts
-import { createHash, randomUUID as randomUUID2 } from "crypto";
+import { createHash, randomUUID } from "crypto";
 import {
-  constants as constants2
+  constants
 } from "fs";
 import {
-  lstat as lstat2,
-  mkdir,
-  open as open2,
-  opendir,
-  realpath as realpath2,
-  rename as rename2,
-  rm as rm2,
-  writeFile
-} from "fs/promises";
-import { basename as basename2, dirname as dirname2, isAbsolute, join as join2, relative as relative2, resolve as resolve2, sep as sep2 } from "path";
-
-// src/vault.ts
-import { randomUUID } from "crypto";
-import { constants } from "fs";
-import {
   lstat,
+  mkdir,
   open,
-  readdir,
+  opendir,
   realpath,
   rename,
-  rm
+  rm,
+  writeFile
 } from "fs/promises";
-import { basename, dirname, join, relative, resolve, sep } from "path";
-var MAX_SCANNED_NOTES = MAX_ANALYZED_NOTES;
-var MAX_NOTE_UTF8_BYTES = 16 * 1024 * 1024;
-var MAX_VAULT_UTF8_BYTES = 256 * 1024 * 1024;
-
-class VaultScanBudgetError extends RangeError {
-  kind;
-  limit;
-  constructor(kind, limit, message) {
-    super(message);
-    this.name = "VaultScanBudgetError";
-    this.kind = kind;
-    this.limit = limit;
-  }
-}
-var defaultIgnoredDirectories = new Set([
-  ".git",
-  ".next",
-  ".turbo",
-  ".vercel",
-  "coverage",
-  "dist",
-  "node_modules"
-]);
-async function markdownFiles(directory, ignoredDirectories = defaultIgnoredDirectories) {
-  const files = [];
-  const entries = await readdir(directory, { withFileTypes: true });
-  for (const entry of entries.toSorted((left, right) => left.name.localeCompare(right.name))) {
-    if (entry.name.startsWith("."))
-      continue;
-    const entryPath = join(directory, entry.name);
-    if (entry.isDirectory()) {
-      if (ignoredDirectories.has(entry.name))
-        continue;
-      files.push(...await markdownFiles(entryPath, ignoredDirectories));
-      continue;
-    }
-    if (entry.isFile() && entry.name.endsWith(".md") && entry.name !== "AGENTS.md") {
-      files.push(entryPath);
-    }
-  }
-  return files;
-}
-function checkedScanLimit(value, hardMaximum, option) {
-  const limit = value ?? hardMaximum;
-  if (!Number.isSafeInteger(limit) || limit < 0 || limit > hardMaximum) {
-    throw new RangeError(`${option} must be a safe integer from 0 through ${hardMaximum}.`);
-  }
-  return limit;
-}
-function normalizedRawNoteId(rawId) {
-  return normalizeVaultPath(rawId).normalize("NFC");
-}
-function validateScannedNotePaths(root, paths) {
-  const files = paths.map((absolutePath) => {
-    const vaultPath = relative(root, absolutePath).split(sep).join("/");
-    return {
-      absolutePath,
-      vaultPath,
-      rawId: vaultPath.slice(0, -3)
-    };
-  });
-  const pathByNormalizedId = new Map;
-  for (const file of files) {
-    const normalizedId = normalizedRawNoteId(file.rawId);
-    const collision = pathByNormalizedId.get(normalizedId);
-    if (collision !== undefined && collision !== file.vaultPath) {
-      throw new Error(`Vault note paths ${JSON.stringify(collision)} and ` + `${JSON.stringify(file.vaultPath)} normalize to the same note ID ` + `${JSON.stringify(normalizedId)}.`);
-    }
-    pathByNormalizedId.set(normalizedId, file.vaultPath);
-  }
-  for (const file of files) {
-    if (isCanonicalNoteId(file.rawId))
-      continue;
-    if (file.rawId !== file.rawId.normalize("NFC")) {
-      throw new Error(`Vault note path ${JSON.stringify(file.vaultPath)} is not NFC; ` + `its extensionless note ID must be exactly ` + `${JSON.stringify(file.rawId.normalize("NFC"))}.`);
-    }
-    if (file.rawId.includes("\\")) {
-      throw new Error(`Vault note path ${JSON.stringify(file.vaultPath)} contains a backslash; ` + "note IDs must use exact vault-root directory separators.");
-    }
-    throw new Error(`Vault note path ${JSON.stringify(file.vaultPath)} must have an exact ` + "canonical extensionless vault-root note ID.");
-  }
-  return files;
-}
-function assertScannableNoteFile(vaultPath, metadata) {
-  if (metadata.isSymbolicLink()) {
-    throw new Error(`Vault note ${JSON.stringify(vaultPath)} must not be a symbolic link.`);
-  }
-  if (!metadata.isFile()) {
-    throw new Error(`Vault note ${JSON.stringify(vaultPath)} must be a regular file.`);
-  }
-  if (metadata.nlink !== 1n) {
-    throw new Error(`Vault note ${JSON.stringify(vaultPath)} must not be hard-linked.`);
-  }
-}
-function noteBytesError(vaultPath, limit) {
-  return new VaultScanBudgetError("note-bytes", limit, `Vault note ${JSON.stringify(vaultPath)} exceeds the ${limit}-byte UTF-8 limit.`);
-}
-function totalBytesError(limit) {
-  return new VaultScanBudgetError("total-bytes", limit, `Vault scan exceeds the ${limit}-byte cumulative UTF-8 limit.`);
-}
-async function readBoundedNote(handle, vaultPath, maxNoteBytes, remainingTotalBytes, maxTotalBytes) {
-  const chunks = [];
-  let bytes = 0;
-  for (;; ) {
-    const remaining = Math.min(maxNoteBytes - bytes, remainingTotalBytes - bytes);
-    const buffer = new Uint8Array(Math.min(64 * 1024, Math.max(1, remaining + 1)));
-    const result = await handle.read(buffer, 0, buffer.byteLength, null);
-    if (result.bytesRead === 0)
-      break;
-    bytes += result.bytesRead;
-    if (bytes > maxNoteBytes)
-      throw noteBytesError(vaultPath, maxNoteBytes);
-    if (bytes > remainingTotalBytes) {
-      throw totalBytesError(maxTotalBytes);
-    }
-    chunks.push(buffer.slice(0, result.bytesRead));
-  }
-  const joined = new Uint8Array(bytes);
-  let offset = 0;
-  for (const chunk of chunks) {
-    joined.set(chunk, offset);
-    offset += chunk.byteLength;
-  }
-  try {
-    return {
-      content: new TextDecoder("utf-8", { fatal: true }).decode(joined),
-      bytes
-    };
-  } catch (error) {
-    throw new Error(`Vault note ${JSON.stringify(vaultPath)} is not valid UTF-8.`, { cause: error });
-  }
-}
-async function readVaultNotes(root, ignoredDirectories = defaultIgnoredDirectories, limits = {}) {
-  const maxNotes = checkedScanLimit(limits.maxNotes, MAX_SCANNED_NOTES, "maxNotes");
-  const maxNoteBytes = checkedScanLimit(limits.maxNoteBytes, MAX_NOTE_UTF8_BYTES, "maxNoteBytes");
-  const maxTotalBytes = checkedScanLimit(limits.maxTotalBytes, MAX_VAULT_UTF8_BYTES, "maxTotalBytes");
-  const paths = await markdownFiles(root, ignoredDirectories);
-  if (paths.length > maxNotes) {
-    throw new VaultScanBudgetError("notes", maxNotes, `Vault scan exceeds the ${maxNotes} Markdown note limit.`);
-  }
-  const files = validateScannedNotePaths(root, paths);
-  let declaredTotal = 0n;
-  const preflight = [];
-  for (const file of files) {
-    const metadata = await lstat(file.absolutePath, { bigint: true });
-    assertScannableNoteFile(file.vaultPath, metadata);
-    if (metadata.size > BigInt(maxNoteBytes)) {
-      throw noteBytesError(file.vaultPath, maxNoteBytes);
-    }
-    declaredTotal += metadata.size;
-    if (declaredTotal > BigInt(maxTotalBytes)) {
-      throw totalBytesError(maxTotalBytes);
-    }
-    preflight.push({
-      ...file,
-      device: metadata.dev,
-      inode: metadata.ino
-    });
-  }
-  const notes = [];
-  let observedTotal = 0;
-  for (const file of preflight) {
-    const handle = await open(file.absolutePath, constants.O_RDONLY | constants.O_NOFOLLOW);
-    try {
-      const beforeRead = await handle.stat({ bigint: true });
-      assertScannableNoteFile(file.vaultPath, beforeRead);
-      if (beforeRead.dev !== file.device || beforeRead.ino !== file.inode) {
-        throw new Error(`Vault note ${JSON.stringify(file.vaultPath)} changed during scan; retry.`);
-      }
-      if (beforeRead.size > BigInt(maxNoteBytes)) {
-        throw noteBytesError(file.vaultPath, maxNoteBytes);
-      }
-      if (BigInt(observedTotal) + beforeRead.size > BigInt(maxTotalBytes)) {
-        throw totalBytesError(maxTotalBytes);
-      }
-      const read = await readBoundedNote(handle, file.vaultPath, maxNoteBytes, maxTotalBytes - observedTotal, maxTotalBytes);
-      const afterRead = await handle.stat({ bigint: true });
-      if (afterRead.dev !== file.device || afterRead.ino !== file.inode || afterRead.size !== beforeRead.size || afterRead.size !== BigInt(read.bytes)) {
-        throw new Error(`Vault note ${JSON.stringify(file.vaultPath)} changed during scan; retry.`);
-      }
-      observedTotal += read.bytes;
-      notes.push(parseNote(file.vaultPath, read.content));
-    } finally {
-      await handle.close();
-    }
-  }
-  return notes;
-}
-function confined(root, path) {
-  const fromRoot = relative(root, path);
-  return fromRoot !== "" && fromRoot !== ".." && !fromRoot.startsWith(`..${sep}`);
-}
-async function assertConfinedIndexParents(root, path) {
-  if (!confined(root, path))
-    throw new Error("The configured index must be a file inside the vault root.");
-  const parent = dirname(path);
-  const segments = relative(root, parent).split(sep).filter((segment) => segment !== "");
-  let current = root;
-  for (const segment of segments) {
-    current = join(current, segment);
-    const metadata = await lstat(current);
-    if (metadata.isSymbolicLink()) {
-      throw new Error("The configured index path must not traverse a symbolic link.");
-    }
-    if (!metadata.isDirectory()) {
-      throw new Error("Every configured index parent must be a directory.");
-    }
-  }
-  const canonicalParent = await realpath(parent);
-  if (!confined(root, join(canonicalParent, basename(path)))) {
-    throw new Error("The configured index parent resolves outside the vault root.");
-  }
-}
-async function readIndexRevision(root, path, maxNoteBytes = MAX_NOTE_UTF8_BYTES) {
-  await assertConfinedIndexParents(root, path);
-  const handle = await open(path, constants.O_RDONLY | constants.O_NOFOLLOW);
-  try {
-    const metadata = await handle.stat({ bigint: true });
-    if (!metadata.isFile())
-      throw new Error("The configured index must be a regular file.");
-    if (metadata.nlink !== 1n)
-      throw new Error("The configured index must not be hard-linked.");
-    const canonicalPath = await realpath(path);
-    if (!confined(root, canonicalPath)) {
-      throw new Error("The configured index resolves outside the vault root.");
-    }
-    const vaultPath = relative(root, path).split(sep).join("/");
-    if (metadata.size > BigInt(maxNoteBytes)) {
-      throw noteBytesError(vaultPath, maxNoteBytes);
-    }
-    const read = await readBoundedNote(handle, vaultPath, maxNoteBytes, maxNoteBytes, maxNoteBytes);
-    const afterRead = await handle.stat({ bigint: true });
-    if (afterRead.dev !== metadata.dev || afterRead.ino !== metadata.ino || afterRead.size !== metadata.size || afterRead.size !== BigInt(read.bytes)) {
-      throw new Error("The configured index changed during scan; retry.");
-    }
-    return {
-      content: read.content,
-      device: metadata.dev,
-      inode: metadata.ino,
-      mode: Number(metadata.mode & 0o777n)
-    };
-  } finally {
-    await handle.close();
-  }
-}
-function sameRevision(left, right) {
-  return left.device === right.device && left.inode === right.inode && left.content === right.content;
-}
-function parsedCatalogMode(value, source) {
-  if (value === undefined)
-    return;
-  if (value === "managed" || value === "authored")
-    return value;
-  throw new Error(`${source} must be exactly "managed" or "authored".`);
-}
-function declaredCatalogMode(indexNote) {
-  const declaration = Object.entries(indexNote.metadata).find(([name]) => name.toLocaleLowerCase("en-US") === "kb_catalog");
-  return parsedCatalogMode(declaration?.[1], `The configured index frontmatter property "kb_catalog"`);
-}
-async function atomicReplace(root, path, content, expected) {
-  const beforeWrite = await readIndexRevision(root, path);
-  if (!sameRevision(beforeWrite, expected)) {
-    throw new Error("The configured index changed during refresh; retry without overwriting the editor's changes.");
-  }
-  const directory = dirname(path);
-  const temporaryPath = join(directory, `.${basename(path)}.${process.pid}.${randomUUID()}.tmp`);
-  await assertConfinedIndexParents(root, path);
-  const handle = await open(temporaryPath, constants.O_WRONLY | constants.O_CREAT | constants.O_EXCL | constants.O_NOFOLLOW, expected.mode);
-  let closed = false;
-  try {
-    await handle.writeFile(content, "utf8");
-    await handle.sync();
-    await handle.close();
-    closed = true;
-    const beforeRename = await readIndexRevision(root, path);
-    if (!sameRevision(beforeRename, expected)) {
-      throw new Error("The configured index changed during refresh; retry without overwriting the editor's changes.");
-    }
-    await assertConfinedIndexParents(root, path);
-    await rename(temporaryPath, path);
-  } catch (error) {
-    if (!closed)
-      await handle.close().catch(() => {
-        return;
-      });
-    await rm(temporaryPath, { force: true }).catch(() => {
-      return;
-    });
-    throw error;
-  }
-}
-async function snapshot(rootInput, options, writeIndex) {
-  const requestedRoot = resolve(rootInput);
-  const root = await realpath(requestedRoot);
-  const rootMetadata = await lstat(root);
-  if (!rootMetadata.isDirectory())
-    throw new Error("The vault root must be a directory.");
-  const indexPath = resolve(root, options.index ?? "index.md");
-  const relativeIndex = relative(root, indexPath);
-  if (!confined(root, indexPath)) {
-    throw new Error("The configured index must be a file inside the vault root.");
-  }
-  if (!indexPath.toLowerCase().endsWith(".md")) {
-    throw new Error("The configured index must be a Markdown file.");
-  }
-  const vaultIndexPath = relativeIndex.split(sep).join("/");
-  const catalogNoteId = vaultIndexPath.toLowerCase().endsWith(".md") ? vaultIndexPath.slice(0, -3) : vaultIndexPath;
-  const notes = await readVaultNotes(root, options.ignoredDirectories, {
-    ...options.maxNotes === undefined ? {} : { maxNotes: options.maxNotes },
-    ...options.maxNoteBytes === undefined ? {} : { maxNoteBytes: options.maxNoteBytes },
-    ...options.maxTotalBytes === undefined ? {} : { maxTotalBytes: options.maxTotalBytes }
-  });
-  const indexRevision = await readIndexRevision(root, indexPath, options.maxNoteBytes ?? MAX_NOTE_UTF8_BYTES);
-  const currentIndex = indexRevision.content;
-  const indexNote = parseNote(vaultIndexPath, currentIndex);
-  const catalogMode = parsedCatalogMode(options.catalogMode, "ScanVaultOptions.catalogMode") ?? declaredCatalogMode(indexNote) ?? "managed";
-  let index = "authored";
-  if (catalogMode === "managed") {
-    const expectedIndex = replaceCatalog(currentIndex, renderCatalog(notes, catalogNoteId));
-    const stale = currentIndex !== expectedIndex;
-    index = stale ? "stale" : "current";
-    if (writeIndex && stale) {
-      await atomicReplace(root, indexPath, expectedIndex, indexRevision);
-      index = "updated";
-      const parsed = parseNote(vaultIndexPath, expectedIndex);
-      const noteIndex = notes.findIndex((note) => note.path === vaultIndexPath);
-      if (noteIndex === -1)
-        notes.push(parsed);
-      else
-        notes[noteIndex] = parsed;
-    }
-  }
-  const mentionScope = options.mentionScope;
-  const mentionIds = new Set;
-  if (typeof mentionScope === "string") {
-    const lookup = lookupNote(notes, mentionScope);
-    if (lookup.kind === "found")
-      mentionIds.add(lookup.note.id);
-    else if (lookup.kind === "ambiguous") {
-      for (const note of lookup.candidates)
-        mentionIds.add(note.id);
-    }
-  }
-  const mentionScopePredicate = mentionScope === undefined ? undefined : (note) => mentionScope !== false && mentionIds.has(note.id);
-  return {
-    root,
-    indexPath,
-    catalogMode,
-    index,
-    notes,
-    analysis: analyzeVault(notes, {
-      catalogNoteId,
-      ...options.includeInSuggestions === undefined ? {} : { includeInSuggestions: options.includeInSuggestions },
-      ...mentionScopePredicate === undefined ? {} : { mentionScope: mentionScopePredicate },
-      ...options.maxNotes === undefined ? {} : { maxNotes: options.maxNotes },
-      ...options.maxConnectionObservations === undefined ? {} : { maxConnectionObservations: options.maxConnectionObservations },
-      ...options.maxMentionPairs === undefined ? {} : { maxMentionPairs: options.maxMentionPairs },
-      ...options.maxMentions === undefined ? {} : { maxMentions: options.maxMentions }
-    })
-  };
-}
-async function scanVault(root = ".", options = {}) {
-  return snapshot(root, options, false);
-}
-async function refreshVault(root = ".", options = {}) {
-  return snapshot(root, options, true);
-}
-
-// src/semantic-runtime.ts
+import { basename, dirname, isAbsolute, join, relative, resolve, sep } from "path";
 var LEASE_VERSION = 1;
 var PROJECTION_VERSION = 2;
 var DEFAULT_LEASE_WAIT_MS = 30000;
@@ -507,11 +122,11 @@ function validatedIndexIdentity(identity) {
   return validated;
 }
 async function boundedMetadataText(path, maximum, label) {
-  const pathBefore = await lstat2(path, { bigint: true });
+  const pathBefore = await lstat(path, { bigint: true });
   if (pathBefore.isSymbolicLink() || !pathBefore.isFile() || pathBefore.nlink !== 1n) {
     throw new Error(`${label} must be a regular, singly linked file.`);
   }
-  const handle = await open2(path, constants2.O_RDONLY | constants2.O_NOFOLLOW | constants2.O_NONBLOCK);
+  const handle = await open(path, constants.O_RDONLY | constants.O_NOFOLLOW | constants.O_NONBLOCK);
   try {
     const before = await handle.stat({ bigint: true });
     if (!before.isFile() || before.nlink !== 1n || before.dev !== pathBefore.dev || before.ino !== pathBefore.ino) {
@@ -537,7 +152,7 @@ async function boundedMetadataText(path, maximum, label) {
     const after = await handle.stat({ bigint: true });
     let pathAfter;
     try {
-      pathAfter = await lstat2(path, { bigint: true });
+      pathAfter = await lstat(path, { bigint: true });
     } catch {
       throw new Error(`${label} changed while it was being read; retry.`);
     }
@@ -557,7 +172,7 @@ async function boundedMetadataText(path, maximum, label) {
 }
 async function safeDirectory(path, label) {
   try {
-    const metadata = await lstat2(path);
+    const metadata = await lstat(path);
     if (metadata.isSymbolicLink())
       throw new Error(`${label} must not be a symbolic link.`);
     if (!metadata.isDirectory())
@@ -571,17 +186,17 @@ async function safeDirectory(path, label) {
 }
 async function canonicalProspectiveDirectory(path) {
   const missing = [];
-  let candidate = resolve2(path);
+  let candidate = resolve(path);
   for (;; ) {
     try {
-      return resolve2(await realpath2(candidate), ...missing.toReversed());
+      return resolve(await realpath(candidate), ...missing.toReversed());
     } catch (error) {
       if (errorCode(error) !== "ENOENT")
         throw error;
-      const parent = dirname2(candidate);
+      const parent = dirname(candidate);
       if (parent === candidate)
         throw error;
-      missing.push(basename2(candidate));
+      missing.push(basename(candidate));
       candidate = parent;
     }
   }
@@ -589,7 +204,7 @@ async function canonicalProspectiveDirectory(path) {
 async function validateSemanticDatabaseFile(path) {
   let metadata;
   try {
-    metadata = await lstat2(path, { bigint: true });
+    metadata = await lstat(path, { bigint: true });
   } catch (error) {
     if (errorCode(error) === "ENOENT")
       return;
@@ -601,7 +216,7 @@ async function validateSemanticDatabaseFile(path) {
   if (!metadata.isFile() || metadata.nlink !== 1n) {
     throw new Error("Semantic database must be a regular, singly linked file.");
   }
-  const handle = await open2(path, constants2.O_RDONLY | constants2.O_NOFOLLOW | constants2.O_NONBLOCK);
+  const handle = await open(path, constants.O_RDONLY | constants.O_NOFOLLOW | constants.O_NONBLOCK);
   try {
     const current = await handle.stat({ bigint: true });
     if (!current.isFile() || current.nlink !== 1n || current.dev !== metadata.dev || current.ino !== metadata.ino) {
@@ -612,12 +227,12 @@ async function validateSemanticDatabaseFile(path) {
   }
 }
 async function canonicalSemanticDatabasePath(database) {
-  const requested = resolve2(database);
-  const canonicalParent = await canonicalProspectiveDirectory(dirname2(requested));
-  const canonical = join2(canonicalParent, basename2(requested));
+  const requested = resolve(database);
+  const canonicalParent = await canonicalProspectiveDirectory(dirname(requested));
+  const canonical = join(canonicalParent, basename(requested));
   await validateSemanticDatabaseFile(canonical);
   try {
-    return await realpath2(canonical);
+    return await realpath(canonical);
   } catch (error) {
     if (errorCode(error) === "ENOENT")
       return canonical;
@@ -626,14 +241,14 @@ async function canonicalSemanticDatabasePath(database) {
 }
 async function settledSemanticDatabasePath(database) {
   const canonical = await canonicalSemanticDatabasePath(database);
-  await mkdir(dirname2(canonical), { recursive: true, mode: 448 });
-  const settledParent = await realpath2(dirname2(canonical));
-  if (settledParent !== dirname2(canonical)) {
+  await mkdir(dirname(canonical), { recursive: true, mode: 448 });
+  const settledParent = await realpath(dirname(canonical));
+  if (settledParent !== dirname(canonical)) {
     throw new Error("Semantic database parent changed while settling its identity; retry.");
   }
   let created;
   try {
-    created = await open2(canonical, constants2.O_WRONLY | constants2.O_CREAT | constants2.O_EXCL | constants2.O_NOFOLLOW | constants2.O_NONBLOCK, 384);
+    created = await open(canonical, constants.O_WRONLY | constants.O_CREAT | constants.O_EXCL | constants.O_NOFOLLOW | constants.O_NONBLOCK, 384);
   } catch (error) {
     if (errorCode(error) !== "EEXIST")
       throw error;
@@ -641,7 +256,7 @@ async function settledSemanticDatabasePath(database) {
     await created?.close();
   }
   await validateSemanticDatabaseFile(canonical);
-  return await realpath2(canonical);
+  return await realpath(canonical);
 }
 function pathIsWithin(root, candidate) {
   return candidate === root || confinedPath(root, candidate);
@@ -659,7 +274,7 @@ function assertSemanticCacheOutsideVault(root, database) {
 async function resolveSemanticDatabase(database, root) {
   const [canonicalDatabase, canonicalRoot] = await Promise.all([
     canonicalSemanticDatabasePath(database),
-    realpath2(root)
+    realpath(root)
   ]);
   assertSemanticCacheOutsideVault(canonicalRoot, canonicalDatabase);
   return canonicalDatabase;
@@ -677,7 +292,7 @@ function parsedOwner(value) {
 }
 async function readOwner(path) {
   try {
-    return parsedOwner(JSON.parse(await boundedMetadataText(join2(path, OWNER_NAME), MAX_OWNER_BYTES, "Semantic lease owner")));
+    return parsedOwner(JSON.parse(await boundedMetadataText(join(path, OWNER_NAME), MAX_OWNER_BYTES, "Semantic lease owner")));
   } catch (error) {
     if (error instanceof RangeError)
       throw error;
@@ -701,15 +316,15 @@ async function recoverDeadLease(path) {
   const confirmed = await readOwner(path);
   if (confirmed?.pid !== owner.pid || confirmed.token !== owner.token)
     return false;
-  const tombstone = `${path}.dead-${owner.token}-${randomUUID2()}`;
+  const tombstone = `${path}.dead-${owner.token}-${randomUUID()}`;
   try {
-    await rename2(path, tombstone);
+    await rename(path, tombstone);
   } catch (error) {
     if (["ENOENT", "EEXIST", "ENOTEMPTY"].includes(errorCode(error) ?? ""))
       return false;
     throw error;
   }
-  await rm2(tombstone, { recursive: true, force: true });
+  await rm(tombstone, { recursive: true, force: true });
   return true;
 }
 async function acquireWriterLeaseState(database, options) {
@@ -720,7 +335,7 @@ async function acquireWriterLeaseState(database, options) {
   const owner = {
     version: LEASE_VERSION,
     pid: process.pid,
-    token: randomUUID2(),
+    token: randomUUID(),
     acquiredAt: new Date().toISOString()
   };
   const startedAt = Date.now();
@@ -729,14 +344,14 @@ async function acquireWriterLeaseState(database, options) {
     const claim = `${path}.claim-${process.pid}-${owner.token}`;
     await mkdir(claim, { mode: 448 });
     try {
-      await writeFile(join2(claim, OWNER_NAME), `${JSON.stringify(owner)}
+      await writeFile(join(claim, OWNER_NAME), `${JSON.stringify(owner)}
 `, {
         encoding: "utf8",
         flag: "wx",
         mode: 384
       });
       try {
-        await rename2(claim, path);
+        await rename(claim, path);
         const lease = { path, owner, database: canonicalDatabase };
         try {
           await validateSemanticDatabaseFile(canonicalDatabase);
@@ -750,13 +365,13 @@ async function acquireWriterLeaseState(database, options) {
           throw error;
       }
     } finally {
-      await rm2(claim, { recursive: true, force: true });
+      await rm(claim, { recursive: true, force: true });
     }
     if (await recoverDeadLease(path))
       continue;
     const elapsed = Date.now() - startedAt;
     if (elapsed >= waitMs) {
-      throw new Error(`Timed out after ${waitMs}ms waiting for the semantic writer lease for ${JSON.stringify(resolve2(database))}.`);
+      throw new Error(`Timed out after ${waitMs}ms waiting for the semantic writer lease for ${JSON.stringify(resolve(database))}.`);
     }
     await Bun.sleep(Math.min(pollMs, waitMs - elapsed));
   }
@@ -769,13 +384,13 @@ async function releaseWriterLease(lease) {
     return;
   const tombstone = `${lease.path}.release-${lease.owner.token}`;
   try {
-    await rename2(lease.path, tombstone);
+    await rename(lease.path, tombstone);
   } catch (error) {
     if (errorCode(error) === "ENOENT")
       return;
     throw error;
   }
-  await rm2(tombstone, { recursive: true, force: true });
+  await rm(tombstone, { recursive: true, force: true });
 }
 async function acquireSemanticWriterLease(database, options = {}) {
   const lease = await acquireWriterLeaseState(database, options);
@@ -790,8 +405,8 @@ async function acquireSemanticWriterLease(database, options = {}) {
   };
 }
 function confinedPath(root, path) {
-  const candidate = relative2(root, path);
-  return candidate !== "" && candidate !== ".." && !candidate.startsWith(`..${sep2}`) && !isAbsolute(candidate);
+  const candidate = relative(root, path);
+  return candidate !== "" && candidate !== ".." && !candidate.startsWith(`..${sep}`) && !isAbsolute(candidate);
 }
 function validatedProjectionNotes(notes) {
   if (notes.length > MAX_SCANNED_NOTES) {
@@ -827,20 +442,20 @@ function validatedProjectionNotes(notes) {
   return { notes: validated, totalBytes };
 }
 async function atomicWrite(path, content) {
-  const temporary = `${path}.${process.pid}.${randomUUID2()}.tmp`;
+  const temporary = `${path}.${process.pid}.${randomUUID()}.tmp`;
   let handle;
   try {
-    handle = await open2(temporary, constants2.O_WRONLY | constants2.O_CREAT | constants2.O_EXCL | constants2.O_NOFOLLOW, 384);
+    handle = await open(temporary, constants.O_WRONLY | constants.O_CREAT | constants.O_EXCL | constants.O_NOFOLLOW, 384);
     await handle.writeFile(content, "utf8");
     await handle.sync();
     await handle.close();
     handle = undefined;
-    await rename2(temporary, path);
+    await rename(temporary, path);
   } finally {
     await handle?.close().catch(() => {
       return;
     });
-    await rm2(temporary, { force: true }).catch(() => {
+    await rm(temporary, { force: true }).catch(() => {
       return;
     });
   }
@@ -849,7 +464,7 @@ function snapshotCacheOwner(database) {
   return {
     version: SNAPSHOT_OWNER_VERSION,
     kind: SNAPSHOT_OWNER_KIND,
-    databaseIdentity: resolve2(database)
+    databaseIdentity: resolve(database)
   };
 }
 async function assertOwnedSnapshotCache(database, snapshotDirectory) {
@@ -859,7 +474,7 @@ async function assertOwnedSnapshotCache(database, snapshotDirectory) {
   const expected = snapshotCacheOwner(database);
   let actual;
   try {
-    actual = JSON.parse(await boundedMetadataText(join2(snapshotDirectory, SNAPSHOT_OWNER_NAME), MAX_OWNER_BYTES, "Semantic snapshot cache owner"));
+    actual = JSON.parse(await boundedMetadataText(join(snapshotDirectory, SNAPSHOT_OWNER_NAME), MAX_OWNER_BYTES, "Semantic snapshot cache owner"));
   } catch {
     throw new Error(`Semantic snapshot cache ${JSON.stringify(snapshotDirectory)} is unowned or has an incompatible ownership marker; remove this disposable directory explicitly before retrying.`);
   }
@@ -871,20 +486,20 @@ async function assertOwnedSnapshotCache(database, snapshotDirectory) {
 async function ensureOwnedSnapshotCache(database, snapshotDirectory) {
   if (await assertOwnedSnapshotCache(database, snapshotDirectory) === "owned")
     return;
-  const temporary = `${snapshotDirectory}.initialize-${process.pid}-${randomUUID2()}`;
+  const temporary = `${snapshotDirectory}.initialize-${process.pid}-${randomUUID()}`;
   await mkdir(temporary, { mode: 448 });
   try {
-    await writeFile(join2(temporary, SNAPSHOT_OWNER_NAME), `${JSON.stringify(snapshotCacheOwner(database))}
+    await writeFile(join(temporary, SNAPSHOT_OWNER_NAME), `${JSON.stringify(snapshotCacheOwner(database))}
 `, { encoding: "utf8", flag: "wx", mode: 384 });
     try {
-      await rename2(temporary, snapshotDirectory);
+      await rename(temporary, snapshotDirectory);
       return;
     } catch (error) {
       if (!["EEXIST", "ENOTEMPTY"].includes(errorCode(error) ?? ""))
         throw error;
     }
   } finally {
-    await rm2(temporary, { recursive: true, force: true });
+    await rm(temporary, { recursive: true, force: true });
   }
   await assertOwnedSnapshotCache(database, snapshotDirectory);
 }
@@ -893,11 +508,11 @@ async function existingGenerationMatches(generationPath, manifest, manifestText)
     if (await safeDirectory(generationPath, "Semantic projection generation") === "absent") {
       return false;
     }
-    if (await boundedMetadataText(join2(generationPath, MANIFEST_NAME), MAX_MANIFEST_BYTES, "Semantic projection manifest") !== manifestText) {
+    if (await boundedMetadataText(join(generationPath, MANIFEST_NAME), MAX_MANIFEST_BYTES, "Semantic projection manifest") !== manifestText) {
       return false;
     }
     for (const entry of manifest.notes) {
-      const path = resolve2(generationPath, ...entry.path.split("/"));
+      const path = resolve(generationPath, ...entry.path.split("/"));
       if (!confinedPath(generationPath, path))
         return false;
       const content = await boundedMetadataText(path, MAX_NOTE_UTF8_BYTES, `Semantic projection note ${JSON.stringify(entry.path)}`);
@@ -905,13 +520,13 @@ async function existingGenerationMatches(generationPath, manifest, manifestText)
         return false;
       }
     }
-    const expectedNotes = new Set(manifest.notes.map(({ path }) => join2(...path.split("/"))));
+    const expectedNotes = new Set(manifest.notes.map(({ path }) => join(...path.split("/"))));
     const expectedDirectories = new Set;
     for (const path of expectedNotes) {
-      let parent = dirname2(path);
+      let parent = dirname(path);
       while (parent !== ".") {
         expectedDirectories.add(parent);
-        parent = dirname2(parent);
+        parent = dirname(parent);
       }
     }
     const pending = [generationPath];
@@ -927,8 +542,8 @@ async function existingGenerationMatches(generationPath, manifest, manifestText)
           entries += 1;
           if (entries > maximumEntries || entry.isSymbolicLink())
             return false;
-          const absolute = join2(directoryPath, entry.name);
-          const path = relative2(generationPath, absolute);
+          const absolute = join(directoryPath, entry.name);
+          const path = relative(generationPath, absolute);
           if (entry.isDirectory()) {
             if (!expectedDirectories.has(path))
               return false;
@@ -939,7 +554,7 @@ async function existingGenerationMatches(generationPath, manifest, manifestText)
             return false;
           if (path === MANIFEST_NAME || expectedNotes.has(path))
             continue;
-          if (dirname2(path) === "." && entry.name.startsWith(READER_PREFIX) && entry.name.endsWith(".json")) {
+          if (dirname(path) === "." && entry.name.startsWith(READER_PREFIX) && entry.name.endsWith(".json")) {
             continue;
           }
           return false;
@@ -965,9 +580,9 @@ async function materializeGeneration(snapshotDirectory, generationPath, manifest
     if (await activeGenerationReaders(generationPath) > 0) {
       throw new Error("Semantic projection cache verification failed while this generation still has active readers; close those sessions and retry the repair.");
     }
-    await rm2(generationPath, { recursive: true, force: true });
+    await rm(generationPath, { recursive: true, force: true });
   }
-  const temporary = join2(snapshotDirectory, `.temporary-${process.pid}-${randomUUID2()}`);
+  const temporary = join(snapshotDirectory, `.temporary-${process.pid}-${randomUUID()}`);
   await mkdir(temporary, { recursive: true, mode: 448 });
   try {
     for (const entry of manifest.notes) {
@@ -980,21 +595,21 @@ async function materializeGeneration(snapshotDirectory, generationPath, manifest
       if (bytes !== entry.bytes || sha256 !== entry.sha256) {
         throw new Error(`Semantic projection note ${JSON.stringify(entry.path)} changed after validation.`);
       }
-      const destination = resolve2(temporary, ...entry.path.split("/"));
+      const destination = resolve(temporary, ...entry.path.split("/"));
       if (!confinedPath(temporary, destination)) {
         throw new Error(`Semantic projection path ${JSON.stringify(entry.path)} escapes its generation.`);
       }
-      await mkdir(dirname2(destination), { recursive: true, mode: 448 });
+      await mkdir(dirname(destination), { recursive: true, mode: 448 });
       await writeFile(destination, note.content, {
         encoding: "utf8",
         flag: "wx",
         mode: 384
       });
     }
-    await atomicWrite(join2(temporary, MANIFEST_NAME), manifestText);
-    await rename2(temporary, generationPath);
+    await atomicWrite(join(temporary, MANIFEST_NAME), manifestText);
+    await rename(temporary, generationPath);
   } catch (error) {
-    await rm2(temporary, { recursive: true, force: true });
+    await rm(temporary, { recursive: true, force: true });
     throw error;
   }
 }
@@ -1021,7 +636,7 @@ async function activeGenerationReaders(generation) {
       if (readerEntries > MAX_CACHE_DIRECTORY_ENTRIES) {
         throw new RangeError("Semantic projection generation has too many reader entries.");
       }
-      const path = join2(generation, entry.name);
+      const path = join(generation, entry.name);
       let owner;
       try {
         owner = parsedOwner(JSON.parse(await boundedMetadataText(path, MAX_OWNER_BYTES, "Semantic projection reader")));
@@ -1033,7 +648,7 @@ async function activeGenerationReaders(generation) {
       if (owner !== null && processIsAlive(owner.pid)) {
         active += 1;
       } else {
-        await rm2(path, { force: true });
+        await rm(path, { force: true });
       }
     }
   } finally {
@@ -1060,7 +675,7 @@ async function activeReaderGenerations(database) {
       }
       if (!entry.isDirectory() || !entry.name.startsWith(GENERATION_PREFIX))
         continue;
-      if (await activeGenerationReaders(join2(snapshotDirectory, entry.name)) > 0) {
+      if (await activeGenerationReaders(join(snapshotDirectory, entry.name)) > 0) {
         active.add(entry.name);
       }
     }
@@ -1118,15 +733,15 @@ async function cleanUnusedGenerations(snapshotDirectory, currentGeneration) {
       }
       if (!entry.isDirectory())
         continue;
-      const path = join2(snapshotDirectory, entry.name);
+      const path = join(snapshotDirectory, entry.name);
       if (entry.name.startsWith(".temporary-")) {
-        await rm2(path, { recursive: true, force: true });
+        await rm(path, { recursive: true, force: true });
         continue;
       }
       if (!entry.name.startsWith(GENERATION_PREFIX) || entry.name === currentGeneration)
         continue;
       if (await activeGenerationReaders(path) === 0) {
-        await rm2(path, { recursive: true, force: true });
+        await rm(path, { recursive: true, force: true });
       }
     }
   } finally {
@@ -1137,7 +752,7 @@ async function cleanUnusedGenerations(snapshotDirectory, currentGeneration) {
 }
 async function describeSemanticProjection(database, root, notes, indexIdentity) {
   const [canonicalRoot, prospectiveDatabase] = await Promise.all([
-    realpath2(root),
+    realpath(root),
     canonicalSemanticDatabasePath(database)
   ]);
   assertSemanticCacheOutsideVault(canonicalRoot, prospectiveDatabase);
@@ -1154,7 +769,7 @@ async function describeSemanticProjection(database, root, notes, indexIdentity) 
   })).digest("hex");
   const generation = `${GENERATION_PREFIX}${identity.slice(0, 32)}`;
   const snapshotDirectory = `${canonicalDatabase}.snapshot`;
-  const generationPath = join2(snapshotDirectory, generation);
+  const generationPath = join(snapshotDirectory, generation);
   const manifest = {
     version: PROJECTION_VERSION,
     indexIdentity: validatedIdentity,
@@ -1188,10 +803,10 @@ async function prepareSemanticProjection(description, notes) {
   const reader = {
     version: LEASE_VERSION,
     pid: process.pid,
-    token: randomUUID2(),
+    token: randomUUID(),
     acquiredAt: new Date().toISOString()
   };
-  const readerPath = join2(generationPath, readerOwnerName(reader));
+  const readerPath = join(generationPath, readerOwnerName(reader));
   await writeFile(readerPath, `${JSON.stringify(reader)}
 `, {
     encoding: "utf8",
@@ -1199,10 +814,10 @@ async function prepareSemanticProjection(description, notes) {
     mode: 384
   });
   try {
-    await atomicWrite(join2(snapshotDirectory, MANIFEST_NAME), manifestText);
+    await atomicWrite(join(snapshotDirectory, MANIFEST_NAME), manifestText);
     await cleanUnusedGenerations(snapshotDirectory, manifest.generation);
   } catch (error) {
-    await rm2(readerPath, { force: true });
+    await rm(readerPath, { force: true });
     throw error;
   }
   let released = false;
@@ -1213,7 +828,7 @@ async function prepareSemanticProjection(description, notes) {
       if (released)
         return;
       released = true;
-      await rm2(readerPath, { force: true });
+      await rm(readerPath, { force: true });
     }
   };
 }
@@ -1257,7 +872,7 @@ var semanticIndexIdentity = {
 };
 var qmdModuleSpecifier = "@tobilu/qmd";
 async function sha256EmbeddingModelFile(path) {
-  const handle = await open3(path, constants3.O_RDONLY | constants3.O_NOFOLLOW);
+  const handle = await open2(path, constants2.O_RDONLY | constants2.O_NOFOLLOW);
   try {
     const metadata = await handle.stat();
     if (!metadata.isFile())
@@ -1301,14 +916,14 @@ async function verifiedIndexEmbeddingModelSource(path, dependencies) {
   if (path === undefined) {
     return Object.freeze({ source: recommendedEmbeddingModel, release: () => Promise.resolve() });
   }
-  const sourcePath = resolve3(path);
-  const directory = await mkdtemp(join3(tmpdir(), "hraness-wordcell-embedding-model-"));
-  const destinationPath = join3(directory, "pinned-model.gguf");
+  const sourcePath = resolve2(path);
+  const directory = await mkdtemp(join2(tmpdir(), "hraness-wordcell-embedding-model-"));
+  const destinationPath = join2(directory, "pinned-model.gguf");
   let source;
   let destination;
   try {
-    source = await open3(sourcePath, constants3.O_RDONLY | constants3.O_NOFOLLOW);
-    destination = await open3(destinationPath, constants3.O_WRONLY | constants3.O_CREAT | constants3.O_EXCL | constants3.O_NOFOLLOW, 256);
+    source = await open2(sourcePath, constants2.O_RDONLY | constants2.O_NOFOLLOW);
+    destination = await open2(destinationPath, constants2.O_WRONLY | constants2.O_CREAT | constants2.O_EXCL | constants2.O_NOFOLLOW, 256);
     const before = await source.stat();
     if (!before.isFile())
       throw new TypeError("The embedding model must be a regular file.");
@@ -1352,7 +967,7 @@ async function verifiedIndexEmbeddingModelSource(path, dependencies) {
         if (released)
           return;
         released = true;
-        await rm3(directory, { recursive: true, force: true });
+        await rm2(directory, { recursive: true, force: true });
       }
     });
   } catch (error) {
@@ -1362,7 +977,7 @@ async function verifiedIndexEmbeddingModelSource(path, dependencies) {
     await source?.close().catch(() => {
       return;
     });
-    await rm3(directory, { recursive: true, force: true });
+    await rm2(directory, { recursive: true, force: true });
     throw error;
   }
 }
@@ -1457,16 +1072,16 @@ async function sessionEmbeddingModelSource(options, dependencies) {
 function cacheHome(dependencies) {
   const configured = dependencies.cacheHome ?? process.env.XDG_CACHE_HOME;
   if (configured !== undefined && configured.trim() !== "") {
-    return isAbsolute2(configured) ? configured : resolve3(configured);
+    return isAbsolute2(configured) ? configured : resolve2(configured);
   }
-  return join3(homedir(), ".cache");
+  return join2(homedir(), ".cache");
 }
 function semanticDatabasePath(root, dependencies = {}) {
-  const identity = createHash2("sha256").update(resolve3(root)).digest("hex").slice(0, 20);
-  return join3(cacheHome(dependencies), "hraness-kb", "indexes", `${identity}.sqlite`);
+  const identity = createHash2("sha256").update(resolve2(root)).digest("hex").slice(0, 20);
+  return join2(cacheHome(dependencies), "hraness-kb", "indexes", `${identity}.sqlite`);
 }
 async function resolvedDirectory(path) {
-  const root = await realpath3(resolve3(path));
+  const root = await realpath2(resolve2(path));
   if (!(await stat(root)).isDirectory())
     throw new Error("Knowledge-base root must be a directory.");
   return root;
@@ -1724,18 +1339,18 @@ async function writeAll(handle, bytes, length, position) {
 async function copyStableSnapshotFile(source, destination, label, maximumBytes, expected) {
   if (!Number.isSafeInteger(expected.bytes) || expected.bytes < 0 || expected.bytes > maximumBytes || !SHA256.test(expected.sha256))
     throw new TypeError(`${label} seal is invalid.`);
-  const pathBefore = await lstat3(source, { bigint: true });
+  const pathBefore = await lstat2(source, { bigint: true });
   if (pathBefore.isSymbolicLink() || !pathBefore.isFile() || pathBefore.nlink !== 1n || pathBefore.size > BigInt(maximumBytes) || pathBefore.size !== BigInt(expected.bytes)) {
     throw new Error(`${label} must be one bounded, singly linked regular file.`);
   }
-  const sourceHandle = await open3(source, constants3.O_RDONLY | constants3.O_NOFOLLOW);
+  const sourceHandle = await open2(source, constants2.O_RDONLY | constants2.O_NOFOLLOW);
   let destinationHandle;
   try {
     const before = await sourceHandle.stat({ bigint: true });
     if (!sameStableFileMetadata(pathBefore, before)) {
       throw new Error(`${label} changed before its isolated read snapshot was opened.`);
     }
-    destinationHandle = await open3(destination, constants3.O_WRONLY | constants3.O_CREAT | constants3.O_EXCL | constants3.O_NOFOLLOW, 384);
+    destinationHandle = await open2(destination, constants2.O_WRONLY | constants2.O_CREAT | constants2.O_EXCL | constants2.O_NOFOLLOW, 384);
     const buffer = new Uint8Array(1024 * 1024);
     const hash = createHash2("sha256");
     let copied = 0;
@@ -1752,7 +1367,7 @@ async function copyStableSnapshotFile(source, destination, label, maximumBytes, 
     await destinationHandle.sync();
     const [after, pathAfter] = await Promise.all([
       sourceHandle.stat({ bigint: true }),
-      lstat3(source, { bigint: true })
+      lstat2(source, { bigint: true })
     ]);
     if (copied !== Number(before.size) || !sameStableFileMetadata(before, after) || !sameStableFileMetadata(after, pathAfter)) {
       throw new Error(`${label} changed while its isolated read snapshot was copied.`);
@@ -1771,7 +1386,7 @@ async function copyStableSnapshotFile(source, destination, label, maximumBytes, 
 }
 async function assertAbsentSnapshotSidecar(path, label) {
   try {
-    await lstat3(path);
+    await lstat2(path);
   } catch (error) {
     if (missingFile(error))
       return;
@@ -1780,17 +1395,17 @@ async function assertAbsentSnapshotSidecar(path, label) {
   throw new Error(`${label} appeared while the isolated read snapshot was copied.`);
 }
 async function createIsolatedQmdDatabaseSnapshot(database, seal) {
-  const directory = await mkdtemp(join3(tmpdir(), "hraness-wordcell-qmd-reader."));
+  const directory = await mkdtemp(join2(tmpdir(), "hraness-wordcell-qmd-reader."));
   await chmod(directory, 448);
   let cleaned = false;
   const cleanup = async () => {
     if (cleaned)
       return;
     cleaned = true;
-    await rm3(directory, { recursive: true, force: true });
+    await rm2(directory, { recursive: true, force: true });
   };
   try {
-    const isolatedDatabase = join3(directory, "snapshot.sqlite");
+    const isolatedDatabase = join2(directory, "snapshot.sqlite");
     if (seal.wal !== null || seal.shm !== null || seal.journal !== null) {
       throw new TypeError("Strict warm semantic snapshots require checkpointed SQLite state.");
     }
@@ -1823,7 +1438,7 @@ function aggregateCloseFailures(settlements, label) {
     throw new AggregateError(failures.map(({ reason }) => reason), `${label} did not close cleanly.`);
   }
 }
-async function closeIsolatedStore(close, snapshot2, label) {
+async function closeIsolatedStore(close, snapshot, label) {
   const settlements = [];
   try {
     await close();
@@ -1832,29 +1447,29 @@ async function closeIsolatedStore(close, snapshot2, label) {
     settlements.push({ status: "rejected", reason });
   }
   try {
-    await snapshot2.cleanup();
+    await snapshot.cleanup();
     settlements.push({ status: "fulfilled", value: undefined });
   } catch (reason) {
     settlements.push({ status: "rejected", reason });
   }
   aggregateCloseFailures(settlements, label);
 }
-function isolatedWarmSearchStore(store, snapshot2) {
+function isolatedWarmSearchStore(store, snapshot) {
   let closePromise;
   return Object.freeze({
     ...store,
     close: () => {
-      closePromise ??= closeIsolatedStore(store.close, snapshot2, "Isolated QMD warm store");
+      closePromise ??= closeIsolatedStore(store.close, snapshot, "Isolated QMD warm store");
       return closePromise;
     }
   });
 }
-function isolatedAttestationStore(store, snapshot2) {
+function isolatedAttestationStore(store, snapshot) {
   let closePromise;
   return Object.freeze({
     ...store,
     close: () => {
-      closePromise ??= closeIsolatedStore(store.close, snapshot2, "Isolated QMD attestation store");
+      closePromise ??= closeIsolatedStore(store.close, snapshot, "Isolated QMD attestation store");
       return closePromise;
     }
   });
@@ -2011,7 +1626,7 @@ async function openedSemanticAttestationStore(value) {
   }
 }
 async function openStore(root, database, embeddingModelSource, dependencies, requireStoreLocalVectorBoundary = false) {
-  await mkdir2(dirname3(database), { recursive: true });
+  await mkdir2(dirname2(database), { recursive: true });
   const created = await (dependencies.createStore ?? defaultCreateStore)({
     dbPath: database,
     config: storeConfig(root, embeddingModelSource)
@@ -2022,7 +1637,7 @@ async function openStore(root, database, embeddingModelSource, dependencies, req
   });
 }
 async function assertExactWarmProjectionFile(path, expected, label) {
-  const handle = await open3(path, constants3.O_RDONLY | constants3.O_NOFOLLOW);
+  const handle = await open2(path, constants2.O_RDONLY | constants2.O_NOFOLLOW);
   try {
     const before = await handle.stat();
     if (!before.isFile() || before.nlink !== 1 || before.size !== expected.byteLength) {
@@ -2040,14 +1655,14 @@ async function assertExactWarmProjectionFile(path, expected, label) {
 async function assertExistingWarmProjection(description, notes) {
   let canonicalGeneration;
   try {
-    canonicalGeneration = await realpath3(description.generationPath);
+    canonicalGeneration = await realpath2(description.generationPath);
   } catch (error) {
     throw new Error("The immutable warm semantic projection is absent.", { cause: error });
   }
   if (canonicalGeneration !== description.generationPath) {
     throw new Error("The immutable warm semantic projection changed identity.");
   }
-  await assertExactWarmProjectionFile(join3(canonicalGeneration, "manifest.json"), Buffer.from(description.manifestText, "utf8"), "Semantic projection manifest");
+  await assertExactWarmProjectionFile(join2(canonicalGeneration, "manifest.json"), Buffer.from(description.manifestText, "utf8"), "Semantic projection manifest");
   const notesByPath = new Map(notes.map((note) => [note.path, note]));
   if (notesByPath.size !== description.manifest.notes.length) {
     throw new Error("The immutable warm semantic projection note population drifted.");
@@ -2061,38 +1676,38 @@ async function assertExistingWarmProjection(description, notes) {
     if (expected.byteLength !== entry.bytes || createHash2("sha256").update(expected).digest("hex") !== entry.sha256) {
       throw new Error(`Semantic projection note ${JSON.stringify(entry.path)} drifted.`);
     }
-    await assertExactWarmProjectionFile(resolve3(canonicalGeneration, ...entry.path.split("/")), expected, `Semantic projection note ${JSON.stringify(entry.path)}`);
+    await assertExactWarmProjectionFile(resolve2(canonicalGeneration, ...entry.path.split("/")), expected, `Semantic projection note ${JSON.stringify(entry.path)}`);
   }
 }
 async function openWarmSearchStore(database, databaseSnapshotSeal, embeddingModelSource, dependencies) {
-  const snapshot2 = await createIsolatedQmdDatabaseSnapshot(database, databaseSnapshotSeal);
+  const snapshot = await createIsolatedQmdDatabaseSnapshot(database, databaseSnapshotSeal);
   try {
     const created = await (dependencies.createWarmSearchStore ?? defaultCreateWarmSearchStore)({
-      dbPath: snapshot2.database,
+      dbPath: snapshot.database,
       embeddingModelSource
     });
     const store = await openedWarmSearchStore(created, dependencies.now ?? performance.now.bind(performance));
-    return isolatedWarmSearchStore(store, snapshot2);
+    return isolatedWarmSearchStore(store, snapshot);
   } catch (error) {
-    await snapshot2.cleanup();
+    await snapshot.cleanup();
     throw error;
   }
 }
 async function openAttestationStore(database, databaseSnapshotSeal, dependencies) {
-  const snapshot2 = await createIsolatedQmdDatabaseSnapshot(database, databaseSnapshotSeal);
+  const snapshot = await createIsolatedQmdDatabaseSnapshot(database, databaseSnapshotSeal);
   try {
-    const created = await (dependencies.createAttestationStore ?? defaultCreateAttestationStore)({ dbPath: snapshot2.database });
+    const created = await (dependencies.createAttestationStore ?? defaultCreateAttestationStore)({ dbPath: snapshot.database });
     const store = await openedSemanticAttestationStore(created);
-    return isolatedAttestationStore(store, snapshot2);
+    return isolatedAttestationStore(store, snapshot);
   } catch (error) {
-    await snapshot2.cleanup();
+    await snapshot.cleanup();
     throw error;
   }
 }
 async function checkpointSemanticWarmCache(options, dependencies = {}) {
   const root = await resolvedDirectory(options.root);
   const database = await resolveSemanticDatabase(databaseFor(root, options.database, dependencies), root);
-  const before = await lstat3(database);
+  const before = await lstat2(database);
   if (before.isSymbolicLink() || !before.isFile() || before.nlink !== 1) {
     throw new TypeError("The semantic database to checkpoint must be a singly linked regular file.");
   }
@@ -2123,7 +1738,7 @@ async function checkpointSemanticWarmCache(options, dependencies = {}) {
   for (const sidecar of [`${database}-wal`, `${database}-shm`]) {
     let metadata;
     try {
-      metadata = await lstat3(sidecar);
+      metadata = await lstat2(sidecar);
     } catch (error) {
       if (missingFile(error))
         continue;
@@ -2132,7 +1747,7 @@ async function checkpointSemanticWarmCache(options, dependencies = {}) {
     if (metadata.isSymbolicLink() || !metadata.isFile() || metadata.nlink !== 1) {
       throw new TypeError("Semantic checkpoint sidecars must be singly linked regular files.");
     }
-    await rm3(sidecar);
+    await rm2(sidecar);
   }
   await Promise.all([
     assertAbsentSnapshotSidecar(`${database}-wal`, "Semantic database WAL"),
@@ -2188,23 +1803,23 @@ async function openSemanticWarmSearchSession(options, dependencies = {}) {
     if (!databaseState.isFile()) {
       throw new Error("The warm semantic database must already be a regular file.");
     }
-    const snapshot2 = await semanticSnapshot(root, dependencies);
-    const description = await describeSemanticProjection(database, root, snapshot2.notes, semanticIndexIdentity);
-    await assertExistingWarmProjection(description, snapshot2.notes);
+    const snapshot = await semanticSnapshot(root, dependencies);
+    const description = await describeSemanticProjection(database, root, snapshot.notes, semanticIndexIdentity);
+    await assertExistingWarmProjection(description, snapshot.notes);
     store = await openWarmSearchStore(database, options.databaseSnapshotSeal, embeddingModel.source, dependencies);
     const pendingEmbeddings = await store.pendingEmbeddingCount();
     if (pendingEmbeddings !== 0) {
       throw new Error(`Warm semantic cache is not ready: ${pendingEmbeddings} embedding input(s) remain pending.`);
     }
-    const notesByPath = new Map(snapshot2.notes.map((note) => [note.path, note]));
+    const notesByPath = new Map(snapshot.notes.map((note) => [note.path, note]));
     const contentHashesByPath = new Map(description.manifest.notes.map(({ path, sha256 }) => [path, sha256]));
-    const notesByQmdPath = qmdNoteLookup(snapshot2.notes, contentHashesByPath);
-    const connectionsById = new Map(snapshot2.analysis.noteConnections.map((connection) => [connection.id, connection]));
+    const notesByQmdPath = qmdNoteLookup(snapshot.notes, contentHashesByPath);
+    const connectionsById = new Map(snapshot.analysis.noteConnections.map((connection) => [connection.id, connection]));
     const update = Object.freeze({
       collections: 1,
       indexed: 0,
       updated: 0,
-      unchanged: snapshot2.notes.length,
+      unchanged: snapshot.notes.length,
       removed: 0,
       needsEmbedding: 0
     });
@@ -2271,7 +1886,7 @@ async function openSemanticWarmSearchSession(options, dependencies = {}) {
 function databaseFor(root, requested, dependencies) {
   if (requested === undefined)
     return semanticDatabasePath(root, dependencies);
-  return resolve3(requested);
+  return resolve2(requested);
 }
 async function embedChanged(store, update, force) {
   if (!force && update.needsEmbedding === 0)
@@ -2291,11 +1906,11 @@ async function indexSemanticVault(options, dependencies = {}) {
   try {
     const root = await resolvedDirectory(options.root);
     const databaseCandidate = await resolveSemanticDatabase(databaseFor(root, options.database, dependencies), root);
-    const snapshot2 = await semanticSnapshot(root, dependencies);
-    const description = await describeSemanticProjection(databaseCandidate, root, snapshot2.notes, semanticIndexIdentity);
+    const snapshot = await semanticSnapshot(root, dependencies);
+    const description = await describeSemanticProjection(databaseCandidate, root, snapshot.notes, semanticIndexIdentity);
     const database = description.database;
     return await withSemanticGenerationWriterLease(database, description.manifest.generation, async () => {
-      const projection = await prepareSemanticProjection(description, snapshot2.notes);
+      const projection = await prepareSemanticProjection(description, snapshot.notes);
       let store;
       try {
         store = await openStore(projection.root, database, embeddingModel.source, dependencies);
@@ -2387,15 +2002,15 @@ async function resolvedSearchNote(projectionRoot, result, notesByPath, notesByQm
     return null;
   let filepath;
   try {
-    filepath = await realpath3(resolve3(result.filepath));
+    filepath = await realpath2(resolve2(result.filepath));
   } catch {
     return null;
   }
-  const candidate = relative3(projectionRoot, filepath);
-  if (candidate === "" || candidate === ".." || candidate.startsWith(`..${sep3}`) || isAbsolute2(candidate)) {
+  const candidate = relative2(projectionRoot, filepath);
+  if (candidate === "" || candidate === ".." || candidate.startsWith(`..${sep2}`) || isAbsolute2(candidate)) {
     return null;
   }
-  const note = notesByPath.get(candidate.split(sep3).join("/"));
+  const note = notesByPath.get(candidate.split(sep2).join("/"));
   return note !== undefined && contentHashesByPath.get(note.path) === result.hash ? note : null;
 }
 function queryOffset(body, query, suggested) {
@@ -2597,12 +2212,12 @@ async function executeSemanticSearch(context, options) {
 async function openSemanticSearchSession(options, dependencies = {}) {
   const root = await resolvedDirectory(options.root);
   const databaseCandidate = await resolveSemanticDatabase(databaseFor(root, options.database, dependencies), root);
-  const snapshot2 = await semanticSnapshot(root, dependencies);
-  const description = await describeSemanticProjection(databaseCandidate, root, snapshot2.notes, semanticIndexIdentity);
-  const notesByPath = new Map(snapshot2.notes.map((note) => [note.path, note]));
+  const snapshot = await semanticSnapshot(root, dependencies);
+  const description = await describeSemanticProjection(databaseCandidate, root, snapshot.notes, semanticIndexIdentity);
+  const notesByPath = new Map(snapshot.notes.map((note) => [note.path, note]));
   const contentHashesByPath = new Map(description.manifest.notes.map(({ path, sha256 }) => [path, sha256]));
-  const notesByQmdPath = qmdNoteLookup(snapshot2.notes, contentHashesByPath);
-  const connectionsById = new Map(snapshot2.analysis.noteConnections.map((connection) => [connection.id, connection]));
+  const notesByQmdPath = qmdNoteLookup(snapshot.notes, contentHashesByPath);
+  const connectionsById = new Map(snapshot.analysis.noteConnections.map((connection) => [connection.id, connection]));
   const requireStoreLocalVectorBoundary = requiredStoreLocalVectorBoundary(options.requireStoreLocalVectorBoundary);
   const embeddingModel = await sessionEmbeddingModelSource(options, dependencies);
   const database = description.database;
@@ -2610,7 +2225,7 @@ async function openSemanticSearchSession(options, dependencies = {}) {
   let initialized;
   try {
     initialized = await withSemanticGenerationWriterLease(database, description.manifest.generation, async () => {
-      const projection2 = await prepareSemanticProjection(description, snapshot2.notes);
+      const projection2 = await prepareSemanticProjection(description, snapshot.notes);
       let store2;
       try {
         store2 = await openStore(projection2.root, database, embeddingModel.source, dependencies, requireStoreLocalVectorBoundary);
@@ -2725,4 +2340,4 @@ async function searchSemanticVault(options, dependencies = {}) {
   }
 }
 
-export { MAX_SCANNED_NOTES, MAX_NOTE_UTF8_BYTES, MAX_VAULT_UTF8_BYTES, VaultScanBudgetError, defaultIgnoredDirectories, markdownFiles, readVaultNotes, scanVault, refreshVault, recommendedEmbeddingModel, recommendedEmbeddingModelSha256, MAX_EMBEDDING_MODEL_BYTES, MAX_SEMANTIC_DATABASE_IDENTITY_BYTES, qmdIndexerVersion, sha256EmbeddingModelFile, createVerifiedEmbeddingModelLease, semanticDatabasePath, checkpointSemanticWarmCache, attestSemanticWarmCache, openSemanticWarmSearchSession, indexSemanticVault, openSemanticSearchSession, searchSemanticVault };
+export { recommendedEmbeddingModel, recommendedEmbeddingModelSha256, MAX_EMBEDDING_MODEL_BYTES, MAX_SEMANTIC_DATABASE_IDENTITY_BYTES, qmdIndexerVersion, sha256EmbeddingModelFile, createVerifiedEmbeddingModelLease, semanticDatabasePath, checkpointSemanticWarmCache, attestSemanticWarmCache, openSemanticWarmSearchSession, indexSemanticVault, openSemanticSearchSession, searchSemanticVault };

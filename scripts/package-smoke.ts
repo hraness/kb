@@ -10,7 +10,7 @@ import {
 import { requiresOhAdoptionPreparerExport } from "./npm-package-identity.js";
 
 const packageName = "@hraness/wordcell";
-const maximumPackageFiles = 218;
+const maximumPackageFiles = 240;
 const maximumPackedBytes = 1_200_000;
 const maximumUnpackedBytes = 5_250_000;
 const importSpecifiers = [
@@ -41,6 +41,8 @@ const importSpecifiers = [
   "@hraness/wordcell/evaluation-kb",
   "@hraness/wordcell/git",
   "@hraness/wordcell/graph",
+  "@hraness/wordcell/graph-authority",
+  "@hraness/wordcell/graph-percolation",
   "@hraness/wordcell/navigation",
   "@hraness/wordcell/pdf",
   "@hraness/wordcell/percolate",
@@ -61,6 +63,8 @@ const importSpecifiers = [
   "@hraness/wordcell/workflows/plan-radar",
 ];
 const baselineRequiredNamedExports = {
+  "@hraness/wordcell/graph-authority": ["openGraphAuthority", "queryGraph", "rebuildGraph", "verifyGraph"],
+  "@hraness/wordcell/graph-percolation": ["percolateWithGraph"],
   "@hraness/wordcell/clip/bundle-reader": ["readCaptureBundle", "verifyCaptureBundle"],
   "@hraness/wordcell/clip/jobs": ["createCaptureJob", "openCaptureJobStore", "updateCaptureJob"],
   "@hraness/wordcell/clip/refresh": ["diffCaptureBundle"],
@@ -89,7 +93,6 @@ const requiredPackageFiles = [
   "LICENSE",
   "README.md",
   "dist/cli.js",
-  "dist/kb-alias.js",
   "dist/evaluation-builder.js",
   "package.json",
   "skills/wordcell/AGENTS.md",
@@ -272,7 +275,7 @@ async function run(command: string[], cwd: string): Promise<void> {
   if (exitCode !== 0) throw new Error(`Command failed (${String(exitCode)}): ${command.join(" ")}`);
 }
 
-async function verifyInstalledHelp(binary: string, cwd: string, expected: string, alias = false): Promise<void> {
+async function verifyInstalledHelp(binary: string, cwd: string, expected: string): Promise<void> {
   const child = Bun.spawn([join(cwd, "node_modules", ".bin", binary), "--help"], {
     cwd, env: environment, stdout: "pipe", stderr: "pipe",
   });
@@ -282,8 +285,7 @@ async function verifyInstalledHelp(binary: string, cwd: string, expected: string
   if (exitCode !== 0 || !stdout.includes(expected)) {
     throw new Error(`Installed ${binary} did not render its command help: exit=${exitCode}, stdout=${JSON.stringify(stdout)}, stderr=${JSON.stringify(stderr)}`);
   }
-  const expectedStderr = alias ? "kb is now wordcell; the kb alias is removed in 0.21.0\n" : "";
-  if (stderr !== expectedStderr) throw new Error(`Installed ${binary} emitted unexpected diagnostics: ${JSON.stringify(stderr)}`);
+  if (stderr !== "") throw new Error(`Installed ${binary} emitted unexpected diagnostics: ${JSON.stringify(stderr)}`);
 }
 
 function resolveGenuineNodeExecutable(): string {
@@ -639,8 +641,33 @@ try {
   await run([nodeExecutable, "--input-type=module", "-e", `await import(${JSON.stringify(packageName)})`], npmConsumer);
   for (const installed of [consumer, npmConsumer]) {
     await verifyInstalledHelp("wordcell", installed, "wordcell init [directory]");
-    await verifyInstalledHelp("kb", installed, "wordcell init [directory]", true);
     await run([join(installed, "node_modules", ".bin", "wordcell-evaluation-builder"), "--help"], installed);
+    const graphRoot = join(installed, "graph-vault");
+    await mkdir(graphRoot);
+    await writeFile(join(graphRoot, "index.md"), "---\nkb_catalog: authored\n---\n# Graph\n");
+    await writeFile(join(graphRoot, "alpha.md"), "# Alpha\n[[beta]]\n");
+    await writeFile(join(graphRoot, "beta.md"), "# Beta\n");
+    const graphBin = join(installed, "node_modules", ".bin", "wordcell");
+    await run([graphBin, "graph", "rebuild", "--root", graphRoot, "--json"], installed);
+    await run([graphBin, "graph", "verify", "--root", graphRoot, "--json"], installed);
+    await run([graphBin, "graph", "query", "--program", "backlinks", "--note", "beta", "--root", graphRoot, "--persisted", "--json"], installed);
+    await run([process.execPath, "--eval", `
+      const { queryGraph, openGraphAuthority } = await import(${JSON.stringify(packageName + "/graph-authority")});
+      const { scanVault } = await import(${JSON.stringify(packageName)});
+      const root = ${JSON.stringify(graphRoot)};
+      const result = await queryGraph(root, { program: "backlinks", note: "beta" }, { persisted: true });
+      if (JSON.stringify(result.rows.map(row => row.values)) !== JSON.stringify([["alpha", "beta", 2, "link", ""]])) {
+        throw new Error("Installed graph package returned incorrect backlink rows");
+      }
+      const authority = await openGraphAuthority(await scanVault(root, { mentionScope: false }));
+      try {
+        const own = await authority.query({ program: "backlinks", note: "beta" });
+        if (!(await authority.verifyResult(own))) throw new Error("Installed graph proof verification failed");
+        const altered = JSON.parse(JSON.stringify(own));
+        altered.rows[0].values[0] = "forged";
+        if (await authority.verifyResult(altered)) throw new Error("Installed graph accepted a modified proof");
+      } finally { await authority.close(); }
+    `], installed);
   }
   await run([
     join(consumer, "node_modules", ".bin", "wordcell"),
