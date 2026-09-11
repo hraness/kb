@@ -1,4 +1,5 @@
 @import "tailwindcss";
+@import "@hraness/ui/styles.css";
 @import "@hraness/design-kit/fonts.css";
 @import "@hraness/design-kit/product-marketing.css";
 
@@ -160,56 +161,9 @@ a:focus-visible {
 }
 
 .ask-ai {
-  display: flex;
-  align-items: center;
-  flex-wrap: wrap;
-  gap: 0.5rem;
   padding-block: 1.25rem;
   border-top: 1px solid var(--line);
   color: var(--muted);
-}
-
-.ask-ai [data-slot="ask-ai-about-this-label"] {
-  font-size: 0.85rem;
-  font-weight: 500;
-}
-
-.ask-ai [data-slot="ask-ai-about-this-links"] {
-  display: flex;
-  align-items: center;
-  flex-wrap: wrap;
-  gap: 0.5rem;
-}
-
-.ask-ai [data-slot="ask-ai-about-this-link"] {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  min-height: 1.875rem;
-  padding: 0 0.625rem;
-  border: 1px solid var(--line);
-  border-radius: 0.5rem;
-  color: inherit;
-  gap: 0.25rem;
-  font-size: 0.8rem;
-  font-weight: 500;
-  line-height: 1;
-  text-decoration: none;
-}
-
-.ask-ai [data-slot="ask-ai-about-this-link"]:hover {
-  border-color: currentColor;
-  color: var(--foreground);
-}
-
-.ask-ai [data-slot="ask-ai-about-this-link"]:focus-visible {
-  outline: 2px solid var(--hraness-site-accent);
-  outline-offset: 2px;
-}
-
-.ask-ai [data-slot="ask-ai-about-this-icon"] {
-  display: block;
-  flex: 0 0 auto;
 }
 
 .site-footer {

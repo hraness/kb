@@ -150,10 +150,12 @@ function verifyAllowedPath(path: string, type: "directory" | "file"): void {
     ? path === "LICENSE"
       || path === "README.md"
       || path === "package.json"
+      || path === "assets/agent-skill.svg"
       || path.startsWith("dist/")
       || path.startsWith("skills/wordcell/")
       || path.startsWith("src/")
-    : path === "dist"
+    : path === "assets"
+      || path === "dist"
       || path.startsWith("dist/")
       || path === "skills"
       || path === "skills/wordcell"

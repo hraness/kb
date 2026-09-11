@@ -381,7 +381,7 @@ describe("npm release workflows", () => {
       readonly version?: unknown;
     };
     expect(manifest).toEqual(expect.objectContaining({
-      version: "0.21.0",
+      version: "0.21.1",
       description: "A knowledge base for coding agents, built from Markdown, backlinks, semantic search, and Git context.",
       keywords: [
         "knowledge-base",
@@ -396,6 +396,10 @@ describe("npm release workflows", () => {
         "knowledge-graph",
         "semantic-search",
         "local-first",
+        "agent-skills",
+        "claude-code",
+        "codex",
+        "typescript-sdk",
       ],
     }));
     const opening = readme.slice(0, 1_500).replace(/\s+/gu, " ").toLowerCase();

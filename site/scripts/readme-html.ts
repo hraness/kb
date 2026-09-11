@@ -102,7 +102,7 @@ function assertFragmentsResolve(html: string): void {
 
 export function renderReadmeHtml(source: string): string {
   const document = source.replaceAll(LANDING_START, "").replaceAll(LANDING_END, "")
-    .replace(/^\[!\[skills\.sh\]\([^)]+\)\]\(([^)]+)\)\s*$/mu, "[Agent Skill on skills.sh]($1)");
+    .replace(/^\[!\[Agent Skill\]\([^)]+\)\]\(([^)]+)\)\s*$/mu, "[Install the Agent Skill]($1)");
   const html = Bun.markdown.html(document, {
     noHtmlBlocks: true,
     noHtmlSpans: true,

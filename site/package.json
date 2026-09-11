@@ -1,6 +1,6 @@
 {
   "name": "wordcell-site",
-  "version": "0.21.0",
+  "version": "0.21.1",
   "private": true,
   "packageManager": "bun@1.3.14",
   "engines": {
@@ -15,7 +15,7 @@
     "postbuild": "bun test ./tests/runtime.test.ts",
     "start": "next start",
     "lint": "eslint . --ignore-pattern .next",
-    "test": "bun test ./tests/source.test.ts ./tests/home.test.tsx ./scripts/readme-html.test.ts",
+    "test": "bun test ./tests/source.test.ts ./tests/home.test.tsx ./scripts/readme-html.test.ts ./tests/ui-styles.test.tsx",
     "typecheck": "tsc --noEmit",
     "check": "bun run check:theme && bun run sync:readme && bun run test && bun run lint && bun run typecheck && bun run build"
   },
@@ -35,7 +35,8 @@
     "eslint": "9.39.4",
     "eslint-config-next": "16.3.3",
     "tailwindcss": "4.2.1",
-    "typescript": "5.9.3"
+    "typescript": "5.9.3",
+    "postcss": "8.5.28"
   },
   "type": "module"
 }
