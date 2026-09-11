@@ -2,6 +2,11 @@ import { resolve } from "node:path";
 
 import type { MetadataObject, Note } from "./graph.js";
 import { lookupNote } from "./graph.js";
+import { openGraphAuthority } from "./graph-authority.js";
+import type { GraphAuthority, GraphQueryRequest, GraphQueryResult } from "./graph-authority-model.js";
+import { validateGraphPercolationOptions, validateGraphQueryRequest } from "./graph-query.js";
+import { percolateWithGraph, type GraphPercolationResult } from "./graph-percolation.js";
+import type { PercolateOptions } from "./percolate.js";
 import {
   GitHistoryError,
   gitHistoryForNotes,
@@ -229,6 +234,9 @@ export type OpenKnowledgeBaseOptions = {
 };
 
 export type KnowledgeBaseDependencies = {
+  /** Read-only, in-memory graph authority over this session's single vault scan. */
+  readonly openGraphAuthority?: typeof openGraphAuthority;
+  readonly percolateWithGraph?: typeof percolateWithGraph;
   readonly scanVault?: typeof scanVault;
   readonly semantic?: SemanticDependencies;
   readonly openSemanticSearchSession?: typeof openSemanticSearchSession;
@@ -250,6 +258,12 @@ export type KnowledgeBaseSession = {
     note: string,
     options?: Omit<NavigateLinksOptions, "direction">,
   ) => LinkNeighborhood;
+  /** Bounded named graph programs, evaluated against this session's original snapshot. */
+  readonly graphQuery: (request: GraphQueryRequest) => Promise<GraphQueryResult>;
+  /** Verify evidence against the same snapshot and named program; never accepts a foreign revision. */
+  readonly graphVerifyResult: (value: unknown) => Promise<boolean>;
+  /** Source-scoped advisory suggestions with separate positive graph proofs. */
+  readonly percolateWithProofs: (options: PercolateOptions & Readonly<{ note: string }>) => Promise<GraphPercolationResult>;
   readonly search: (options: KnowledgeBaseSearchOptions) => Promise<KnowledgeBaseSearchResult>;
   readonly history: (
     noteIds: readonly string[],
@@ -524,10 +538,23 @@ export async function openKnowledgeBase(
     ? undefined
     : Promise.resolve(injectedSemantic);
   let gitPromise: Promise<GitHistoryIndexResult> | undefined;
+  let graphAuthorityPromise: Promise<GraphAuthority> | undefined;
+  let graphOperationTail: Promise<void> = Promise.resolve();
 
   const assertOpen = (): void => {
     if (closeRequested) throw new Error("Knowledge-base session is closed.");
   };
+  const withGraphOperation = <T>(operation: () => Promise<T>): Promise<T> => {
+    assertOpen();
+    const pending = graphOperationTail.then(operation);
+    graphOperationTail = pending.then(() => undefined, () => undefined);
+    return pending;
+  };
+  const withGraphAuthority = <T>(operation: (authority: GraphAuthority) => Promise<T>): Promise<T> =>
+    withGraphOperation(async () => {
+      graphAuthorityPromise ??= (dependencies.openGraphAuthority ?? openGraphAuthority)(snapshot);
+      return operation(await graphAuthorityPromise);
+    });
   const semantic = (): Promise<SemanticSearchSession> => {
     assertOpen();
     semanticPromise ??= (dependencies.openSemanticSearchSession
@@ -980,6 +1007,17 @@ export async function openKnowledgeBase(
       ...linkOptions,
       direction: "in",
     }),
+    graphQuery: async (request) => {
+      assertOpen();
+      const checked = validateGraphQueryRequest(request);
+      return withGraphAuthority((authority) => authority.query(checked));
+    },
+    graphVerifyResult: async (value) => withGraphAuthority((authority) => authority.verifyResult(value)),
+    percolateWithProofs: async (percolateOptions) => {
+      assertOpen();
+      const checked = validateGraphPercolationOptions(percolateOptions);
+      return withGraphOperation(() => (dependencies.percolateWithGraph ?? percolateWithGraph)(snapshot, checked));
+    },
     search,
     history: async (noteIds, historyOptions = {}) => {
       assertOpen();
@@ -1000,12 +1038,19 @@ export async function openKnowledgeBase(
     close: () => {
       if (closePromise !== undefined) return closePromise;
       closeRequested = true;
-      closePromise = semanticPromise === undefined
-        ? Promise.resolve()
-        : semanticPromise.then(
-            (session) => session.close(),
-            () => undefined,
-          );
+      closePromise = (async () => {
+        const semanticClose = semanticPromise === undefined
+          ? Promise.resolve()
+          : semanticPromise.then((session) => session.close(), () => undefined);
+        const graphClose = graphOperationTail.then(async () => {
+          await graphAuthorityPromise?.then((authority) => authority.close(), () => undefined);
+        });
+        const results = await Promise.allSettled([semanticClose, graphClose]);
+        const errors = results.filter((result): result is PromiseRejectedResult => result.status === "rejected")
+          .map((result) => result.reason as unknown);
+        if (errors.length === 1) throw errors[0];
+        if (errors.length > 1) throw new AggregateError(errors, "Knowledge-base stores could not close.");
+      })();
       return closePromise;
     },
   };

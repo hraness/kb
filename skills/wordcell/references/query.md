@@ -250,3 +250,9 @@ then leave it untouched. `wordcell catalog --root "$KB_ROOT"` renders the exhaus
 inventory on demand. A managed vault keeps the original generated-catalog
 behavior. Neither mode changes scanning, graph analysis, semantic indexing, or
 attachment validation.
+
+## Query named graph programs
+
+Use `wordcell graph query --program backlinks --note <exact-id> --root "$KB_ROOT" --json` for positive source proofs. Programs also include bounded `reachability`, predicate-specific `relation-closure`, exact `scope-route`, `shared-tags`, and `shared-concepts`. Default queries write nothing. `graph rebuild` writes only the disposable `.wordcell/oh.sqlite` cache; `graph verify` and queries with `--persisted` reject missing or stale state without repairing it. After a damaged cache, `graph rebuild --fresh` builds a replacement from Markdown.
+
+Inspect the source revision, row/proof truncation and source record digests. Reopen SDK sessions after Markdown changes. Proofs establish derivation from source records, not the truth of an authored assertion. `wordcell graph --json` keeps its existing structural report.

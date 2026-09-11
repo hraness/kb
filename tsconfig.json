@@ -143,6 +143,12 @@
       ],
       "@hraness/wordcell/workflows/plan-radar": [
         "./src/workflows/plan-radar.ts"
+      ],
+      "@hraness/wordcell/graph-authority": [
+        "./src/graph-authority.ts"
+      ],
+      "@hraness/wordcell/graph-percolation": [
+        "./src/graph-percolation.ts"
       ]
     },
     "verbatimModuleSyntax": true,

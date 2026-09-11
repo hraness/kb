@@ -14,7 +14,7 @@ system.
 Bun 1.3.14 or newer is required.
 
 ```sh
-bun add --global --ignore-scripts https://github.com/hraness/wordcell/releases/download/v0.20.0/hraness-wordcell-0.20.0.tgz
+bun add --global --ignore-scripts https://github.com/hraness/wordcell/releases/download/v0.21.0/hraness-wordcell-0.21.0.tgz
 wordcell --help
 ```
 
@@ -253,14 +253,14 @@ Treat the knowledge base as repository-adjacent durable memory. Authored Markdow
 
 ## Installation reference
 
-[Bun](https://bun.sh/docs/installation) is the required runtime. GitHub Releases are the canonical distribution, and each release publishes the same archive to npm as `@hraness/wordcell`. The examples target the prepared `0.20.0` release and become available when its GitHub release is published. Existing `@hraness/kb` installs remain available during that transition. For signed artifact verification, see [the release procedure](docs/publishing.md#verify-a-published-release).
+[Bun](https://bun.sh/docs/installation) is the required runtime. GitHub Releases are the canonical distribution, and each release publishes the same archive to npm as `@hraness/wordcell`. The examples target the prepared `0.21.0` release and become available when its GitHub release is published. Existing `@hraness/kb` installs remain available during that transition. For signed artifact verification, see [the release procedure](docs/publishing.md#verify-a-published-release).
 
 ### Tell your coding agent to install it
 
 Copy this prompt into Codex, Claude Code, or another coding agent:
 
 ```text
-Install the `wordcell` Agent Skill from `hraness/wordcell#v0.20.0` with the standard skills
+Install the `wordcell` Agent Skill from `hraness/wordcell#v0.21.0` with the standard skills
 CLI. Use the skill's runtime instructions to install the exact
 versioned GitHub release archive only when the command is missing. Verify it
 with `wordcell doctor` and `wordcell --help`, but do not initialize or modify a vault until
@@ -270,8 +270,8 @@ I ask.
 Install the single public skill with either runner:
 
 ```sh
-npx skills add hraness/wordcell#v0.20.0
-bunx skills add hraness/wordcell#v0.20.0
+npx skills add hraness/wordcell#v0.21.0
+bunx skills add hraness/wordcell#v0.21.0
 ```
 
 Both commands discover the same `wordcell` skill and install it into the selected
@@ -281,14 +281,14 @@ refresh a catalog, or edit Markdown. When invoked, the skill uses an existing
 CLI from the immutable GitHub release archive.
 
 The public skills CLI reads `skills/wordcell/` from the repository. The immutable
-`0.20.0` packed release includes the same tree under
+`0.21.0` packed release includes the same tree under
 `node_modules/@hraness/wordcell/skills/wordcell/`, and the package check verifies that the
 installed skill is byte-identical to the repository source.
 
 Install the two global commands with Bun:
 
 ```sh
-bun add --global --ignore-scripts https://github.com/hraness/wordcell/releases/download/v0.20.0/hraness-wordcell-0.20.0.tgz
+bun add --global --ignore-scripts https://github.com/hraness/wordcell/releases/download/v0.21.0/hraness-wordcell-0.21.0.tgz
 wordcell --help
 wordcell-evaluation-builder --help
 ```
@@ -296,7 +296,7 @@ wordcell-evaluation-builder --help
 The same GitHub archive can be installed with npm:
 
 ```sh
-npm install --global --ignore-scripts https://github.com/hraness/wordcell/releases/download/v0.20.0/hraness-wordcell-0.20.0.tgz
+npm install --global --ignore-scripts https://github.com/hraness/wordcell/releases/download/v0.21.0/hraness-wordcell-0.21.0.tgz
 wordcell --help
 ```
 
@@ -309,7 +309,7 @@ reviewed and enabled; run `wordcell doctor` to inspect the resulting capabilitie
 For programmatic use, add the versioned GitHub archive to a Bun project:
 
 ```sh
-bun add --exact --ignore-scripts https://github.com/hraness/wordcell/releases/download/v0.20.0/hraness-wordcell-0.20.0.tgz
+bun add --exact --ignore-scripts https://github.com/hraness/wordcell/releases/download/v0.21.0/hraness-wordcell-0.21.0.tgz
 ```
 
 The resulting dependency should remain exact:
@@ -317,13 +317,13 @@ The resulting dependency should remain exact:
 ```json
 {
   "dependencies": {
-    "@hraness/wordcell": "https://github.com/hraness/wordcell/releases/download/v0.20.0/hraness-wordcell-0.20.0.tgz"
+    "@hraness/wordcell": "https://github.com/hraness/wordcell/releases/download/v0.21.0/hraness-wordcell-0.21.0.tgz"
   }
 }
 ```
 
-Version 0.20.0 retains two public GitHub dependencies: `@hraness/oh` at
-immutable release `v0.2.0` for closure verification and `@tobilu/qmd` at commit
+Version 0.21.0 retains two public GitHub dependencies: `@hraness/oh` at
+immutable release archive `v0.4.3` for graph projection and closure verification and `@tobilu/qmd` at commit
 `aa993dceb3ef8cfb71d470554ca437570f5a2b3c` for store-local model behavior.
 Installation also needs Git and public GitHub access while it resolves those
 dependencies. Browser-cookie capture uses the exact upstream registry release
@@ -437,6 +437,8 @@ or `wordcell search` to expand the question deliberately.
 | `wordcell refresh --root <directory>` | Rebuild a managed catalog atomically and report graph findings. An authored-catalog vault remains unchanged. |
 | `wordcell check --root <directory>` | Verify catalog policy, graph integrity, and confined local image, PDF, and tldraw attachments without changing files. `--no-catalog` gates an edit lane without requiring the shared catalog refresh. |
 | `wordcell catalog --root <directory>` | Render an exhaustive disposable catalog without modifying an authored or managed front door. |
+| `wordcell graph query --program <name> --root <directory>` | Query a bounded, proof-bearing Oh projection; see [the graph guide](docs/graph-authority.md). |
+| `wordcell graph rebuild\|verify --root <directory>` | Rebuild or verify the disposable local graph cache without editing Markdown. |
 | `wordcell graph --root <directory>` | Print the resolved contextual and typed graph, broken or ambiguous targets, orphans, and advisory mention candidates. |
 | `wordcell backlinks <note> --root <directory>` | Show incoming contextual links and typed relationships for a note resolved by path, title, or alias. |
 | `wordcell links <note> --root <directory>` | Traverse incoming, outgoing, or bidirectional contextual links and typed relationships with explicit depth and node limits. |
@@ -572,7 +574,7 @@ descriptors, and promotion expectations in its own repository. The installed
 `wordcell-evaluation-builder` binary exposes the same build lifecycle without a
 source checkout.
 Other focused entries include
-`@hraness/wordcell/graph`, `@hraness/wordcell/navigation`, `@hraness/wordcell/percolate`,
+`@hraness/wordcell/graph-authority`, `@hraness/wordcell/graph-percolation`, `@hraness/wordcell/graph`, `@hraness/wordcell/navigation`, `@hraness/wordcell/percolate`,
 `@hraness/wordcell/portfolio`, `@hraness/wordcell/query`, `@hraness/wordcell/repository-memory`,
 `@hraness/wordcell/search-rules`, `@hraness/wordcell/untrusted-content`,
 `@hraness/wordcell/source-inbox`, and `@hraness/wordcell/semantic`; web-capture orchestration and
@@ -601,9 +603,9 @@ ritual. The package smoke test keeps future tagged packages byte-identical to
 that source tree.
 
 ```sh
-npx skills add hraness/wordcell#v0.20.0
+npx skills add hraness/wordcell#v0.21.0
 # or
-bunx skills add hraness/wordcell#v0.20.0
+bunx skills add hraness/wordcell#v0.21.0
 ```
 
 The skill invokes the installed `wordcell` command without depending on a repository
@@ -617,6 +619,18 @@ discovery omits it.
 See [Design](docs/design.md), [Portfolio federation](docs/portfolio.md), [Agent workflow](docs/agent-workflow.md), [PDF capture](docs/pdf.md), and [Contributing](CONTRIBUTING.md) for the durable contracts and development gate. hraness/wordcell is available under the [MIT License](LICENSE).
 
 ## Release notes
+
+### Upgrade to v0.21.0
+
+Version 0.21.0 adds a rebuildable Oh graph, named positive-rule queries with
+source proofs, read-only cache verification, and opt-in percolation proofs.
+See [the graph guide](docs/graph-authority.md) for commands, resource limits,
+revision identity, and cache recovery. Existing graph reports, percolation V2,
+search ranking, vault formats and `kb://` identifiers stay compatible.
+
+The deprecated `kb` command alias is removed as announced in 0.20.0. Update
+scripts to invoke `wordcell`; existing pinned 0.20.x installations retain the
+alias. No Markdown or document-ID migration is required.
 
 ### Upgrade to v0.20.0
 

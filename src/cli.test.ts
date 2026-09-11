@@ -1989,6 +1989,9 @@ describe("kb vault commands", () => {
             });
           },
           history: unused,
+          graphQuery: unused,
+          graphVerifyResult: unused,
+          percolateWithProofs: unused,
           searchHistory: unused,
           close: () => {
             closed += 1;
@@ -2057,6 +2060,9 @@ describe("kb vault commands", () => {
               });
             },
             history: unused,
+            graphQuery: unused,
+            graphVerifyResult: unused,
+            percolateWithProofs: unused,
             searchHistory: unused,
             close: () => Promise.resolve(),
           } satisfies KnowledgeBaseSession);
@@ -2398,6 +2404,9 @@ describe("kb vault commands", () => {
       backlinks: () => { throw new Error("not used"); },
       search: () => Promise.resolve(result),
       history: () => Promise.resolve(result.history),
+      graphQuery: () => { throw new Error("not used"); },
+      graphVerifyResult: () => { throw new Error("not used"); },
+      percolateWithProofs: () => { throw new Error("not used"); },
       searchHistory: () => { throw new Error("not used"); },
       close: () => Promise.resolve(),
     });
@@ -2485,6 +2494,9 @@ describe("kb vault commands", () => {
           limitedCommits: [limitedCommit],
         });
       },
+      graphQuery: () => { throw new Error("not used"); },
+      graphVerifyResult: () => { throw new Error("not used"); },
+      percolateWithProofs: () => { throw new Error("not used"); },
       searchHistory: (options) => {
         calls.push({ searchHistory: options });
         return Promise.resolve({
@@ -2592,6 +2604,9 @@ describe("kb vault commands", () => {
         backlinks: () => { throw new Error("not used"); },
         search: () => { throw new Error("not used"); },
         history: () => Promise.resolve(unavailable),
+        graphQuery: () => { throw new Error("not used"); },
+        graphVerifyResult: () => { throw new Error("not used"); },
+        percolateWithProofs: () => { throw new Error("not used"); },
         searchHistory: () => Promise.resolve(unavailable),
         close: () => {
           closed += 1;

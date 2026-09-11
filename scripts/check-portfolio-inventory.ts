@@ -44,7 +44,9 @@ export function hranessSourceRepository(specifier: string): string | undefined {
   const commitMatch = /^git\+https:\/\/github\.com\/(hraness\/[A-Za-z0-9._-]+)\.git#[0-9a-f]{40}$/u.exec(specifier);
   if (commitMatch?.[1] !== undefined) return commitMatch[1];
   const stableTagMatch = /^github:(hraness\/[A-Za-z0-9._-]+)#v(?:0|[1-9][0-9]*)\.(?:0|[1-9][0-9]*)\.(?:0|[1-9][0-9]*)$/u.exec(specifier);
-  const sourceRepository = stableTagMatch?.[1];
+  // Ownership only: release immutability and artifact digests are admission checks.
+  const releaseMatch = /^https:\/\/github\.com\/(hraness\/[A-Za-z0-9._-]+)\/releases\/download\/v(?:0|[1-9][0-9]*)\.(?:0|[1-9][0-9]*)\.(?:0|[1-9][0-9]*)\/[A-Za-z0-9_-][A-Za-z0-9._-]*\.tgz$/u.exec(specifier);
+  const sourceRepository = stableTagMatch?.[1] ?? releaseMatch?.[1];
   return sourceRepository?.endsWith(".git") === true ? undefined : sourceRepository;
 }
 

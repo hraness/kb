@@ -68,6 +68,13 @@ import {
   type RelationIssue,
   type VaultAnalysis,
 } from "./graph.js";
+import {
+  executeGraphCommand,
+  parseGraphCommand,
+  type GraphCliCommand,
+  type GraphCliDependencies,
+} from "./graph-cli.js";
+import { percolateWithGraph } from "./graph-percolation.js";
 import { initVault, type InitVaultResult } from "./init.js";
 import type {
   GitHistoryForNotesResult,
@@ -223,13 +230,16 @@ Usage:
   wordcell check [--root <directory>] [--index <path>] [--no-catalog] [--json]
   wordcell catalog [--root <directory>] [--index <path>] [--json]
   wordcell graph [--root <directory>] [--index <path>] [--json]
+  wordcell graph rebuild [--fresh] [--root <directory>] [--index <path>] [--json]
+  wordcell graph verify [--root <directory>] [--index <path>] [--json]
+  wordcell graph query --program <backlinks|reachability|scope-route|relation-closure|shared-tags|shared-concepts> [--note <id> | --scope <path>] [--predicate <predicate>] [--depth <count>] [--limit <count>] [--persisted] [--root <directory>] [--index <path>] [--json]
   wordcell backlinks <note> [--root <directory>] [--index <path>] [--json]
   wordcell links <note> [--root <directory>] [--direction <in|out|both>] [--depth <count>] [--limit <count>] [--json]
   wordcell note create <id> --title <title> [--type <type>] [--tag <tag>] [--body <markdown> | --body-file <path>] [--root <directory>] [--json]
   wordcell relation add <source> <predicate> <target> [--root <directory>] [--expected-revision <sha256:...>] [--json]
   wordcell relation remove <source> <predicate> <target> [--root <directory>] [--expected-revision <sha256:...>] [--json]
   wordcell relation list <note> [--root <directory>] [--json]
-  wordcell percolate [note] [--root <directory>] [--min-support <count>] [--limit <count>] [--json]
+  wordcell percolate [note] [--proofs] [--root <directory>] [--min-support <count>] [--limit <count>] [--json]
   wordcell list [--root <directory>] [--where <path=value>] [--has <path>] [--tag <tag>] [--scope <repository-path>] [--sort <field>] [--order <asc|desc>] [--limit <count>] [--json]
   wordcell index [--root <directory>] [--database <path>] [--force] [--json]
   wordcell search <query> [--root <directory>] [--repo <repository>] [--database <path>] [--mode <hybrid|exact|keyword|semantic>] [--rules <file>] [--priority] [--where <path=value>] [--has <path>] [--tag <tag>] [--scope <repository-path>] [--related <note>] [--graph-depth <1|2>] [--no-graph] [--history | --no-history | --require-history] [--limit <count>] [--candidate-limit <count>] [--min-score <score>] [--json]
@@ -252,6 +262,7 @@ Run \`wordcell clip --help\` for web capture options or \`wordcell pdf --help\` 
 type VaultCommand = "refresh" | "check" | "graph" | "backlinks" | "links";
 
 type ParsedCommand =
+  | GraphCliCommand
   | { readonly kind: "help" }
   | { readonly kind: "clip"; readonly arguments: readonly string[] }
   | {
@@ -422,6 +433,7 @@ type ParsedCommand =
     }
   | {
       readonly kind: "percolate";
+      readonly proofs?: true;
       readonly root: string;
       readonly note?: string;
       readonly minSupport: number;
@@ -433,7 +445,7 @@ type ParseResult =
   | { readonly ok: true; readonly value: ParsedCommand }
   | { readonly ok: false; readonly message: string };
 
-type CliDependencies = {
+type CliDependencies = GraphCliDependencies & {
   readonly runClipCommand?: typeof runClipCommand;
   readonly readCaptureBundle?: typeof readCaptureBundle;
   readonly verifyCaptureBundle?: typeof verifyCaptureBundle;
@@ -455,6 +467,7 @@ type CliDependencies = {
   readonly addNoteRelation?: typeof addNoteRelation;
   readonly removeNoteRelation?: typeof removeNoteRelation;
   readonly percolateVault?: typeof percolateVault;
+  readonly percolateWithGraph?: typeof percolateWithGraph;
   readonly inspectAgentContextRepository?: typeof inspectAgentContextRepository;
   readonly buildRepositoryMemoryContext?: typeof buildRepositoryMemoryContext;
   readonly auditAgentGuideRepository?: typeof auditAgentGuideRepository;
@@ -1678,10 +1691,16 @@ function parsePercolateCommand(arguments_: readonly string[]): ParseResult {
   let minSupport = 2;
   let limit = 25;
   let json = false;
+  let proofs = false;
   const positional: string[] = [];
   for (let cursor = 0; cursor < arguments_.length; cursor += 1) {
     const argument = arguments_[cursor];
     if (argument === undefined) continue;
+    if (argument === "--proofs") {
+      if (proofs) return { ok: false, message: "duplicate percolation proofs option" };
+      proofs = true;
+      continue;
+    }
     if (argument === "--json") {
       json = true;
       continue;
@@ -1714,10 +1733,12 @@ function parsePercolateCommand(arguments_: readonly string[]): ParseResult {
   if (positional.length > 1) {
     return { ok: false, message: "percolate accepts at most one note ID" };
   }
+  if (proofs && note === undefined) return { ok: false, message: "percolate --proofs requires one note" };
   return {
     ok: true,
     value: {
       kind: "percolate",
+      ...(proofs ? { proofs: true as const } : {}),
       root,
       ...(note === undefined ? {} : { note }),
       minSupport,
@@ -1887,6 +1908,9 @@ export function parseArguments(arguments_: readonly string[]): ParseResult {
     if (positional.length > 1) return { ok: false, message: "init accepts at most one directory" };
     if (positional[0] !== undefined) directory = positional[0];
     return { ok: true, value: { kind: "init", directory, json } };
+  }
+  if (command === "graph" && ["rebuild", "verify", "query"].includes(arguments_[1] ?? "")) {
+    return parseGraphCommand(arguments_.slice(1));
   }
   if (command === "refresh" || command === "check" || command === "graph" || command === "backlinks" || command === "links") {
     return parseVaultCommand(command, arguments_.slice(1));
@@ -2745,6 +2769,20 @@ async function runPercolate(
       ...(command.note === undefined ? {} : { mentionScope: command.note }),
     },
   );
+  if (command.proofs === true) {
+    if (command.note === undefined) throw new Error("percolate --proofs requires one note");
+    const result = await (dependencies.percolateWithGraph ?? percolateWithGraph)(snapshot, {
+      note: command.note, minSupport: command.minSupport, limit: command.limit,
+    });
+    const support = [result.positiveSupport.sharedTags, result.positiveSupport.sharedConcepts];
+    const partial = support.some((item) => item.truncated || item.proofsTruncated);
+    const text = `${renderPercolation(result.suggestions, command.note)}\nSnapshot: ${result.revision}\n`
+      + "Positive shared-tag and shared-concept proofs are included in --json output.\n"
+      + "Absence checks, support counts, and predicate choices remain Wordcell authoring decisions.\n"
+      + (partial ? "Partial proof evidence: a graph query reached its bounds.\n" : "");
+    output.stdout(command.json ? terminalSafeJson(result) : sanitizeTerminalText(redactSensitiveText(text)));
+    return partial ? 4 : 0;
+  }
   const result = (dependencies.percolateVault ?? percolateVault)(
     snapshot.notes,
     snapshot.analysis,
@@ -3527,6 +3565,11 @@ export async function main(
     if (command.kind === "agents") return await runAgents(command, output, dependencies);
     if (command.kind === "note-create") return await runNoteCreate(command, output, dependencies);
     if (command.kind === "relation") return await runRelation(command, output, dependencies);
+    if (command.kind === "graph-rebuild" || command.kind === "graph-verify" || command.kind === "graph-query") {
+      const result = await executeGraphCommand(command, dependencies);
+      output.stdout(command.json ? terminalSafeJson(result.value) : sanitizeTerminalText(redactSensitiveText(result.text)));
+      return result.exitCode;
+    }
     if (command.kind === "percolate") return await runPercolate(command, output, dependencies);
     if (command.kind === "list") return await runList(command, output, dependencies);
     if (command.kind === "inbox") return await runInbox(command, output, dependencies);

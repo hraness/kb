@@ -16,6 +16,11 @@ repository_scopes:
   - site
   - skills/wordcell
   - src/oh-adoption.ts
+  - src/oh
+  - src/graph-authority.ts
+  - src/graph-facts.ts
+  - src/graph-percolation.ts
+  - src/sdk.ts
 ---
 
 # Wordcell rename and the Oh seam
@@ -69,29 +74,30 @@ positive-Datalog answers carry proofs. Nothing flows from Oh back into notes by 
 
 ```
 wordcell CLI / SDK / skill
-  └─ src/graph-authority.ts   engine-neutral port: Fact, Program, Row, Proof
-       └─ src/oh/              the only module that imports @hraness/oh
-            ├─ profile.ts      Wordcell application profile digest → store profile
-            ├─ codec.ts        note → edition:note/<document_id> record
-            ├─ projection.ts   fact extractor: wordcell.note, .link, .relation, .tag, .scope
-            ├─ programs.ts     positive rule packs: backlinks, bounded reachability,
-            │                  scope-route, relation-closure
-            └─ authority.ts    memory authority wiring; working store at
-                               .wordcell/oh.sqlite, rebuilt from Markdown; explicit
-                               empty canonical store and pinned head initially
+  └─ src/graph-authority.ts       Wordcell port and staged filesystem lifecycle
+       ├─ graph-authority-model.ts   engine-neutral source/query/proof types
+       ├─ graph-facts.ts             canonical authored fact extraction
+       └─ src/oh/                   graph engine imports and storage adapter
+            ├─ snapshot.ts          record codec and extractor profile
+            ├─ programs.ts          six named positive rule packs
+            ├─ validation.ts        bounded foreign-data validation
+            └─ authority.ts         store, SQLite, projection and verification
 ```
 
-Proposed command syntax (not shipped): `wordcell graph query --program <id>`, `wordcell ask`
-(bounded structured positive-Datalog query AST; textual syntax is undecided), `wordcell graph rebuild`, `wordcell graph verify`;
-`wordcell percolate` candidates gain proof evidence. Search and Git context stay
-on Wordcell's side and rejoin Oh records by `recordSha256`. The dependency
-moves from the `v0.2.0` Git pin to the immutable 0.4.3 release archive and
-touches only the `store`, `sqlite`, `projection`, and `memory` entry points.
-The 2026-07 DataScript retirement stands; Oh may run as an imported library in
-the same Bun process. Oh requires a canonical store and pinned head even when
-Wordcell has no promoted content: the initial adapter supplies an explicit
-empty canonical lane. Orphans and concept counts are closed-snapshot facts
-derived by Wordcell or deferred, not native negation or aggregation promises.
+The implemented commands are `wordcell graph query --program <id>`,
+`wordcell graph rebuild`, `wordcell graph verify`, and opt-in
+`wordcell percolate <note> --proofs`. Arbitrary structured/textual query input
+and `wordcell ask` are deferred. Search and Git context keep their existing
+Wordcell contracts. The dependency moves from the `v0.2.0` Git pin to the
+verified immutable Oh 0.4.3 release archive. Only the graph adapter imports
+Oh's store, SQLite and projection entry points; the independent pre-existing
+`src/oh-adoption.ts` boundary remains.
+
+The 2026-07 DataScript retirement stands. The actual Oh API supports a store
+and projection directly, so this derived Markdown consumer needs no empty
+canonical memory lane. Canonical/working memory composition is deferred until
+there is a consumer for it. Orphans and concept counts are closed-snapshot
+Wordcell facts, not native negation or aggregation promises.
 
 ## Work
 
@@ -140,3 +146,82 @@ derived by Wordcell or deferred, not native negation or aggregation promises.
 - Release bootstrap and retry boundary tests now read the actual workflow from
   the repository. The release-only focused suite passes eight tests and 68
   assertions. Plan percolation returned no supported new relation candidates.
+
+## Oh integration execution (2026-09-10)
+
+The owner requested the Oh integration after completing the 0.20 rename and
+public release. The integration starts from current main `7a93a21`, retaining
+its shared Paper site theme. The next package version is 0.21.0; the deprecated
+`kb` command alias is removed at the previously announced minor boundary.
+Vault directories, frontmatter, metadata, and `kb://` references keep their
+existing contracts.
+
+The implemented application boundary is `src/graph-authority.ts`, with shared
+Wordcell types in `src/graph-authority-model.ts`. `src/graph-facts.ts` reparses
+source Markdown and binds the full source inventory, configured catalog,
+optional stable document IDs, and vault identity. `src/oh/` owns the exact
+Oh 0.4.3 archive API, record codec, named programs, persistence and proof
+translation. The independent existing `src/oh-adoption.ts` purpose is retained.
+
+Inspection of the actual immutable Oh interface narrowed the initial design:
+its store supports atomic CAS record updates, but its projection is a full
+positive-Datalog evaluation when inputs change. A new canonical/working
+memory authority would add unused policy and a lower record cap. This
+Markdown-only projection therefore uses store, SQLite and projection directly;
+canonical publication and memory authority composition are deferred until
+there is a concrete canonical consumer. It exposes no arbitrary textual query
+or native negation/aggregation promise.
+
+Explicit graph rebuild uses a private staged database, validates replay and
+fresh Markdown identity, then atomically installs a self-ignored
+`.wordcell/oh.sqlite`. Read-only verification uses a bounded in-memory copy,
+not an upstream constructor on the live file. `--fresh` permits a new verified
+cache without trusting damaged history; the old file remains until the new
+one is ready. No query or rebuild writes Markdown. Stable `document_id`
+identities survive renames; missing IDs use clearly distinct path identities.
+No IDs are invented or written into source.
+
+The legacy graph report and percolation V2 result remain unchanged. Named
+queries add source-backed proofs, explicit resource bounds, and truncation
+signals; the SDK shares its existing single snapshot. Optional percolation
+proofs use a separate envelope containing unchanged suggestions and positive
+shared-tag/shared-concept support. Absence, counts, and predicate choice remain
+host or author decisions. Search relevance and existing navigation retain
+their behavior.
+
+### Validation and recovery
+
+Acceptance covers deterministic extraction and order independence, staged
+rebuild versus incremental update parity, rename/delete handling, stale and
+foreign proof rejection, cycles and depth limits, malformed records and
+resource exhaustion, unchanged vault bytes, read-only persisted verification,
+unsafe filesystem identities, and explicit corruption recovery. Packaged
+Bun/npm consumers exercise the new graph commands and exported types.
+
+Focused extraction and CLI/SDK tests passed. Initial adapter tests exposed
+noncanonical record-value ordering in Oh's search projection and rejection of
+shared references in a returned proof result. The adapter canonicalizes values
+before committing and distinguishes shared references from actual cycles.
+The required final gate and independent integration review remain pending.
+
+
+## Result
+
+The Wordcell rename and 0.20.0 publication are complete. The 0.21.0 Oh source
+integration is implemented on `codex/wordcell-oh-integration`; required final
+validation, current-head review, protected publication and public readback are
+still part of delivery. The integration retains Markdown authority and the
+legacy graph/percolation contracts, and removes only the previously announced
+CLI alias at its minor boundary.
+
+## Durable memory
+
+Oh record-value objects must be canonicalized before creation: Oh search-text
+replay follows stored field order. Proof validation must distinguish repeated
+object references from ancestor cycles. Cache verification reads isolated bytes
+and validates the SQLite schema before querying stored relations. Rebuilds
+serialize first-time initialization, bound descriptor size before allocation,
+and preserve uncertain paths if their directory identities change. Shared
+concept support follows authored connections in either direction and excludes
+concept notes from the ordinary-note pair. Selected-note rule filters belong
+early enough to keep common shared-tag queries within their declared budget.

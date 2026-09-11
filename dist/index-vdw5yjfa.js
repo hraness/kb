@@ -1,18 +1,30 @@
 // @bun
 import {
+  UntrustedContentBudgetError,
+  createUntrustedToolResult
+} from "./index-4j3tt0c3.js";
+import {
   expandSearchRequest,
   parseSearchRules,
   prioritizeSearchHits
 } from "./index-adx6khj5.js";
 import {
   openSemanticSearchSession,
-  recommendedEmbeddingModel,
-  scanVault
-} from "./index-n05s3wsb.js";
+  recommendedEmbeddingModel
+} from "./index-115b07ap.js";
 import {
-  UntrustedContentBudgetError,
-  createUntrustedToolResult
-} from "./index-4j3tt0c3.js";
+  percolateWithGraph
+} from "./index-bgfzwt4h.js";
+import {
+  openGraphAuthority
+} from "./index-bcfn9xah.js";
+import {
+  validateGraphPercolationOptions,
+  validateGraphQueryRequest
+} from "./index-11621h23.js";
+import {
+  scanVault
+} from "./index-0k2x4nn9.js";
 import {
   GitHistoryError,
   gitHistoryForNotes,
@@ -210,10 +222,26 @@ async function openKnowledgeBase(options, dependencies = {}) {
   let closePromise;
   let semanticPromise = injectedSemantic === undefined ? undefined : Promise.resolve(injectedSemantic);
   let gitPromise;
+  let graphAuthorityPromise;
+  let graphOperationTail = Promise.resolve();
   const assertOpen = () => {
     if (closeRequested)
       throw new Error("Knowledge-base session is closed.");
   };
+  const withGraphOperation = (operation) => {
+    assertOpen();
+    const pending = graphOperationTail.then(operation);
+    graphOperationTail = pending.then(() => {
+      return;
+    }, () => {
+      return;
+    });
+    return pending;
+  };
+  const withGraphAuthority = (operation) => withGraphOperation(async () => {
+    graphAuthorityPromise ??= (dependencies.openGraphAuthority ?? openGraphAuthority)(snapshot);
+    return operation(await graphAuthorityPromise);
+  });
   const semantic = () => {
     assertOpen();
     semanticPromise ??= (dependencies.openSemanticSearchSession ?? openSemanticSearchSession)({
@@ -542,6 +570,17 @@ async function openKnowledgeBase(options, dependencies = {}) {
       ...linkOptions,
       direction: "in"
     }),
+    graphQuery: async (request) => {
+      assertOpen();
+      const checked = validateGraphQueryRequest(request);
+      return withGraphAuthority((authority) => authority.query(checked));
+    },
+    graphVerifyResult: async (value) => withGraphAuthority((authority) => authority.verifyResult(value)),
+    percolateWithProofs: async (percolateOptions) => {
+      assertOpen();
+      const checked = validateGraphPercolationOptions(percolateOptions);
+      return withGraphOperation(() => (dependencies.percolateWithGraph ?? percolateWithGraph)(snapshot, checked));
+    },
     search,
     history: async (noteIds, historyOptions = {}) => {
       assertOpen();
@@ -563,9 +602,22 @@ async function openKnowledgeBase(options, dependencies = {}) {
       if (closePromise !== undefined)
         return closePromise;
       closeRequested = true;
-      closePromise = semanticPromise === undefined ? Promise.resolve() : semanticPromise.then((session) => session.close(), () => {
-        return;
-      });
+      closePromise = (async () => {
+        const semanticClose = semanticPromise === undefined ? Promise.resolve() : semanticPromise.then((session) => session.close(), () => {
+          return;
+        });
+        const graphClose = graphOperationTail.then(async () => {
+          await graphAuthorityPromise?.then((authority) => authority.close(), () => {
+            return;
+          });
+        });
+        const results = await Promise.allSettled([semanticClose, graphClose]);
+        const errors = results.filter((result) => result.status === "rejected").map((result) => result.reason);
+        if (errors.length === 1)
+          throw errors[0];
+        if (errors.length > 1)
+          throw new AggregateError(errors, "Knowledge-base stores could not close.");
+      })();
       return closePromise;
     }
   };

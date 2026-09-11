@@ -5,14 +5,14 @@ import {
   MAX_SEARCH_RESULTS,
   openKnowledgeBase,
   validateKnowledgeBaseSearchHistory
-} from "./index-m7et4rz4.js";
+} from "./index-vdw5yjfa.js";
 import {
   expandSearchRequest,
   parseSearchRules
 } from "./index-adx6khj5.js";
 import {
   scanVault
-} from "./index-n05s3wsb.js";
+} from "./index-0k2x4nn9.js";
 import {
   indexGitHistory
 } from "./index-1gwbassd.js";

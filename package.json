@@ -1,6 +1,6 @@
 {
   "name": "@hraness/wordcell",
-  "version": "0.20.0",
+  "version": "0.21.0",
   "description": "A knowledge base for coding agents, built from Markdown, backlinks, semantic search, and Git context.",
   "license": "MIT",
   "type": "module",
@@ -261,11 +261,18 @@
     "./workflows/plan-radar": {
       "types": "./src/workflows/plan-radar.ts",
       "import": "./dist/workflows/plan-radar.js"
+    },
+    "./graph-authority": {
+      "types": "./src/graph-authority.ts",
+      "import": "./dist/graph-authority.js"
+    },
+    "./graph-percolation": {
+      "types": "./src/graph-percolation.ts",
+      "import": "./dist/graph-percolation.js"
     }
   },
   "bin": {
     "wordcell": "./dist/cli.js",
-    "kb": "./dist/kb-alias.js",
     "wordcell-evaluation-builder": "./dist/evaluation-builder.js"
   },
   "main": "./dist/index.js",
@@ -285,7 +292,6 @@
     "src/url-intelligence.ts",
     "src/cli.ts",
     "src/cli-program.ts",
-    "src/kb-alias.ts",
     "src/clip/acquire.ts",
     "src/clip/archive-today.ts",
     "src/clip/args.ts",
@@ -378,14 +384,26 @@
     "src/workflows/plan-radar.ts",
     "skills/wordcell",
     "README.md",
-    "LICENSE"
+    "LICENSE",
+    "src/graph-authority.ts",
+    "src/graph-authority-model.ts",
+    "src/graph-cache-filesystem.ts",
+    "src/graph-facts.ts",
+    "src/graph-query.ts",
+    "src/graph-cli.ts",
+    "src/graph-percolation.ts",
+    "src/oh/authority.ts",
+    "src/oh/programs.ts",
+    "src/oh/schema.ts",
+    "src/oh/snapshot.ts",
+    "src/oh/validation.ts"
   ],
   "scripts": {
     "kb:refresh": "bunx --bun github:hraness/kb#v0.15.1 refresh --root kb",
     "kb:check:lane": "bunx --bun github:hraness/kb#v0.15.1 check --root kb --no-catalog",
     "kb:check": "bunx --bun github:hraness/kb#v0.15.1 check --root kb && bunx --bun github:hraness/kb#v0.15.1 agents check --root kb --repo .",
     "kb:catalog": "bunx --bun github:hraness/kb#v0.15.1 catalog --root kb",
-    "build": "bun -e 'await (await import(\"node:fs/promises\")).rm(\"./dist\", { recursive: true, force: true })' && bun build ./src/index.ts ./src/agent-context.ts ./src/agent-guide-audit.ts ./src/attachments.ts ./src/authoring.ts ./src/benchmark.ts ./src/clip/browser-profiles.ts ./src/capture.ts ./src/cli.ts ./src/kb-alias.ts ./src/clip/acquire.ts ./src/clip/args.ts ./src/clip/bounded-byte-buffer.ts ./src/clip/bundle-reader.ts ./src/clip/cli.ts ./src/clip/cookies.ts ./src/clip/doctor.ts ./src/clip/jobs.ts ./src/clip/network.ts ./src/clip/network-proxy.ts ./src/clip/persist.ts ./src/clip/refresh.ts ./src/clip/terminal.ts ./src/evaluation.ts ./src/evaluation-builder.ts ./src/evaluation-kb.ts ./src/git.ts ./src/graph.ts ./src/navigation.ts ./src/pdf.ts ./src/percolate.ts ./src/portfolio.ts ./src/query.ts ./src/repository-memory.ts ./src/sdk.ts ./src/search.ts ./src/search-rules.ts ./src/semantic.ts ./src/source-inbox.ts ./src/untrusted-content.ts ./src/url-intelligence.ts ./src/workflow.ts ./src/workflows/index.ts ./src/workflows/decision-context.ts ./src/workflows/explain-change.ts ./src/workflows/plan-radar.ts ./src/clip/defuddle-worker.ts --outdir ./dist --root ./src --target bun --format esm --splitting --packages external",
+    "build": "bun -e 'await (await import(\"node:fs/promises\")).rm(\"./dist\", { recursive: true, force: true })' && bun build ./src/index.ts ./src/agent-context.ts ./src/agent-guide-audit.ts ./src/attachments.ts ./src/authoring.ts ./src/benchmark.ts ./src/clip/browser-profiles.ts ./src/capture.ts ./src/cli.ts ./src/clip/acquire.ts ./src/clip/args.ts ./src/clip/bounded-byte-buffer.ts ./src/clip/bundle-reader.ts ./src/clip/cli.ts ./src/clip/cookies.ts ./src/clip/doctor.ts ./src/clip/jobs.ts ./src/clip/network.ts ./src/clip/network-proxy.ts ./src/clip/persist.ts ./src/clip/refresh.ts ./src/clip/terminal.ts ./src/evaluation.ts ./src/evaluation-builder.ts ./src/evaluation-kb.ts ./src/git.ts ./src/graph.ts ./src/graph-percolation.ts ./src/graph-authority.ts ./src/navigation.ts ./src/pdf.ts ./src/percolate.ts ./src/portfolio.ts ./src/query.ts ./src/repository-memory.ts ./src/sdk.ts ./src/search.ts ./src/search-rules.ts ./src/semantic.ts ./src/source-inbox.ts ./src/untrusted-content.ts ./src/url-intelligence.ts ./src/workflow.ts ./src/workflows/index.ts ./src/workflows/decision-context.ts ./src/workflows/explain-change.ts ./src/workflows/plan-radar.ts ./src/clip/defuddle-worker.ts --outdir ./dist --root ./src --target bun --format esm --splitting --packages external",
     "check:workflows": "bun ./scripts/check-workflow-yaml.ts",
     "check:installed-command-docs": "bun ./scripts/check-installed-command-docs.ts",
     "check:portfolio-inventory": "bun ./scripts/check-portfolio-inventory.ts",
@@ -400,7 +418,7 @@
     "check:effect": "bun run scripts/check-effect-policy.ts && bun test ./scripts/check-effect-architecture.test.ts"
   },
   "dependencies": {
-    "@hraness/oh": "github:hraness/oh#v0.2.0",
+    "@hraness/oh": "https://github.com/hraness/oh/releases/download/v0.4.3/hraness-oh-0.4.3.tgz",
     "@steipete/sweet-cookie": "0.4.3",
     "@tobilu/qmd": "git+https://github.com/hraness/qmd.git#aa993dceb3ef8cfb71d470554ca437570f5a2b3c",
     "agent-browser": "0.32.3",

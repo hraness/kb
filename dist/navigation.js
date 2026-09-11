@@ -5,6 +5,7 @@ import {
   NavigationBudgetError,
   navigateLinks
 } from "./index-d13v9ckt.js";
+import"./index-z1w83f81.js";
 export {
   navigateLinks,
   NavigationBudgetError,

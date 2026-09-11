@@ -18,6 +18,7 @@ import {
   validateGitHistoryForNotesRequest,
   validateSearchGitHistoryOptions
 } from "./index-1gwbassd.js";
+import"./index-z1w83f81.js";
 export {
   validateSearchGitHistoryOptions,
   validateGitHistoryForNotesRequest,

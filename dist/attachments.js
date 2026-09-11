@@ -8,6 +8,7 @@ import {
   validateAttachmentReferences,
   validateMarkdownAttachments
 } from "./index-x3fthpsc.js";
+import"./index-z1w83f81.js";
 export {
   validateMarkdownAttachments,
   validateAttachmentReferences,

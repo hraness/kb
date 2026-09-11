@@ -174,3 +174,7 @@ authored-catalog vault, refresh and check leave the front door untouched, while
 `wordcell catalog --root "$KB_ROOT"` renders an exhaustive disposable inventory.
 Resolve same-note Git conflicts from the prose and evidence; do not accept one
 side's frontmatter mechanically.
+
+## Inspect positive graph proofs
+
+Use `wordcell percolate <note> --proofs --root "$KB_ROOT" --json` when you need shared-tag and shared-concept proof trees. This explicit envelope keeps existing V2 candidates under `suggestions` and separate bounded query results under `positiveSupport`. Absence and counts remain Wordcell decisions; choosing a predicate and writing a relationship remain author decisions. Inspect all truncation markers and read the cited Markdown before editing.

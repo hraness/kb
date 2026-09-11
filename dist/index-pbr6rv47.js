@@ -2,10 +2,10 @@
 import {
   MAX_SEARCH_RESULTS,
   openKnowledgeBase
-} from "./index-m7et4rz4.js";
+} from "./index-vdw5yjfa.js";
 import {
   scanVault
-} from "./index-n05s3wsb.js";
+} from "./index-0k2x4nn9.js";
 import {
   runGitCommand
 } from "./index-1gwbassd.js";
