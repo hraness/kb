@@ -72,7 +72,7 @@ describe("Wordcell site source contract", () => {
     const globals = await read("app/globals.css");
     expect(globals).toContain('@import "@hraness/design-kit/fonts.css"');
     expect(globals).toContain('@import "@hraness/design-kit/product-marketing.css"');
-    expect(globals).toContain('--font-text: "Nebula Sans"');
+    expect(globals).toContain('@import "../vendor/paper-theme/paper-theme.css"');
     expect(globals).not.toMatch(/Georgia|Times New Roman/u);
   });
 

@@ -1,0 +1,19 @@
+{
+  "schemaVersion": 1,
+  "contractVersion": 1,
+  "source": {
+    "repository": "https://github.com/hraness/design-kit",
+    "commit": "4c2c84b35f8e55b787a24f408d5b54579adf54ec",
+    "export": "@hraness/design-kit/paper-theme.css"
+  },
+  "files": {
+    "paper-theme.css": {
+      "path": "src/paper-theme.css",
+      "sha256": "b2747ecb73ba38a5af6cb2fdffc1f4a8fddb4b742df999348ea9e420316ed322"
+    },
+    "LICENSE": {
+      "path": "LICENSE",
+      "sha256": "763eaf6783097cac7303f10321b33ffc6a88c35845ba1e592b6a750e4568c5e0"
+    }
+  }
+}
