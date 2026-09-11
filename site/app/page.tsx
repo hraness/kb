@@ -152,13 +152,14 @@ export default function Home() {
       <main id="main" tabIndex={-1}>
         <MarketingPage>
           <ProductHero
+            align="start"
             actions={[
               { href: "#install", label: "Install Wordcell" },
               { href: "/docs", label: "Read the docs" },
             ]}
             boundary={footnote}
             className="wordcell-marketing-hero"
-            eyebrow="A knowledge base for coding agents"
+            eyebrow=""
             frame={(
               <MarketingProofFrame
                 caption="Example commands: record a constraint, inspect repository context, and recover its backlinks and history."

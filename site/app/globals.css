@@ -2,40 +2,13 @@
 @import "@hraness/design-kit/fonts.css";
 @import "@hraness/design-kit/product-marketing.css";
 
-/* Product palette. Light is the default; dark mirrors every token. The
- * marketing grammar reads these through the bindings below. */
+@import "../vendor/paper-theme/paper-theme.css";
+
 :root {
-  color-scheme: light dark;
-  --background: #f7f8fa;
-  --surface: #ffffff;
-  --foreground: #16201a;
-  --muted: #5d6963;
-  --line: rgba(22, 32, 26, 0.12);
   --inverse-background: #14202a;
-  --inverse-foreground: #eef2ea;
-  --inverse: var(--inverse-background);
-  --font-text: "Nebula Sans", ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
-  --font-heading: var(--font-text);
-  --font-mono: ui-monospace, SFMono-Regular, Menlo, monospace;
-  --hraness-site-accent: #1f5a72;
-  --hraness-site-accent-ink: #ffffff;
-  font-family: var(--font-text);
+  --wordcell-code-foreground: #eef2ea;
   font-synthesis: none;
   line-height: 1.55;
-}
-
-@media (prefers-color-scheme: dark) {
-  :root {
-    --background: #121619;
-    --surface: #1a2026;
-    --foreground: #e8ece7;
-    --muted: #a6b0a9;
-    --line: rgba(232, 236, 231, 0.14);
-    --inverse-background: #0b1511;
-    --inverse-foreground: #edf2ee;
-    --hraness-site-accent: #8ec9e0;
-    --hraness-site-accent-ink: #0a2230;
-  }
 }
 
 * {
@@ -68,18 +41,18 @@ a:focus-visible {
   outline-offset: 3px;
 }
 
-/* Marketing grammar bindings. The palette above is the source of truth. */
+/* Product content keeps the shared marketing grammar and fixed code paint. */
 :where(.hraness-marketing-page, .hraness-marketing-header) {
   --hraness-marketing-ink: var(--foreground);
   --hraness-marketing-muted: var(--muted);
   --hraness-marketing-background: var(--background);
   --hraness-marketing-surface: var(--surface);
   --hraness-marketing-inverse: var(--inverse-background);
-  --hraness-marketing-inverse-ink: var(--inverse-foreground);
+  --hraness-marketing-inverse-ink: var(--wordcell-code-foreground);
   --hraness-marketing-text-font: var(--font-text);
   --hraness-marketing-heading-font: var(--font-text);
   --hraness-marketing-mono-font: var(--font-mono);
-  --hraness-marketing-measure: 72rem;
+
 }
 
 .brand-mark {
@@ -93,7 +66,7 @@ a:focus-visible {
 .wordcell-marketing-hero .hraness-marketing-hero__copy { gap: 1rem; }
 .wordcell-marketing-hero .hraness-marketing-hero__heading {
   max-inline-size: 22ch;
-  font-size: clamp(2.3rem, 4.5vw, 3.5rem);
+  font-size: var(--hraness-paper-heading-size);
 }
 
 .hraness-marketing-stats {
@@ -181,7 +154,7 @@ a:focus-visible {
 
 .ask-ai,
 .site-footer {
-  inline-size: min(100%, 72rem);
+  inline-size: min(100%, var(--hraness-marketing-measure));
   margin-inline: auto;
   padding-inline: clamp(1.25rem, 4vw, 3rem);
 }
@@ -316,8 +289,8 @@ a { text-underline-offset: 0.2em; }
 .document-page th, .document-page td { border-bottom: 1px solid var(--line); padding: 0.5rem 0.6rem; text-align: left; vertical-align: top; }
 .document-nav { display: flex; flex-wrap: wrap; gap: 1rem; margin-bottom: 1.5rem; font-size: 0.95rem; }
 
-.document-page h1 { margin: 1.75rem 0 1rem; font-size: clamp(2.25rem, 6vw, 3.25rem); font-weight: 600; }
-.document-page h2 { font-size: 1.65rem; font-weight: 600; margin-bottom: 1rem; }
+.document-page h1 { margin: 1.75rem 0 1rem; font-size: var(--hraness-paper-heading-size); font-weight: 600; }
+.document-page h2 { font-size: var(--hraness-paper-section-heading-size); font-weight: 600; margin-bottom: 1rem; }
 .document-page h3 { font-size: 1.25rem; font-weight: 600; margin: 1.75rem 0 0.75rem; }
 .document-page p { margin: 1rem 0; }
 .document-page pre { margin: 1.25rem 0; }
@@ -325,3 +298,24 @@ a { text-underline-offset: 0.2em; }
 .document-page article ul { list-style: disc; padding-left: 1.5rem; margin: 1rem 0; }
 .document-page article ol { list-style: decimal; padding-left: 1.5rem; margin: 1rem 0; }
 .document-page article li + li { margin-top: 0.5rem; }
+
+.wordcell-marketing-hero .hraness-marketing-hero__eyebrow:empty { display: none; }
+.wordcell-marketing-hero .hraness-marketing-hero__heading {
+  font-weight: var(--hraness-marketing-heading-weight);
+  line-height: var(--hraness-paper-heading-leading);
+  letter-spacing: var(--hraness-paper-heading-tracking);
+}
+.wordcell-marketing-hero .hraness-marketing-hero__summary {
+  font-size: var(--hraness-paper-summary-size);
+  line-height: 1.6;
+}
+[data-hraness-theme="paper"] .hraness-marketing-page h2 {
+  font-size: var(--hraness-paper-section-heading-size);
+  line-height: 1.2;
+  letter-spacing: -.025em;
+}
+[data-hraness-theme="paper"] .hraness-marketing-proof-frame {
+  --hraness-marketing-inverse: var(--inverse-background);
+  --hraness-marketing-inverse-ink: var(--wordcell-code-foreground);
+  box-shadow: none;
+}
