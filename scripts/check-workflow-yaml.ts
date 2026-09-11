@@ -361,7 +361,7 @@ export function validateReleaseWorkflow(source: string, label: string): void {
   if (containsUnexpectedProviderInvocation(publicationCommands)) throw new Error(`${label} contains an unexpected provider mutation command outside its reviewed helper`);
   validateNpmPublicationJobs(publishNpm, admitNpm, label);
   if ((source.match(/id-token: write/gu) ?? []).length !== 2) throw new Error(`${label} must grant OIDC only to the attestation and npm publication jobs`);
-  validateReviewedWorkflowSemantics(workflow, "6c8aae13c95c77118cbf9e18ca211a64a4ef501ef2060e691fcf0383519f4682", label);
+  validateReviewedWorkflowSemantics(workflow, "fb971c88f8120f4ba130153be1be7ecc8beeafd5594c3aabf493ba84ee2bb436", label);
 }
 
 function validateNpmPublicationJobs(
@@ -433,6 +433,9 @@ function validateNpmPublicationJobs(
   if (admissionCheckout.ref !== "${{ needs.verify.outputs.workflow_sha }}" || admissionCheckout["persist-credentials"] !== false) {
     throw new Error(`${label} npm admission must check out the exact reviewed verifier closure without credentials`);
   }
+  if (JSON.stringify(admissionSteps[5]?.env) !== JSON.stringify({ GH_TOKEN: "${{ github.token }}" })) {
+    throw new Error(`${label} npm admission requires its read-only GitHub token at the verification step`);
+  }
   const admissionCommands = joinedCommands(admissionSteps);
   for (const expected of ["bun run ./scripts/npm-package-identity.ts", "npm audit signatures --json --include-attestations", "bun run ./scripts/npm-release-attestation.ts", '--expected-source-sha "$VERIFIED_SOURCE_SHA"']) {
     if (!admissionCommands.includes(expected)) throw new Error(`${label} npm admission must verify registry bytes, signatures, and provenance against the canonical asset`);
@@ -440,11 +443,45 @@ function validateNpmPublicationJobs(
   if (containsUnexpectedProviderInvocation(admissionCommands)) throw new Error(`${label} npm admission contains an unexpected provider mutation command`);
 }
 
+export function validateAdmissionRecoveryWorkflow(source: string, label: string): void {
+  const workflow = workflowRecord(source, label);
+  if (JSON.stringify(workflow.on) !== JSON.stringify({ workflow_dispatch: null })
+    || JSON.stringify(workflow.permissions) !== "{}") throw new Error(`${label} recovery must be input-free dispatch with no default permissions`);
+  const jobs = record(workflow.jobs, `${label} jobs`);
+  if (JSON.stringify(Object.keys(jobs)) !== JSON.stringify(["admit"])) throw new Error(`${label} recovery has unexpected jobs`);
+  const job = record(jobs.admit, `${label} admission`);
+  if (JSON.stringify(job.permissions) !== JSON.stringify({ actions: "read", contents: "read" }) || job.environment !== undefined) {
+    throw new Error(`${label} recovery must have only read permissions and no environment`);
+  }
+  const steps = jobSteps(job, label);
+  validateExactStepSequence(steps, [
+    { kind: "run", name: "Authorize owner recovery on current main before checkout" },
+    { kind: "uses", uses: "actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0" },
+    { kind: "uses", uses: "actions/setup-node@820762786026740c76f36085b0efc47a31fe5020" },
+    { kind: "uses", uses: "oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6" },
+    { kind: "run", name: "Pin npm" }, { kind: "run" },
+    { kind: "run", name: "Admit the original canonical and npm bytes without publication" },
+  ], label);
+  const checkout = record(steps[1]?.with, `${label} checkout`);
+  if (checkout.ref !== "${{ github.sha }}" || checkout["persist-credentials"] !== false) throw new Error(`${label} must check out the authorized immutable verifier source`);
+  for (const index of [0, 6]) {
+    if (JSON.stringify(steps[index]?.env) !== JSON.stringify({ GH_TOKEN: "${{ github.token }}" })) throw new Error(`${label} requires step-only read tokens`);
+  }
+  if (steps[6]?.run !== "bun run scripts/npm-admission-recovery.ts" || containsUnexpectedProviderInvocation(joinedCommands(steps))) {
+    throw new Error(`${label} recovery cannot publish or mutate a provider`);
+  }
+  validateReviewedWorkflowSemantics(workflow, "a2057a204712ec548c88a4e810596ee4a975035de51ae9de89cd9ef098d0c918", label);
+}
+
 if (import.meta.main) {
   const repositoryRoot = resolve(import.meta.dir, "..");
   validateWorkflowYaml(
     await readFile(resolve(repositoryRoot, ".github/workflows/ci.yml"), "utf8"),
     ".github/workflows/ci.yml",
+  );
+  validateAdmissionRecoveryWorkflow(
+    await readFile(resolve(repositoryRoot, ".github/workflows/admit-published.yml"), "utf8"),
+    ".github/workflows/admit-published.yml",
   );
   validateReleaseWorkflow(
     await readFile(resolve(repositoryRoot, ".github/workflows/release.yml"), "utf8"),

@@ -114,7 +114,16 @@ The verifier binds release metadata, the annotated tag, packing receipt,
 archive SHA-256/SHA-512, exact checksum file, complete asset inventory, and
 signed provenance. It invokes `gh attestation verify` with exact repository,
 signer workflow, signer digest, source digest, source ref, hosted-runner
-restriction, and the downloaded bundle. Run the installed-package smoke on
+restriction, and the downloaded bundle. Both the original signed attempt and
+the latest effective job inventory must contain the exact six release jobs,
+with authorization, source verification, attestation, and canonical publication
+completed successfully. An overall failed run is accepted only when its failure
+is explained by the two known npm jobs. A failed canonical rerun, incomplete or
+duplicate inventory, changed owner/source, or an active new attempt stops
+verification. Provider-assigned job IDs may change on a failed-only retry;
+the signed receipt's original run and attempt never change.
+
+Run the installed-package smoke on
 that downloaded archive and packing receipt before reporting release success.
 
 End users can install a published version directly with Bun or npm using its
@@ -169,6 +178,38 @@ If `publish_npm` fails after the GitHub Release exists, inspect the exact
 registry state, then re-run the failed jobs of the same workflow run. The
 artifact-by-ID download and the idempotent registry check make that retry
 safe. Never re-push the tag or create another release.
+
+## Recover the published 0.20.0 admission
+
+Release run [34540823193](https://github.com/hraness/wordcell/actions/runs/34540823193)
+attempt 1 published the immutable canonical release and its exact npm mirror,
+then admission stopped because the GitHub CLI had no `GH_TOKEN`. The protected
+tag and published bytes remain unchanged. Future tag admissions pass the
+existing read-only GitHub token only to their verification step.
+
+After this repair is reviewed, merged, and checked on current `main`, the owner
+may dispatch **Admit published Wordcell 0.20.0** (`admit-published.yml`) on
+`main`. This input-free recovery holds only `actions: read` and `contents: read`;
+it has no environment, OIDC permission, signing step, or provider mutation.
+It verifies owner/event/run/workflow authority and fresh main before checkout,
+before admission, and before reporting the result.
+
+The recovery accepts only source
+`a3b44090b38aa22228e26b4be8e7727232b3ff17`, original run `34540823193`
+attempt `1`, archive SHA-256
+`5a3c61436d9d87ea90409e19ae8ad1511d2a5dc3f5c9a529037eb6fd49ce017a`,
+and the pinned SHA-512 integrity in `scripts/npm-admission-recovery.ts`.
+It verifies all canonical assets and hosted-run certificates, checks immutable
+GitHub Latest, compares registry bytes exactly, installs with lifecycle scripts
+disabled, and verifies npm signatures plus publish and SLSA attestations.
+The npm provenance must identify the original tag source, run, and attempt;
+the recovery workflow is solely new read-only verification evidence.
+
+Record the successful recovery run separately. The original failed run remains
+failed; never move its tag, republish a version, forge its check result, or
+relabel its provenance. A site publication datum can use the successful recovery
+run only after it completes. No recovery result is claimed merely by merging
+this workflow.
 
 ## Configure trusted publishing
 
