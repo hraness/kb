@@ -143,6 +143,7 @@ export default function Home() {
       />
       <a className="skip-link" href="#main">Skip to content</a>
       <MarketingSiteHeader
+        className="hraness-material-chrome"
         action={{ href: "#install", label: "Install Wordcell" }}
         brand={<><BrandMark />Wordcell</>}
         brandLabel="Wordcell home"
@@ -151,7 +152,7 @@ export default function Home() {
 
       <main id="main" tabIndex={-1}>
         <MarketingPage>
-          <div className="hraness-marketing-field">
+          <div className="hraness-material-wall">
           <ProductHero
             align="start"
             actions={[
@@ -163,6 +164,7 @@ export default function Home() {
             eyebrow=""
             frame={(
               <MarketingProofFrame
+                className="hraness-material-pane"
                 caption="Example commands: record a constraint, inspect repository context, and recover its backlinks and history."
                 credit="From the README"
                 title="Keep one decision available to the next session"
