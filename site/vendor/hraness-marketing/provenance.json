@@ -1,0 +1,51 @@
+{
+  "schemaVersion": 1,
+  "contractVersion": 1,
+  "source": {
+    "repository": "https://github.com/hraness/design-kit",
+    "commit": "898d80364085a41c858350f1b492ac28b5a0384b",
+    "export": "@hraness/design-kit/product-marketing-preset.css"
+  },
+  "files": {
+    "product-marketing-preset.css": {
+      "path": "src/product-marketing-preset.css",
+      "sha256": "e1474dbfa5dcb17e840ecd48e2b767e88e808a1f6124cd9bb8fe720e1076a4a7"
+    },
+    "fonts/instrument-serif/instrument-serif-latin-400.woff2": {
+      "path": "src/fonts/instrument-serif/instrument-serif-latin-400.woff2",
+      "sha256": "60c06664b5a95c7de6cc3e00d1f9034d78bd1e40b564016b241674449a067d4d"
+    },
+    "fonts/instrument-serif/OFL.txt": {
+      "path": "src/fonts/instrument-serif/OFL.txt",
+      "sha256": "129ed7618959716959f2941fdd5b49e0ad6e6c1d78726761786a00253d865521"
+    },
+    "fonts/instrument-serif/UPSTREAM.md": {
+      "path": "src/fonts/instrument-serif/UPSTREAM.md",
+      "sha256": "f7535d814724c4f839765450c2885d6dd6bf9a7658d24796261b13455ab36288"
+    },
+    "marketing-assets/grain.svg": {
+      "path": "src/marketing-assets/grain.svg",
+      "sha256": "b40c33a0e382c8e9d0518b4720321b5c262a929c28d40a190a902d07acd06553"
+    },
+    "marketing-assets/cells.svg": {
+      "path": "src/marketing-assets/cells.svg",
+      "sha256": "dc687b71a46c4767f052a0546485f6621b5f4c8f4003127807521e02a3c92d4c"
+    },
+    "marketing-assets/UPSTREAM.md": {
+      "path": "src/marketing-assets/UPSTREAM.md",
+      "sha256": "13801c388ac902a621c00f85a762bd670c7019e7c82ff43859ae033ebe07d583"
+    },
+    "check.mjs": {
+      "path": "scripts/check-marketing-snapshot.mjs",
+      "sha256": "55b0847790e5561dca1f25f62f7e4719786dce93264ead325e17a1f381c25bce"
+    },
+    "check.d.mts": {
+      "path": "scripts/check-marketing-snapshot.d.mts",
+      "sha256": "1f9d8474ee6b37f826ddbd843253e5d04e8b2eb96876b99cb50de1e91ebdf636"
+    },
+    "LICENSE": {
+      "path": "LICENSE",
+      "sha256": "763eaf6783097cac7303f10321b33ffc6a88c35845ba1e592b6a750e4568c5e0"
+    }
+  }
+}

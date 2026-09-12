@@ -136,7 +136,7 @@ export default function Home() {
   ];
 
   return (
-    <>
+    <div data-hraness-marketing-preset="editorial">
       <script
         dangerouslySetInnerHTML={{ __html: JSON.stringify(structuredData) }}
         type="application/ld+json"
@@ -151,6 +151,7 @@ export default function Home() {
 
       <main id="main" tabIndex={-1}>
         <MarketingPage>
+          <div className="hraness-marketing-field">
           <ProductHero
             align="start"
             actions={[
@@ -177,16 +178,17 @@ $ wordcell history notes/parser-contract --root kb --repo .`}</code></pre>
             )}
             heading={heading}
             headingId="hero-title"
-            name={readmeTitle}
+            name=""
             summary={readmeLead}
           />
+          </div>
 
           <MarketingPrimitives
             heading="Plain files, derived views."
             headingId="model-title"
             id="model"
             items={primitives.map((primitive) => ({ label: primitive.label, summary: primitive.summary }))}
-            label="The model"
+            label=""
             summary="A vault is Markdown under version control. Wordcell adds the write path and the bounded read paths an agent needs, and keeps every index replaceable."
           />
 
@@ -224,7 +226,7 @@ const hits = await session.search({ query: "parser contract", mode: "exact" });`
                 ),
               },
             ]}
-            label="Interfaces"
+            label=""
             summary="The CLI, the SDK, and the packaged skill read and write the same files. There is no agent-only path behind the convenient one."
           />
 
@@ -232,7 +234,7 @@ const hits = await session.search({ query: "parser contract", mode: "exact" });`
             heading="What Wordcell will not do."
             headingId="boundary-title"
             id="boundary"
-            label="Boundaries"
+            label=""
             summary="Wordcell derives views from your files and refuses to become a second source of truth."
           >
             <MarketingTrustBoundary
@@ -240,17 +242,18 @@ const hits = await session.search({ query: "parser contract", mode: "exact" });`
               headingId="kernel-title"
               id="kernel"
               items={trust}
-              label="Guarantees"
+              label=""
               summary="These rules are enforced by the command surface and its tests, not by convention."
             />
           </MarketingSection>
 
           <MarketingInstallPanel
-            eyebrow={releaseVersion === undefined ? "First Wordcell release in preparation" : `Current verified release · v${releaseVersion}`}
+            eyebrow=""
             heading="Install and start a vault."
             headingId="install-title"
             id="install"
           >
+            <p className="install-note">{releaseVersion === undefined ? "First Wordcell release in preparation" : `Current verified release · v${releaseVersion}`}</p>
             {publishedRelease !== null && archiveUrl !== null ? (
               <>
                 <pre className="install-command" tabIndex={0}><code>{`bun add --global --ignore-scripts ${archiveUrl}
@@ -277,7 +280,7 @@ wordcell check --root kb`}</code></pre>
             heading="Before you install."
             headingId="questions-title"
             id="questions"
-            label="Questions"
+            label=""
             questions={questions.map(({ answer, question }) => ({
               answer: <p>{answer}</p>,
               question,
@@ -288,7 +291,7 @@ wordcell check --root kb`}</code></pre>
             heading="Built by Ben Guo"
             headingId="maker-title"
             id="maker"
-            label="The maker"
+            label=""
             links={[
               { href: "https://hraness.com", label: "hraness.com" },
               { href: "https://x.com/hraness", label: "@hraness" },
@@ -325,6 +328,6 @@ wordcell check --root kb`}</code></pre>
           <a href="https://hraness.com/projects">Hraness projects</a>
         </nav>
       </footer>
-    </>
+    </div>
   );
 }

@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import { createHash } from "node:crypto";
 import { readFile } from "node:fs/promises";
+import { checkMarketingSnapshot } from "../vendor/hraness-marketing/check.mjs";
 
 // Offline integrity only: upgrades use the reviewed source's snapshot installer.
 const directories = ["vendor/paper-theme"];
@@ -23,3 +24,5 @@ for (const relative of directories) {
   }
 }
 console.log("Paper theme snapshots verified.");
+await checkMarketingSnapshot();
+console.log("Marketing snapshot verified.");
