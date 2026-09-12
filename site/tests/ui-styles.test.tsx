@@ -80,3 +80,52 @@ describe("shared Ask AI stylesheet delivery", () => {
     expect(globals).not.toContain(".hraness-ask-ai-about-this__");
   });
 });
+
+
+test("delivers material chrome and reduced-transparency fallback through the existing CSS compiler", async () => {
+  const { root } = await compiled;
+  const header = new Map<string, string>();
+  let reducedTransparency = false;
+  let forcedPlane = false;
+  root.walkRules(rule => {
+    if (rule.selector === '[data-hraness-material="lantern"] .hraness-marketing-header.hraness-material-chrome') {
+      rule.walkDecls(declaration => { header.set(declaration.prop, declaration.value.replaceAll(/\s/gu, "")); });
+    }
+    const parent = rule.parent;
+    if (parent?.type === "atrule" && parent.name === "media") {
+      if (parent.params.includes("prefers-reduced-transparency") && rule.selector.includes("hraness-material-chrome")) {
+        rule.walkDecls("--hraness-material-chrome-blur", declaration => { if (declaration.value === "none") reducedTransparency = true; });
+      }
+      if (parent.params.includes("forced-colors") && rule.selector === '[data-hraness-material="lantern"]') {
+        rule.walkDecls("--hraness-material-plane", declaration => { if (declaration.value === "Canvas") forcedPlane = true; });
+      }
+    }
+  });
+  expect(header.get("backdrop-filter")).toBe("var(--hraness-material-chrome-blur,none)");
+  expect(header.get("-webkit-backdrop-filter")).toBe("var(--hraness-material-chrome-blur,none)");
+  expect(header.get("background")).toBe("var(--hraness-material-chrome-paint,var(--hraness-material-plane))");
+  expect(reducedTransparency).toBe(true);
+  expect(forcedPlane).toBe(true);
+});
+
+test("keeps wrapped phone navigation in flow while preserving desktop sticky chrome", async () => {
+  const { root } = await compiled;
+  let desktopSticky = false;
+  const phoneOverrides: Rule[] = [];
+  root.walkRules(rule => {
+    if (rule.selector === ".hraness-marketing-header") {
+      rule.walkDecls("position", declaration => { if (declaration.value === "sticky") desktopSticky = true; });
+    }
+    if (rule.selector === '[data-hraness-material="lantern"] .hraness-marketing-header.hraness-material-chrome') {
+      rule.walkDecls("position", declaration => { if (declaration.value === "static") phoneOverrides.push(rule); });
+    }
+  });
+  expect(desktopSticky).toBe(true);
+  expect(phoneOverrides).toHaveLength(1);
+  const parent = phoneOverrides[0]!.parent;
+  expect(parent?.type).toBe("atrule");
+  if (parent?.type !== "atrule") throw new Error("Phone chrome override must be scoped by a media query");
+  expect(parent.name).toBe("media");
+  expect(parent.params.replaceAll(/\s/gu, "")).toBe("(max-width:48rem)");
+  expect(phoneOverrides[0]!.nodes.filter(node => node.type === "decl").map(node => [node.prop, node.value])).toEqual([["position", "static"]]);
+});

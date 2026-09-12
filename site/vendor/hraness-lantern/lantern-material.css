@@ -1,0 +1,162 @@
+/* Lantern is an opt-in material, independent of palette and typography.
+ * All paint is deterministic CSS. No texture is placed over meaningful content. */
+@layer base {
+  [data-hraness-material="lantern"] {
+    --hraness-material-module: 4rem;
+    --hraness-material-warm: #d49a54;
+    --hraness-material-cool: #8d9fc5;
+    --hraness-material-plane: var(--surface, var(--ui-background, Canvas));
+    --hraness-material-ink: var(--foreground, var(--ui-foreground, CanvasText));
+    --hraness-material-muted: var(--muted, var(--ui-muted-foreground, CanvasText));
+    --hraness-material-seam: color-mix(in oklch, var(--hraness-material-ink) 16%, var(--hraness-material-plane));
+    --hraness-material-edge: color-mix(in oklch, white 28%, transparent);
+    --hraness-material-shade: color-mix(in oklch, black 14%, transparent);
+    --hraness-material-warm-plane: color-mix(in oklch, var(--hraness-material-warm) 12%, var(--hraness-material-plane));
+    --hraness-material-inset: inset 0 1px 3px color-mix(in oklch, black 9%, transparent);
+    --hraness-material-lift: inset 0 1px 0 var(--hraness-material-edge), 0 2px 4px color-mix(in oklch, black 7%, transparent), 0 12px 32px color-mix(in oklch, black 5%, transparent);
+    --hraness-material-focus: var(--focus, var(--ui-ring, Highlight));
+    --hraness-material-duration: 160ms;
+  }
+}
+
+@layer components.hraness-design-kit.legacy {
+  /* A quiet, opaque reading plane. The seam belongs to the surface perimeter. */
+  :where([data-hraness-material="lantern"], [data-hraness-material="lantern"] *):is(.hraness-material-pane) {
+    background-color: var(--hraness-material-plane);
+    border: 1px solid var(--hraness-material-seam);
+    border-radius: var(--radius-lg, 0.75rem);
+    color: var(--hraness-material-ink);
+    min-inline-size: 0;
+  }
+  :where([data-hraness-material="lantern"], [data-hraness-material="lantern"] *):is(.hraness-material-pane[data-depth="raised"]) {
+    box-shadow: var(--hraness-material-lift);
+  }
+  :where([data-hraness-material="lantern"], [data-hraness-material="lantern"] *):is(.hraness-material-pane[data-depth="inset"]) {
+    background-color: color-mix(in oklch, var(--background, Canvas) 70%, var(--hraness-material-plane));
+    box-shadow: var(--hraness-material-inset);
+  }
+
+  /* A translucent enclosure, only where content actually passes behind it.
+   * Resolve these tokens on the chrome itself for nested palette islands. */
+  :where([data-hraness-material="lantern"], [data-hraness-material="lantern"] *):is(.hraness-material-chrome) {
+    --hraness-material-chrome-paint: var(--surface, var(--ui-background, Canvas));
+    --hraness-material-chrome-blur: none;
+    background-color: var(--hraness-material-chrome-paint);
+    border-block-end: 1px solid var(--hraness-material-seam);
+    box-shadow: inset 0 1px 0 var(--hraness-material-edge), 0 4px 12px color-mix(in oklch, black 4%, transparent);
+  }
+  /* Bind the compiled TopBar's public paint seam at its own surface boundary. */
+  :where([data-hraness-material="lantern"], [data-hraness-material="lantern"] *):is(.hraness-material-chrome.hraness-design-top-bar[data-surface="glass"]) {
+    --hraness-design-top-bar-background: var(--hraness-material-chrome-paint);
+    --hraness-design-top-bar-backdrop: var(--hraness-material-chrome-blur);
+  }
+  @supports (-webkit-backdrop-filter: blur(1px)) {
+    :where([data-hraness-material="lantern"], [data-hraness-material="lantern"] *):is(.hraness-material-chrome) {
+      --hraness-material-chrome-paint: color-mix(in oklch, var(--surface, var(--ui-background, Canvas)) 90%, transparent);
+      --hraness-material-chrome-blur: blur(20px) saturate(1.1);
+      -webkit-backdrop-filter: var(--hraness-material-chrome-blur);
+    }
+  }
+  @supports (backdrop-filter: blur(1px)) {
+    :where([data-hraness-material="lantern"], [data-hraness-material="lantern"] *):is(.hraness-material-chrome) {
+      --hraness-material-chrome-paint: color-mix(in oklch, var(--surface, var(--ui-background, Canvas)) 90%, transparent);
+      --hraness-material-chrome-blur: blur(20px) saturate(1.1);
+      backdrop-filter: var(--hraness-material-chrome-blur);
+    }
+  }
+
+  /* Glazing is a background material, with one square module and a warm band
+   * of transmitted light. Its edges suggest a rounded enclosure without
+   * distorting the document, blurring text, or masking brand artwork. */
+  :where([data-hraness-material="lantern"], [data-hraness-material="lantern"] *):is(.hraness-material-wall) {
+    background-color: var(--background, var(--ui-background, Canvas));
+    background-image:
+      repeating-linear-gradient(90deg, transparent 0, transparent calc(var(--hraness-material-module) - 2px), color-mix(in oklch, var(--hraness-material-ink) 9%, transparent) calc(var(--hraness-material-module) - 2px), color-mix(in oklch, white 16%, transparent) calc(var(--hraness-material-module) - 1px), transparent var(--hraness-material-module)),
+      repeating-linear-gradient(0deg, transparent 0, transparent calc(var(--hraness-material-module) - 2px), color-mix(in oklch, var(--hraness-material-ink) 9%, transparent) calc(var(--hraness-material-module) - 2px), color-mix(in oklch, white 16%, transparent) calc(var(--hraness-material-module) - 1px), transparent var(--hraness-material-module)),
+      radial-gradient(ellipse at 60% 110%, color-mix(in oklch, var(--hraness-material-warm) 32%, transparent), transparent 62%),
+      linear-gradient(110deg, color-mix(in oklch, var(--hraness-material-cool) 22%, transparent), transparent 28%, color-mix(in oklch, white 8%, transparent) 48%, transparent 70%, color-mix(in oklch, var(--hraness-material-cool) 16%, transparent));
+    background-position: center top;
+    color: var(--hraness-material-ink);
+  }
+
+  /* Plain HTML control adapters. Compiled UI primitives use the public
+   * lanternControlStyles recipes through their documented controlXstyle seam.
+   * Edge paint uses background images, leaving focus shadows and outlines alone. */
+  :where([data-hraness-material="lantern"], [data-hraness-material="lantern"] *):is(.hraness-material-control) {
+    background-image: linear-gradient(to bottom, var(--hraness-material-edge), transparent 2px);
+  }
+  :where([data-hraness-material="lantern"], [data-hraness-material="lantern"] *):is(.hraness-material-input) {
+    background-image: linear-gradient(to bottom, var(--hraness-material-shade), transparent 4px);
+    caret-color: var(--hraness-material-focus);
+  }
+  :where([data-hraness-material="lantern"], [data-hraness-material="lantern"] *):is(.hraness-material-choice[aria-pressed="true"], .hraness-material-choice[aria-selected="true"], .hraness-material-choice[data-selected]) {
+    background-color: var(--hraness-material-warm-plane);
+    color: var(--hraness-material-ink);
+    background-image: linear-gradient(to top, var(--hraness-material-warm), var(--hraness-material-warm) 2px, transparent 2px);
+  }
+  :where([data-hraness-material="lantern"], [data-hraness-material="lantern"] *):is(.hraness-material-control:disabled, .hraness-material-control[aria-disabled="true"], .hraness-material-control[data-disabled], .hraness-material-input:disabled) {
+    background-image: none;
+  }
+
+  /* A collection is a readable sequence, never a requirement to fill a grid.
+   * Products own grouping, columns and the meaning of each row. */
+  :where([data-hraness-material="lantern"], [data-hraness-material="lantern"] *):is(.hraness-material-rows) {
+    margin: 0;
+    padding: 0;
+    list-style: none;
+  }
+  :where([data-hraness-material="lantern"], [data-hraness-material="lantern"] *):is(.hraness-material-rows > * + *) {
+    border-block-start: 1px solid var(--hraness-material-seam);
+  }
+  :where([data-hraness-material="lantern"], [data-hraness-material="lantern"] *):is(.hraness-material-disclosure > summary) {
+    cursor: pointer;
+    min-block-size: 2.75rem;
+    padding-block: 0.75rem;
+  }
+  :where([data-hraness-material="lantern"], [data-hraness-material="lantern"] *):is(.hraness-material-disclosure > summary:focus-visible) {
+    outline: 2px solid var(--hraness-material-focus);
+    outline-offset: 3px;
+  }
+  [data-hraness-material="lantern"] ::selection {
+    background-color: var(--hraness-material-warm-plane);
+    color: var(--hraness-material-ink);
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    [data-hraness-material="lantern"] { --hraness-material-duration: 0ms; }
+  }
+  @media (prefers-reduced-transparency: reduce) {
+    :where([data-hraness-material="lantern"], [data-hraness-material="lantern"] *):is(.hraness-material-chrome) {
+      --hraness-material-chrome-paint: var(--surface, var(--ui-background, Canvas));
+      --hraness-material-chrome-blur: none;
+    }
+    :where([data-hraness-material="lantern"], [data-hraness-material="lantern"] *):is(.hraness-material-wall) { background-image: none; }
+  }
+  @media (forced-colors: active) {
+    [data-hraness-material="lantern"] {
+      --hraness-material-plane: Canvas;
+      --hraness-material-ink: CanvasText;
+      --hraness-material-muted: CanvasText;
+      --hraness-material-seam: CanvasText;
+      --hraness-material-focus: Highlight;
+      --hraness-material-warm-plane: Canvas;
+      --hraness-material-warm: Highlight;
+      --hraness-material-edge: transparent;
+      --hraness-material-inset: none;
+      --hraness-material-lift: none;
+    }
+    :where([data-hraness-material="lantern"], [data-hraness-material="lantern"] *):is(.hraness-material-wall, .hraness-material-chrome, .hraness-material-pane) {
+      --hraness-material-chrome-paint: Canvas;
+      --hraness-material-chrome-blur: none;
+      background-color: Canvas;
+      background-image: none;
+      box-shadow: none;
+    }
+    :where([data-hraness-material="lantern"], [data-hraness-material="lantern"] *):is(.hraness-material-control, .hraness-material-input, .hraness-material-choice) { background-image: none; }
+    :where([data-hraness-material="lantern"], [data-hraness-material="lantern"] *):is(.hraness-material-choice[aria-pressed="true"], .hraness-material-choice[aria-selected="true"], .hraness-material-choice[data-selected]) {
+      background-color: Highlight;
+      color: HighlightText;
+      background-image: none;
+    }
+  }
+}

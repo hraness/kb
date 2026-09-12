@@ -5,6 +5,7 @@
 
 @import "../vendor/paper-theme/paper-theme.css";
 @import "../vendor/hraness-marketing/product-marketing-preset.css";
+@import "../vendor/hraness-lantern/lantern-material.css";
 
 :root {
   --inverse-background: #14202a;
@@ -200,7 +201,7 @@ a:focus-visible {
   html { scroll-behavior: auto; }
 }
 
-::selection { background: var(--hraness-site-accent); color: var(--hraness-site-accent-ink); }
+::selection { background: var(--hraness-material-warm-plane); color: var(--hraness-material-ink); }
 a { text-underline-offset: 0.2em; }
 
 /* Wordcell document pages render README Markdown. */
@@ -231,4 +232,36 @@ a { text-underline-offset: 0.2em; }
 .wordcell-marketing-hero .hraness-marketing-proof-frame {
   --hraness-marketing-inverse: var(--inverse-background);
   --hraness-marketing-inverse-ink: var(--wordcell-code-foreground);
+}
+
+/* The existing grammar owns layout and controls. Lantern supplies only material
+   paint; these bridges keep old compiled peers and their focus rules intact. */
+[data-hraness-material="lantern"] .hraness-marketing-header.hraness-material-chrome {
+  -webkit-backdrop-filter: var(--hraness-material-chrome-blur, none);
+  backdrop-filter: var(--hraness-material-chrome-blur, none);
+  background: var(--hraness-material-chrome-paint, var(--hraness-material-plane));
+  border-block-end-color: var(--hraness-material-seam);
+}
+@media (max-width: 48rem) {
+  /* Wrapped navigation has a variable height; keep anchor headings unobscured. */
+  [data-hraness-material="lantern"] .hraness-marketing-header.hraness-material-chrome {
+    position: static;
+  }
+}
+[data-hraness-marketing-preset="editorial"] .hraness-material-wall > .hraness-marketing-hero {
+  padding-inline: var(--hraness-marketing-gutter);
+}
+[data-hraness-material="lantern"] .hraness-marketing-proof-frame.hraness-material-pane {
+  --hraness-marketing-line: var(--hraness-material-seam);
+  --hraness-marketing-surface: var(--hraness-material-plane);
+  box-shadow: var(--hraness-material-lift);
+}
+[data-hraness-material="lantern"] .hraness-marketing-question[open] > summary {
+  background-color: var(--hraness-material-warm-plane);
+  color: var(--hraness-material-ink);
+}
+[data-hraness-material="lantern"] :is(.document-page pre, .install-command) {
+  background: var(--hraness-material-plane);
+  border-color: var(--hraness-material-seam);
+  color: var(--hraness-material-ink);
 }

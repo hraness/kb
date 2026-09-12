@@ -93,3 +93,14 @@ test("publication metadata fails closed on malformed or partially verified relea
     expect(() => parsePublishedRelease(value)).toThrow();
   }
 });
+
+
+test("loads the immutable material after Paper and editorial styling", async () => {
+  const [css, layout, checker] = await Promise.all([read("app/globals.css"), read("app/layout.tsx"), read("scripts/check-paper-theme.mjs")]);
+  const materialImport = '@import "../vendor/hraness-lantern/lantern-material.css";';
+  expect(css).toContain(materialImport);
+  expect(css.indexOf(materialImport)).toBeGreaterThan(css.indexOf('product-marketing-preset.css";'));
+  expect(layout).toContain('data-hraness-material="lantern"');
+  expect(checker).toContain('import { checkLanternMaterialSnapshot } from "../vendor/hraness-lantern/check.mjs"');
+  expect(checker).toContain("await checkLanternMaterialSnapshot();");
+});
