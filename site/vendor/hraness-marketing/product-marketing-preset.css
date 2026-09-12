@@ -1,0 +1,224 @@
+/* Opt-in marketing contract 1. Asset URLs stay relative in packages and snapshots. */
+@font-face {
+  font-family: "Instrument Serif";
+  src: url("./fonts/instrument-serif/instrument-serif-latin-400.woff2") format("woff2");
+  font-style: normal;
+  font-weight: 400;
+  font-display: swap;
+}
+
+@layer components.hraness-design-kit.legacy {
+  :where([data-hraness-marketing-preset="editorial"], [data-hraness-marketing-preset="minimal"]) {
+    --hraness-marketing-display-font: "Instrument Serif", Georgia, serif;
+    --hraness-marketing-h1-size: clamp(2.75rem, 5.1vw, 4rem);
+    --hraness-marketing-h1-leading: 1.06;
+    --hraness-marketing-h1-tracking: -.025em;
+    --hraness-marketing-h2-size: clamp(2.4rem, 4vw, 3.25rem);
+    --hraness-marketing-h2-leading: 1.08;
+    --hraness-marketing-h2-tracking: -.02em;
+    --hraness-marketing-display-weight: 400;
+    --hraness-marketing-content-measure: 70rem;
+    --hraness-marketing-header-measure: 76rem;
+    --hraness-marketing-header-height: 4.5rem;
+    --hraness-marketing-gutter: 2rem;
+    --hraness-marketing-hero-space: 3.5rem 4rem;
+    --hraness-marketing-story-space: 5rem;
+    --hraness-marketing-summary-leading: 1.6;
+    --hraness-marketing-header-action-height: 2.625rem;
+    --hraness-marketing-field-ink: light-dark(#242a2f, #eceee9);
+    --hraness-marketing-field-muted: light-dark(#515d68, #c2c9ce);
+    --hraness-marketing-link: light-dark(#345474, #c2d3e4);
+    --hraness-marketing-field-gradient: linear-gradient(180deg, light-dark(#f0efea, #292b28) 0%, light-dark(#dce1df, #343b3d) 34%, light-dark(#c9d3dd, #424e65) 70%, light-dark(#e3e7e8, #2f3843) 100%);
+    --hraness-marketing-field-images: url("./marketing-assets/grain.svg"), url("./marketing-assets/cells.svg"), var(--hraness-marketing-field-gradient);
+    --hraness-marketing-field-size: 64px 64px, 100% auto, 100% 100%;
+    --hraness-marketing-terminal-background: #252723;
+    --hraness-marketing-terminal-ink: #e8eae5;
+    --hraness-marketing-terminal-muted: #bfc6b6;
+    --hraness-marketing-terminal-command: #c4d9b9;
+    --hraness-marketing-terminal-chrome: linear-gradient(#383b36, #30332e);
+    --hraness-marketing-terminal-shadow: 0 18px 40px #15202c29, 0 3px 8px #15202c1f;
+  }
+
+  [data-hraness-marketing-preset="minimal"] {
+    --hraness-marketing-display-font: var(--font-text, "Nebula Sans", ui-sans-serif, system-ui, sans-serif);
+    --hraness-marketing-display-weight: 500;
+    --hraness-marketing-h1-size: clamp(1.75rem, 3vw, 2.375rem);
+    --hraness-marketing-h1-leading: 1.15;
+    --hraness-marketing-h1-tracking: -.035em;
+    --hraness-marketing-h2-size: clamp(1.25rem, 2.2vw, 1.75rem);
+    --hraness-marketing-h2-leading: 1.15;
+    --hraness-marketing-h2-tracking: -.02em;
+    --hraness-marketing-header-height: 2.8125rem;
+    --hraness-marketing-hero-space: 2rem 3rem;
+    --hraness-marketing-story-space: 3rem;
+    --hraness-marketing-field-images: none;
+  }
+
+  /* Role-local bindings override the legacy role defaults as well as serving
+     compiled recipes. Application headings outside these hooks stay untouched. */
+  :is([data-hraness-marketing-preset="editorial"], [data-hraness-marketing-preset="minimal"]),
+  :is([data-hraness-marketing-preset="editorial"], [data-hraness-marketing-preset="minimal"]) :where(
+    .hraness-marketing-page, .hraness-marketing-header, .hraness-marketing-hero,
+    .hraness-marketing-pillars, .hraness-marketing-install, .hraness-marketing-section,
+    .hraness-marketing-primitives, .hraness-marketing-stats, .hraness-marketing-interfaces,
+    .hraness-marketing-trust, .hraness-marketing-quotes, .hraness-marketing-pricing,
+    .hraness-marketing-questions, .hraness-marketing-maker, .hraness-marketing-cta,
+    .hraness-marketing-proof-frame
+  ) {
+    --hraness-marketing-heading-font: var(--hraness-marketing-display-font);
+    --hraness-marketing-heading-weight: var(--hraness-marketing-display-weight);
+    --hraness-marketing-heading-tracking: var(--hraness-marketing-h1-tracking);
+    --hraness-paper-heading-size: var(--hraness-marketing-h1-size);
+    --hraness-paper-section-heading-size: var(--hraness-marketing-h2-size);
+    --hraness-paper-summary-size: 1.0625rem;
+    --hraness-marketing-measure: var(--hraness-marketing-content-measure);
+    --hraness-marketing-copy-measure: 48ch;
+    --hraness-marketing-radius: .25rem;
+    --hraness-marketing-frame-radius: .625rem;
+    --hraness-marketing-section-space: var(--hraness-marketing-story-space);
+    --hraness-marketing-action-height: 2.625rem;
+  }
+
+  :is([data-hraness-marketing-preset="editorial"], [data-hraness-marketing-preset="minimal"]) :where(
+    .hraness-marketing-page, .hraness-marketing-header, .hraness-marketing-hero,
+    .hraness-marketing-pillars, .hraness-marketing-install, .hraness-marketing-section,
+    .hraness-marketing-primitives, .hraness-marketing-stats, .hraness-marketing-interfaces,
+    .hraness-marketing-trust, .hraness-marketing-quotes, .hraness-marketing-pricing,
+    .hraness-marketing-questions, .hraness-marketing-maker, .hraness-marketing-cta,
+    .hraness-marketing-proof-frame
+  ):not([data-hraness-marketing-preset]) {
+    --hraness-marketing-gutter: inherit;
+  }
+
+  :is([data-hraness-marketing-preset="editorial"], [data-hraness-marketing-preset="minimal"]) .hraness-marketing-header {
+    --hraness-marketing-measure: var(--hraness-marketing-header-measure);
+  }
+  :is([data-hraness-marketing-preset="editorial"], [data-hraness-marketing-preset="minimal"]) .hraness-marketing-header__inner {
+    min-block-size: var(--hraness-marketing-header-height);
+  }
+  :is([data-hraness-marketing-preset="editorial"], [data-hraness-marketing-preset="minimal"]) .hraness-marketing-hero {
+    padding-block: var(--hraness-marketing-hero-space);
+  }
+  :is([data-hraness-marketing-preset="editorial"], [data-hraness-marketing-preset="minimal"]) .hraness-marketing-hero__heading {
+    font-family: var(--hraness-marketing-display-font);
+    font-size: var(--hraness-marketing-h1-size);
+    font-weight: var(--hraness-marketing-display-weight);
+    letter-spacing: var(--hraness-marketing-h1-tracking);
+    line-height: var(--hraness-marketing-h1-leading);
+  }
+  :is([data-hraness-marketing-preset="editorial"], [data-hraness-marketing-preset="minimal"]) :where(.hraness-marketing-section__heading, .hraness-marketing-install__heading, .hraness-marketing-primitives__heading, .hraness-marketing-interfaces__heading, .hraness-marketing-trust__heading, .hraness-marketing-quotes__heading, .hraness-marketing-pricing__heading, .hraness-marketing-questions__heading, .hraness-marketing-maker__heading, .hraness-marketing-cta__heading) {
+    font-family: var(--hraness-marketing-display-font);
+    font-size: var(--hraness-marketing-h2-size);
+    font-weight: var(--hraness-marketing-display-weight);
+    line-height: var(--hraness-marketing-h2-leading);
+    letter-spacing: var(--hraness-marketing-h2-tracking);
+  }
+  :is([data-hraness-marketing-preset="editorial"], [data-hraness-marketing-preset="minimal"]) .hraness-marketing-hero__summary {
+    line-height: var(--hraness-marketing-summary-leading, 1.6);
+  }
+
+  :is([data-hraness-marketing-preset="editorial"], [data-hraness-marketing-preset="minimal"]) .hraness-marketing-action {
+    min-block-size: var(--hraness-marketing-action-height);
+    border-radius: var(--hraness-marketing-radius);
+  }
+  @media (pointer: coarse) {
+    :where([data-hraness-marketing-preset="editorial"], [data-hraness-marketing-preset="minimal"]) {
+      --hraness-marketing-header-action-height: 3rem;
+    }
+    :is([data-hraness-marketing-preset="editorial"], [data-hraness-marketing-preset="minimal"]) .hraness-marketing-action {
+      min-block-size: 3rem;
+    }
+  }
+
+  :is([data-hraness-marketing-preset="editorial"], [data-hraness-marketing-preset="minimal"]) .hraness-marketing-field > :where(.hraness-marketing-hero, .hraness-marketing-section, .hraness-marketing-pillars, .hraness-marketing-primitives, .hraness-marketing-stats, .hraness-marketing-interfaces, .hraness-marketing-trust, .hraness-marketing-quotes, .hraness-marketing-pricing, .hraness-marketing-questions, .hraness-marketing-maker, .hraness-marketing-cta) {
+    padding-inline: var(--hraness-marketing-gutter);
+  }
+
+  /* This is a background on a flow container, never an overlay on content. */
+  :is([data-hraness-marketing-preset="editorial"], [data-hraness-marketing-preset="minimal"]).hraness-marketing-field,
+  :is([data-hraness-marketing-preset="editorial"], [data-hraness-marketing-preset="minimal"]) .hraness-marketing-field {
+    background-image: var(--hraness-marketing-field-images);
+    background-position: 0 0, center top, 0 0;
+    background-size: var(--hraness-marketing-field-size);
+    color: var(--hraness-marketing-field-ink);
+    position: relative;
+  }
+  :is([data-hraness-marketing-preset="editorial"], [data-hraness-marketing-preset="minimal"]).hraness-marketing-field:not([data-tone="accent"]),
+  :is([data-hraness-marketing-preset="editorial"], [data-hraness-marketing-preset="minimal"]) .hraness-marketing-field:where(.hraness-marketing-page, .hraness-marketing-header, .hraness-marketing-hero, .hraness-marketing-pillars, .hraness-marketing-install, .hraness-marketing-section, .hraness-marketing-primitives, .hraness-marketing-stats, .hraness-marketing-interfaces, .hraness-marketing-trust, .hraness-marketing-quotes, .hraness-marketing-pricing, .hraness-marketing-questions, .hraness-marketing-maker, .hraness-marketing-cta, .hraness-marketing-proof-frame):not([data-tone="accent"]),
+  :is([data-hraness-marketing-preset="editorial"], [data-hraness-marketing-preset="minimal"]) .hraness-marketing-field :where(.hraness-marketing-page, .hraness-marketing-header, .hraness-marketing-hero, .hraness-marketing-pillars, .hraness-marketing-install, .hraness-marketing-section, .hraness-marketing-primitives, .hraness-marketing-stats, .hraness-marketing-interfaces, .hraness-marketing-trust, .hraness-marketing-quotes, .hraness-marketing-pricing, .hraness-marketing-questions, .hraness-marketing-maker, .hraness-marketing-cta, .hraness-marketing-proof-frame):not([data-tone="accent"]) {
+    --hraness-marketing-ink: var(--hraness-marketing-field-ink);
+    --hraness-marketing-muted: var(--hraness-marketing-field-muted);
+  }
+  :is([data-hraness-marketing-preset="editorial"], [data-hraness-marketing-preset="minimal"]) .hraness-marketing-brand-mark {
+    object-fit: contain;
+    flex: 0 0 auto;
+    filter: none;
+    mask-image: none;
+    background-image: none;
+  }
+
+  /* Legacy releases require string labels. Empty labels may omit the slot;
+     nonempty product facts remain visible and are never hidden by a preset. */
+  :is([data-hraness-marketing-preset="editorial"], [data-hraness-marketing-preset="minimal"]) :where(.hraness-marketing-hero__name, .hraness-marketing-hero__eyebrow, .hraness-marketing-section__label, .hraness-marketing-install__eyebrow, .hraness-marketing-questions__label, .hraness-marketing-primitives__label, .hraness-marketing-interfaces__label, .hraness-marketing-trust__label, .hraness-marketing-quotes__label, .hraness-marketing-pricing__label, .hraness-marketing-maker__label):empty {
+    display: none;
+  }
+
+  /* Paint-only hook: no header position, dimensions, or navigation layout. */
+  .hraness-marketing-header-surface,
+  :is([data-hraness-marketing-preset="editorial"], [data-hraness-marketing-preset="minimal"]):where(.hraness-marketing-header, .hraness-marketing-header-surface),
+    :is([data-hraness-marketing-preset="editorial"], [data-hraness-marketing-preset="minimal"]) :where(.hraness-marketing-header, .hraness-marketing-header-surface) {
+    --hraness-marketing-header-background: var(--background, Canvas);
+    --hraness-marketing-header-backdrop: none;
+    background-color: var(--hraness-marketing-header-background);
+  }
+  @supports (-webkit-backdrop-filter: blur(1px)) {
+    .hraness-marketing-header-surface,
+    :is([data-hraness-marketing-preset="editorial"], [data-hraness-marketing-preset="minimal"]):where(.hraness-marketing-header, .hraness-marketing-header-surface),
+    :is([data-hraness-marketing-preset="editorial"], [data-hraness-marketing-preset="minimal"]) :where(.hraness-marketing-header, .hraness-marketing-header-surface) {
+      --hraness-marketing-header-background: color-mix(in oklch, var(--background, Canvas) 82%, transparent);
+      --hraness-marketing-header-backdrop: blur(14px) saturate(1.4);
+      -webkit-backdrop-filter: var(--hraness-marketing-header-backdrop);
+    }
+  }
+  @supports (backdrop-filter: blur(1px)) {
+    .hraness-marketing-header-surface,
+    :is([data-hraness-marketing-preset="editorial"], [data-hraness-marketing-preset="minimal"]):where(.hraness-marketing-header, .hraness-marketing-header-surface),
+    :is([data-hraness-marketing-preset="editorial"], [data-hraness-marketing-preset="minimal"]) :where(.hraness-marketing-header, .hraness-marketing-header-surface) {
+      --hraness-marketing-header-background: color-mix(in oklch, var(--background, Canvas) 82%, transparent);
+      --hraness-marketing-header-backdrop: blur(14px) saturate(1.4);
+      backdrop-filter: var(--hraness-marketing-header-backdrop);
+    }
+  }
+  @media (prefers-reduced-transparency: reduce), (forced-colors: active) {
+    .hraness-marketing-header-surface,
+    :is([data-hraness-marketing-preset="editorial"], [data-hraness-marketing-preset="minimal"]):where(.hraness-marketing-header, .hraness-marketing-header-surface),
+    :is([data-hraness-marketing-preset="editorial"], [data-hraness-marketing-preset="minimal"]) :where(.hraness-marketing-header, .hraness-marketing-header-surface) {
+      --hraness-marketing-header-background: var(--background, Canvas);
+      --hraness-marketing-header-backdrop: none;
+    }
+  }
+  @media (max-width: 760px) {
+    :where([data-hraness-marketing-preset="editorial"], [data-hraness-marketing-preset="minimal"]) {
+      --hraness-marketing-gutter: 1.25rem;
+      --hraness-marketing-hero-space: 2.75rem 4.5rem;
+      --hraness-marketing-story-space: 3.5rem;
+      --hraness-marketing-field-size: 64px 64px, 266.667% auto, 100% 100%;
+    }
+    [data-hraness-marketing-preset="minimal"] {
+      --hraness-marketing-hero-space: 2rem 3rem;
+      --hraness-marketing-story-space: 3rem;
+    }
+  }
+  @media (forced-colors: active) {
+    :where([data-hraness-marketing-preset="editorial"], [data-hraness-marketing-preset="minimal"]) {
+      --hraness-marketing-field-images: none;
+      --hraness-marketing-field-ink: CanvasText;
+      --hraness-marketing-field-muted: CanvasText;
+      --hraness-marketing-link: LinkText;
+    }
+    :is([data-hraness-marketing-preset="editorial"], [data-hraness-marketing-preset="minimal"]).hraness-marketing-field,
+  :is([data-hraness-marketing-preset="editorial"], [data-hraness-marketing-preset="minimal"]) .hraness-marketing-field {
+      background: Canvas;
+    }
+  }
+}

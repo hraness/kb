@@ -4,6 +4,7 @@
 @import "@hraness/design-kit/product-marketing.css";
 
 @import "../vendor/paper-theme/paper-theme.css";
+@import "../vendor/hraness-marketing/product-marketing-preset.css";
 
 :root {
   --inverse-background: #14202a;
@@ -42,32 +43,12 @@ a:focus-visible {
   outline-offset: 3px;
 }
 
-/* Product content keeps the shared marketing grammar and fixed code paint. */
-:where(.hraness-marketing-page, .hraness-marketing-header) {
-  --hraness-marketing-ink: var(--foreground);
-  --hraness-marketing-muted: var(--muted);
-  --hraness-marketing-background: var(--background);
-  --hraness-marketing-surface: var(--surface);
-  --hraness-marketing-inverse: var(--inverse-background);
-  --hraness-marketing-inverse-ink: var(--wordcell-code-foreground);
-  --hraness-marketing-text-font: var(--font-text);
-  --hraness-marketing-heading-font: var(--font-text);
-  --hraness-marketing-mono-font: var(--font-mono);
-
-}
-
 .brand-mark {
   color: var(--hraness-site-accent);
 }
 
-.wordcell-marketing-hero {
-  gap: clamp(1.25rem, 2.5vw, 2rem);
-  padding-block-start: clamp(1.5rem, 3vw, 2.5rem);
-}
-.wordcell-marketing-hero .hraness-marketing-hero__copy { gap: 1rem; }
 .wordcell-marketing-hero .hraness-marketing-hero__heading {
   max-inline-size: 22ch;
-  font-size: var(--hraness-paper-heading-size);
 }
 
 .hraness-marketing-stats {
@@ -125,13 +106,6 @@ a:focus-visible {
   #trace > .hraness-marketing-section__heading-group {
     position: sticky;
     inset-block-start: 5rem;
-  }
-}
-
-/* A three-row sticky header would take a third of a phone viewport. */
-@media (max-width: 48rem) {
-  .hraness-marketing-header {
-    position: static;
   }
 }
 
@@ -253,23 +227,8 @@ a { text-underline-offset: 0.2em; }
 .document-page article ol { list-style: decimal; padding-left: 1.5rem; margin: 1rem 0; }
 .document-page article li + li { margin-top: 0.5rem; }
 
-.wordcell-marketing-hero .hraness-marketing-hero__eyebrow:empty { display: none; }
-.wordcell-marketing-hero .hraness-marketing-hero__heading {
-  font-weight: var(--hraness-marketing-heading-weight);
-  line-height: var(--hraness-paper-heading-leading);
-  letter-spacing: var(--hraness-paper-heading-tracking);
-}
-.wordcell-marketing-hero .hraness-marketing-hero__summary {
-  font-size: var(--hraness-paper-summary-size);
-  line-height: 1.6;
-}
-[data-hraness-theme="paper"] .hraness-marketing-page h2 {
-  font-size: var(--hraness-paper-section-heading-size);
-  line-height: 1.2;
-  letter-spacing: -.025em;
-}
-[data-hraness-theme="paper"] .hraness-marketing-proof-frame {
+/* The product's command transcript retains its fixed code contrast. */
+.wordcell-marketing-hero .hraness-marketing-proof-frame {
   --hraness-marketing-inverse: var(--inverse-background);
   --hraness-marketing-inverse-ink: var(--wordcell-code-foreground);
-  box-shadow: none;
 }

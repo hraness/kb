@@ -25,4 +25,21 @@ test("the docs page renders the README with its installation anchor", () => {
   expect(html).toContain('id="install"');
   expect(html).toContain('id="the-kb-vault-format"');
   expect(html).toContain("wordcell --help");
+  expect(html).not.toContain("data-hraness-marketing-preset");
+});
+
+test("scopes the editorial preset to the homepage header and real command example", () => {
+  const html = renderToStaticMarkup(<Home />);
+  const elements: string[] = [];
+  new HTMLRewriter()
+    .on('[data-hraness-marketing-preset="editorial"] .hraness-marketing-header', {
+      element() { elements.push("header"); },
+    })
+    .on('[data-hraness-marketing-preset="editorial"] #main .hraness-marketing-field .hraness-marketing-proof-frame', {
+      element() { elements.push("proof"); },
+    })
+    .transform(html);
+  expect(elements).toEqual(["header", "proof"]);
+  expect(html).toContain("wordcell context packages/parser/src/index.ts --root kb --repo .");
+  expect(html).toContain("Example commands:");
 });
